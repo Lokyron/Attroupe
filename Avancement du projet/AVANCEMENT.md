@@ -3,6 +3,13 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-16 — Lot 3 : groupes, membres, invitations (écrit, en attente de revue)
+
+Création de groupe, verrou 3 (`exigerAppartenance`, `exigerAdminGroupe`), membres, rôles, retrait, départ, invitations par e-mail
+(lien à jeton, adresse vérifiée exigée) et par nom d'utilisateur exact (à accepter), règles d'intégrité (`ADR-0009`), registre de
+cloisonnement + test de complétude + suite générique, client (connexion, sélecteur, groupe, invitations). La garde du SQL brut est
+complétée de trois exceptions nommées (architecture §4 verrou 5) ; le canal transverse n'a pas grossi. Aucune migration.
+
 ## 2026-11-15 — Lot 2 : les comptes (écrit, en attente de revue)
 
 Inscription, vérification d'e-mail, connexion par session opaque hachée, sessions multiples et

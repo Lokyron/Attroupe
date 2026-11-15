@@ -56,6 +56,27 @@ export const PORTEE_TABLES: Readonly<Record<string, ColonnePortee>> = {
   threads: 'group_id',
 };
 
+/**
+ * EXCEPTIONS RAISONNÉES (architecture §4, verrou 5) — trois admissions nommées, et aucune règle large :
+ *  1. `INSERT INTO groups (…) VALUES (…)` : `groups` est la table RACINE, il n'y a pas de `group_id` à filtrer et c'est
+ *     l'unique point d'entrée de création d'un groupe. Seule la forme « colonnes + VALUES » est admise (ni `SELECT`, ni
+ *     `ON CONFLICT`) ;
+ *  2. `invitations` filtrée par `target_user_id = ?` : une invitation est par nature une ressource INTER-GROUPES (le
+ *     destinataire n'est pas encore membre, il n'a donc pas de groupe à fournir) ; la preuve d'accès est le destinataire ;
+ *  3. `invitations` filtrée par `token_hash = ?` : idem, la preuve d'accès est le secret du lien (empreinte SHA-256).
+ * La valeur doit être LIÉE (`= ?`), jamais littérale, et le filtre suit les mêmes règles de conjoint que `group_id`.
+ * `invitations` par `id = ?` sans l'un de ces filtres reste refusée.
+ *
+ * BORNES de ces exceptions (revue du lot 3) : une couverture par colonne alternative ne couvre QUE la table `invitations`
+ * elle-même et ne se PROPAGE JAMAIS par `group_id = group_id` (sinon une simple jointure sur une invitation, même refusée ou
+ * échue, ouvrirait en lecture et en écriture toutes les tables du groupe invitant). Une seule jointure en dérive, nommée :
+ *  4. en LECTURE seule (`SELECT`), `memberships AS m` rattachée par `m.id = i.invited_by_membership_id AND m.group_id = i.group_id`
+ *     (l'inviteur affiché au destinataire) ; la ligne ainsi couverte ne propage rien à son tour.
+ * Et la colonne de preuve ne se modifie pas : `target_user_id` jamais en `SET` ; `token_hash` seulement sous un vrai
+ * `group_id = ?` lié (l'armement du jeton à l'envoi, `armerInvitationEnvoi`), jamais sous un filtre par `token_hash` / `target_user_id`.
+ */
+const ACCES_ALTERNATIFS: Readonly<Record<string, readonly string[]>> = { invitations: ['target_user_id', 'token_hash'] };
+
 /** Requête refusée par la garde. */
 export class ErreurRequeteSansGroupe extends Error {
   constructor(public readonly raison: string, public readonly texte: string) {
@@ -343,6 +364,8 @@ export function diagnostiquer(texte: string): string | undefined {
   const liens: Array<readonly [string, string]> = []; // [couvert, hérite] : group_id = group_id
   const liensPartage: Array<readonly [string, string]> = []; // [qualifiant du partage, qualifiant de personal_events]
   const gardesConflit: GardeConflit[] = [];
+  const misesPreuve: Array<{ readonly colonne: string; readonly indice: number }> = []; // colonnes de preuve vues en SET
+  const liensInviteur: Array<readonly [string, string]> = []; // [membre, invitation] : m.id = i.invited_by_membership_id
   /** Dans le ON d'une jointure externe, seule la table jointe peut recevoir un filtre ou un lien. */
   const proprietaireGauche = (i: number): string | undefined =>
     clauseAu[i] === 'on' && jointureAu[i]?.gauche === true ? jointureAu[i]?.qualifiant : undefined;
@@ -363,11 +386,33 @@ export function diagnostiquer(texte: string): string | undefined {
           liensPartage.push([partage, creneau]);
         }
       }
+      // m.id = i.invited_by_membership_id : l'inviteur d'une invitation (seule jointure dérivée d'une couverture alternative).
+      if (m === 'id' && q1 !== undefined && symbole(i + 1) === '=' && symbole(i + 3) === '.' && mot(i + 4) === 'invited_by_membership_id') {
+        const q2i = mot(i + 2);
+        const gaucheI = proprietaireGauche(i);
+        if (q2i !== undefined && conjoint(i - 2, i + 5) && (gaucheI === undefined || gaucheI === q1)) liensInviteur.push([q1, q2i]);
+      }
       // « g.id = ? » : l'identifiant lié d'un groupe, qualifié par SA référence (jamais « id = ? » nu).
       if (m === 'id' && q1 !== undefined && symbole(i + 1) === '=' && jetons[i + 2]?.genre === 'param' && conjoint(i - 2, i + 3)) {
         const gauche = proprietaireGauche(i);
         if (gauche === undefined || gauche === q1) filtres.push({ qualifiant: q1, colonne: 'id' });
       }
+    }
+    if (m === 'target_user_id' || m === 'token_hash') {
+      if (clauseAu[i] === 'set') misesPreuve.push({ colonne: m, indice: i });
+      // Accès alternatif de `invitations` (voir ACCES_ALTERNATIFS) : même exigence qu'un filtre de portée — conjoint direct d'un
+      // WHERE / ON, valeur liée. Toute autre forme (littéral, SET, comparaison détournée) n'est simplement pas un filtre :
+      // la table reste non couverte et la requête est refusée plus bas.
+      const avantAlt = brut(i - 1);
+      if (avantAlt !== undefined && AVANT_COLONNE.has(avantAlt) && mot(i - 1) !== 'as' && symbole(i + 1) === '=' && jetons[i + 2]?.genre === 'param') {
+        const qualifieAlt = symbole(i - 1) === '.';
+        const qualifiantAlt = qualifieAlt ? mot(i - 2) : undefined;
+        const gaucheAlt = proprietaireGauche(i);
+        if (conjoint(qualifieAlt ? i - 2 : i, i + 3) && (gaucheAlt === undefined || (qualifiantAlt !== undefined && gaucheAlt === qualifiantAlt))) {
+          filtres.push({ qualifiant: qualifiantAlt, colonne: m });
+        }
+      }
+      continue;
     }
     if (m !== 'group_id' && m !== 'user_id') continue;
     if (clauseAu[i] === 'set') return `« ${m} » ne se modifie pas : la portée d'une ligne est posée à l'insertion`;
@@ -407,7 +452,15 @@ export function diagnostiquer(texte: string): string | undefined {
       return `table « ${ref.table} » : aucune colonne de portée, accès réservé au canal transverse`;
     }
     if (ref.insertion) {
-      if (ref.colonne === 'id') return `insertion dans « ${ref.table} » : non admise (canal transverse)`;
+      if (ref.colonne === 'id') {
+        // Exception n° 1 (ACCES_ALTERNATIFS) : la création d'un groupe, et seulement sous la forme INSERT INTO groups (colonnes) VALUES (…).
+        const fermante = symbole(ref.indice + 1) === '(' ? fermeture.get(ref.indice + 1) : undefined;
+        if (ref.table !== 'groups' || fermante === undefined || mot(fermante + 1) !== 'values') {
+          return `insertion dans « ${ref.table} » : seule la forme INSERT INTO groups (colonnes) VALUES (…) est admise`;
+        }
+        couvertes.add(n);
+        continue;
+      }
       let j = ref.indice + 1;
       let profondeur = 0;
       let trouvee = false;
@@ -434,17 +487,30 @@ export function diagnostiquer(texte: string): string | undefined {
       return `ON CONFLICT … DO UPDATE sans « WHERE ${insertion?.qualifiant ?? '<table>'}.${insertion?.colonne ?? 'group_id'} = excluded.${insertion?.colonne ?? 'group_id'} » : une clé forgée écraserait la ligne d'une autre portée`;
     }
   }
+  // `propageables` : références couvertes par un VRAI filtre de portée (ou dérivées d'une telle référence) ; seules elles
+  // propagent leur couverture. `couvertes` ajoute les couvertures « de preuve » (ACCES_ALTERNATIFS), qui ne propagent rien.
+  const propageables = new Set<number>([...couvertes]);
   // Filtres qualifiés : exacts, grâce à l'unicité des qualifiants.
   for (const [n, ref] of references.entries()) {
-    if (ref.colonne !== null && filtres.some((f) => f.colonne === ref.colonne && f.qualifiant === ref.qualifiant)) couvertes.add(n);
+    if (ref.colonne === null) continue;
+    for (const f of filtres) {
+      if (f.qualifiant !== ref.qualifiant) continue;
+      if (f.colonne === ref.colonne) {
+        couvertes.add(n);
+        propageables.add(n);
+      } else if ((ACCES_ALTERNATIFS[ref.table] ?? []).includes(f.colonne)) couvertes.add(n);
+    }
   }
   // Filtres sans qualifiant (« group_id = ? ») : ils ne désignent une référence que si elle est la SEULE de cette colonne
   // (sinon SQLite lui-même répond « ambiguous column » : la garde refuse de choisir).
-  for (const colonne of ['group_id', 'user_id']) {
+  for (const colonne of ['group_id', 'user_id', 'target_user_id', 'token_hash']) {
     if (!filtres.some((f) => f.qualifiant === undefined && f.colonne === colonne)) continue;
-    const candidates = [...references.entries()].filter(([, r]) => r.colonne === colonne);
+    const candidates = [...references.entries()].filter(([, r]) => r.colonne === colonne || (ACCES_ALTERNATIFS[r.table] ?? []).includes(colonne));
     const unique = candidates.length === 1 ? candidates[0] : undefined;
-    if (unique !== undefined) couvertes.add(unique[0]);
+    if (unique !== undefined) {
+      couvertes.add(unique[0]);
+      if (unique[1].colonne === colonne) propageables.add(unique[0]);
+    }
   }
   // Propagation par jointure : group_id = group_id (dans le sens permis), et personal_events par ses partages.
   const indiceDe = (qualifiant: string): number => references.findIndex((r) => r.qualifiant === qualifiant);
@@ -454,7 +520,8 @@ export function diagnostiquer(texte: string): string | undefined {
       const nd = indiceDe(de);
       const nv = indiceDe(vers);
       if (nd < 0 || nv < 0 || references[nd]?.colonne !== 'group_id' || references[nv]?.colonne !== 'group_id') continue;
-      if (couvertes.has(nd) && !couvertes.has(nv)) {
+      if (propageables.has(nd) && !propageables.has(nv)) {
+        propageables.add(nv);
         couvertes.add(nv);
         change = true;
       }
@@ -463,11 +530,29 @@ export function diagnostiquer(texte: string): string | undefined {
       const np = indiceDe(partage);
       const nc = indiceDe(creneau);
       if (np < 0 || nc < 0 || references[np]?.table !== 'personal_event_shares' || references[nc]?.table !== 'personal_events') continue;
-      if (couvertes.has(np) && !couvertes.has(nc)) {
+      if (propageables.has(np) && !propageables.has(nc)) {
+        propageables.add(nc);
         couvertes.add(nc);
         change = true;
       }
     }
+  }
+  // Exception n° 4 : l'inviteur d'une invitation couverte par preuve, en lecture seule, sans propagation.
+  if (mot(0) === 'select') {
+    for (const [membre, invitation] of liensInviteur) {
+      const nm = indiceDe(membre);
+      const ni = indiceDe(invitation);
+      const lie = liens.some(([a, b]) => (a === invitation && b === membre) || (a === membre && b === invitation));
+      if (nm < 0 || ni < 0 || !lie || references[nm]?.table !== 'memberships' || references[ni]?.table !== 'invitations') continue;
+      if (couvertes.has(ni)) couvertes.add(nm);
+    }
+  }
+  // La colonne de preuve ne se réécrit pas (une invitation ne se réattribue pas) ; le jeton ne s'arme que sous un vrai group_id.
+  const niInvitations = references.findIndex((r) => r.table === 'invitations');
+  for (const mp of misesPreuve) {
+    if (niInvitations < 0) continue;
+    if (mp.colonne === 'target_user_id') return "« target_user_id » ne se modifie pas : une invitation ne se réattribue pas";
+    if (!propageables.has(niInvitations)) return "« token_hash » ne se modifie que sous « group_id = ? » (armement du jeton), jamais sous un filtre de preuve";
   }
   for (const [n, ref] of references.entries()) {
     if (!couvertes.has(n)) {

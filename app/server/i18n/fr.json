@@ -12,6 +12,10 @@
     "compte_existant": {
       "sujet": "Vous avez déjà un compte",
       "texte": "Bonjour {nom},\n\nQuelqu'un a tenté de créer un compte {application} avec votre adresse e-mail, mais un compte existe déjà. Si c'était vous, connectez-vous (ou demandez un nouveau mot de passe si vous l'avez oublié) :\n\n{lien}\n\nSinon, vous pouvez ignorer ce message : rien n'a été modifié."
+    },
+    "invitation_groupe": {
+      "sujet": "Invitation à rejoindre « {groupe} »",
+      "texte": "Bonjour,\n\n{invitant} vous invite à rejoindre le groupe « {groupe} » sur {application}.{mot}\n\nPour répondre à l'invitation, ouvrez le lien suivant (valable 14 jours, utilisable une seule fois) :\n\n{lien}\n\nSi vous ne connaissez pas cette personne, ignorez simplement ce message : rien ne se passera tant que vous n'acceptez pas."
     }
   }
 }

@@ -7,6 +7,7 @@ import { FORME_JETON, empreinteJeton } from '../../domain/jetons.js';
 import { DUREE_GLISSANTE_MS, echeanceSession, SEUIL_PROLONGATION_MS } from '../../domain/session.js';
 import type { Contexte } from '../contexte.js';
 import { ErreurHttp } from '../erreurs.js';
+import { declarerIntergiciel } from '../montage.js';
 
 // Intergiciel de session (verrou d'identité, architecture §5). Il lit le cookie, retrouve la session par
 // l'empreinte SHA-256 du jeton, relit le compte en base (`creerPorteeUtilisateur` refuse un compte suspendu
@@ -41,10 +42,10 @@ export function exigerSession(req: Request): Authentification {
 }
 
 /** Garde de routeur : `routeur.use(gardeSession)` ; les routes lisent ensuite `exigerSession(req)`. */
-export const gardeSession: RequestHandler = (req, _res, next) => {
+export const gardeSession: RequestHandler = declarerIntergiciel('garde', (req, _res, next) => {
   exigerSession(req);
   next();
-};
+});
 
 /** Valeur du cookie de session dans l'en-tête `Cookie`, si elle a la forme d'un jeton (aucun traitement sinon). */
 function jetonDuCookie(req: Request): string | undefined {

@@ -133,6 +133,30 @@ Surface d'API de la V1 par domaine :
 | DELETE | `/api/moi/sessions/:id` | Révoque un appareil (404 si ce n'est pas le mien). |
 | DELETE | `/api/moi/sessions` | Révoque toutes mes sessions sauf la courante. |
 
+Lot 3 (groupes, membres, invitations). Tout ce qui est sous `/api/groupes/:groupId/…` passe par
+`exigerAppartenance` (posé **une fois** sur le préfixe) : 401 sans session, **404** `groupe.introuvable` pour un groupe
+étranger, inexistant, supprimé ou quitté (jamais 403). Les routes *(admin)* ajoutent `exigerAdminGroupe` : **403**
+`droit.admin_requis`. Règles d'intégrité : [`ADR-0009`](docs/decisions/ADR-0009-membres-et-invitations.md).
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| GET | `/api/groupes` | Mes groupes (sélecteur). `GET /api/moi` les porte aussi (`groupes`) avec `invitations_en_attente`. |
+| POST | `/api/groupes` | `{name, default_currency_code?, time_zone?}` → 201 ; le créateur devient administrateur. Cadence 10/compte. |
+| GET | `/api/moi/invitations` | Mes invitations reçues par nom d'utilisateur (jamais d'identifiant de groupe). |
+| POST | `/api/moi/invitations/:invitationId/acceptation` · `/refus` | Répondre. 404 si l'invitation n'est pas adressée à ce compte. Réintégration : la même ligne `memberships` est réactivée. |
+| POST | `/api/invitations/apercu` | Aperçu par lien, `{token}` dans le corps, jamais dans l'URL (*sans session*) : groupe, invitant, rôle. 410 `invitation.revoquee` / `expiree` / `deja_utilisee`. |
+| POST | `/api/invitations/acceptation` | Accepter par lien, `{token}` dans le corps : session, adresse **vérifiée** et identique (403 `invitation.adresse_non_verifiee`, 404 sinon). |
+| GET / PATCH | `/api/groupes/:groupId` | Détail (avec `mon_role`) ; renommer, devise, fuseau *(admin)*. 409 `groupe.archive` si archivé. |
+| GET | `/api/groupes/:groupId/membres` | Actifs d'abord, puis anciens membres. Ni e-mail ni nom d'utilisateur. |
+| PATCH | `/api/groupes/:groupId/membres/:membreId` | `{role}` *(admin)*. 409 `groupe.dernier_admin`, `membre.inactif`. |
+| DELETE | `/api/groupes/:groupId/membres/:membreId` | Retire *(admin)* : `status = 'removed'`, historique conservé. 409 `membre.retrait_de_soi`. |
+| POST | `/api/groupes/:groupId/depart` | Partir (`left`). 409 `groupe.dernier_admin`. |
+| GET / POST | `/api/groupes/:groupId/invitations` | Lister ; inviter `{email}` **ou** `{username}` exact, `role?`, `message?` *(admin)*. POST : 202 identique dans tous les cas, cadence 10/compte, 3 par (cible, groupe), 20 par cible. |
+| DELETE | `/api/groupes/:groupId/invitations/:invitationId` | Révoquer *(admin)* ; 409 `invitation.non_en_attente`. |
+
+Registre de cloisonnement : `app/tests/cloisonnement/registre.ts` recense chaque route et son exigence ; le test de
+complétude échoue si une route montée n'y figure pas (les routeurs se montent avec `monter()`, `http/montage.ts`).
+
 Cadence (en mémoire, 15 min, report exponentiel au-delà), clés par **couple (e-mail, IP)**, par e-mail
 seul (large), par IP (/64 en IPv6) et par réseau /48 IPv6 : connexion 10 / 100 / 30 / 90 ; inscription
 5 / 30 / 10 / 30 ; mot de passe oublié 5 / 30 / 20 / 60 ; jeton 30 / 90 par IP / réseau ; changement de

@@ -71,6 +71,8 @@ const BLOQUE: ReadonlyArray<[string, string, string]> = [
   ['connexionBrute depuis transverse.ts', "import { connexionBrute } from '../connection.js';\nexport default connexionBrute;", TRANSVERSE],
   ['baseDe depuis une route', "import { baseDe } from '../db/portee-utilisateur.js';\nexport default baseDe;", ROUTES],
   ['baseDe depuis l’intergiciel', "import { baseDe } from '../../db/portee-utilisateur.js';\nexport default baseDe;", APPARTENANCE],
+  ['baseDeScope depuis une route', "import { baseDeScope } from '../db/scope.js';\nexport default baseDeScope;", ROUTES],
+  ['baseDeScope depuis l’intergiciel', "import { baseDeScope } from '../../db/scope.js';\nexport default baseDeScope;", APPARTENANCE],
   // Le serveur n'importe rien de app/tests/ (fixtures/brut.ts rend la vraie connexion)
   ['fixtures/brut depuis une route', "import { brut } from '../../tests/fixtures/brut.js';\nexport default brut;", chemin('server', 'routes', 'y.ts')],
   ['fixtures/brut depuis db/queries', "import { brut } from '../../../tests/fixtures/brut.js';\nexport default brut;", QUERIES],
@@ -91,6 +93,7 @@ describe('règles ESLint des verrous n° 2 et 5 (lot 1 corrigé)', () => {
     ['creerPorteeUtilisateur depuis l’intergiciel d’appartenance', "import { creerPorteeUtilisateur } from '../../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", APPARTENANCE],
     ['le type GroupScope depuis une route', "import type { GroupScope } from '../db/scope.js';\nexport type T = GroupScope;", ROUTES],
     ['le type Base (opaque) depuis une route', "import type { Base } from '../db/base.js';\nexport type T = Base;", ROUTES],
+    ['baseDeScope depuis db/queries', "import { baseDeScope } from '../scope.js';\nexport default baseDeScope;", QUERIES],
     ['preparer depuis db/queries', "import { preparer } from '../sql.js';\nexport default preparer;", QUERIES],
     ['preparerTransverse depuis transverse.ts', "import { preparerTransverse } from '../sql.js';\nexport default preparerTransverse;", TRANSVERSE],
     ['connexionBrute depuis sql.ts', "import { connexionBrute } from './connection.js';\nexport default connexionBrute;", SQL],

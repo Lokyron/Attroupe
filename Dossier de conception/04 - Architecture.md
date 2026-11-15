@@ -287,6 +287,22 @@ premiers laisseraient passer, y compris dans un script d'exploitation écrit à 
   La garde prouve qu'un filtre lié existe, pas quelle valeur on lie : c'est le rôle du scope.
   `personal_events` n'est lisible que par `user_id = ?` ou par une jointure avec
   `personal_event_shares` filtrée par `group_id = ?`.
+  **Trois exceptions raisonnées (lot 3), et aucune autre.** Elles complètent la garde ; elles n'élargissent pas le canal
+  transverse, qui reste une liste figée de *lectures* :
+  1. `INSERT INTO groups (colonnes) VALUES (…)` : `groups` est la table racine, sans `group_id` à filtrer, et l'unique
+     point d'entrée de création d'un groupe. Ni `SELECT`, ni `ON CONFLICT`, ni insertion sans liste de colonnes ;
+  2. `invitations` filtrée par **`target_user_id = ?`** : une invitation est par nature inter-groupes (son destinataire
+     n'est pas encore membre), la preuve d'accès est le destinataire ;
+  3. `invitations` filtrée par **`token_hash = ?`** : la preuve d'accès est le secret du lien (empreinte SHA-256).
+  La valeur doit être **liée** (jamais littérale) et le filtre suit les règles d'un conjoint direct de `WHERE` / `ON`.
+  `SELECT * FROM invitations WHERE id = ?` reste refusé.
+  **Bornes (revue du lot 3).** Une couverture par `target_user_id` / `token_hash` ne couvre **que** `invitations` et ne se
+  propage **jamais** par `group_id = group_id` : sinon une jointure sur une invitation (même refusée, révoquée ou échue)
+  ouvrirait en lecture et en écriture toutes les tables du groupe invitant. Seule dérivation admise, nommée : en `SELECT`,
+  `memberships ON m.id = i.invited_by_membership_id AND m.group_id = i.group_id` (l'inviteur), qui ne propage rien.
+  La colonne de preuve est immuable : `target_user_id` jamais en `SET`, `token_hash` seulement sous un vrai `group_id = ?`
+  (armement du jeton à l'envoi). Tests : `tests/schema/garde-sql.test.ts` (chaque admission et son
+  voisin dangereux). Les écritures qui en découlent ne lient jamais qu'un `group_id` relu dans une invitation prouvée.
 - **Canal transverse** : les lectures qui traversent les groupes par nature (« mes groupes » :
   `memberships WHERE user_id = ?`) passent par `preparerTransverse`, fonction **non exportée hors
   de `db/`**, appelée seulement par `db/queries/transverse.ts`, dont les textes SQL sont **figés
@@ -423,8 +439,13 @@ Conventions : préfixe `/api`, JSON, cookie de session obligatoire sauf mention 
 | GET | `/moi/invitations` | Mes invitations en attente. |
 | POST | `/moi/invitations/:id/acceptation` | Accepter : crée l'appartenance. |
 | POST | `/moi/invitations/:id/refus` | Refuser. |
-| GET | `/invitations/:jeton` | Aperçu d'une invitation par lien (nom du groupe, qui invite). *Sans session.* |
-| POST | `/invitations/:jeton/acceptation` | Accepter par lien, après inscription ou connexion. |
+| POST | `/invitations/apercu` | Aperçu d'une invitation par lien (nom du groupe, qui invite). *Sans session.* Jeton dans le **corps** `{ token }`, jamais dans l'URL (le journal d'accès enregistre l'URL). |
+| POST | `/invitations/acceptation` | Accepter par lien (`{ token }`), après inscription ou connexion. |
+
+> **Écart au lot 3** : `GET /moi/invitations` ne liste que les invitations adressées à ce compte par **nom d'utilisateur**. Les invitations
+> par e-mail s'acceptent par le lien seul (`POST /invitations/acceptation`), qui exige une adresse vérifiée et identique : la
+> garde du SQL brut n'admet que `target_user_id = ?` et `token_hash = ?` (§4 verrou 5), pas un filtre sur l'adresse. L'émission
+> (`POST /groupes/:g/invitations`) répond 202 identique dans tous les cas (pas d'annuaire). Voir `ADR-0009`.
 
 ### Groupes et membres
 | Méthode | Chemin | Rôle |

@@ -41,7 +41,7 @@ export interface Decor extends BaseTemporaire {
   /** Écoule la file d'e-mails vers ce transporteur-témoin. Le jeton n'existe qu'à partir de là : la file n'en contient pas. */
   readonly remettre: () => Promise<BilanRemise>;
   /** Jeton du dernier e-mail de ce gabarit remis à cette adresse (écoule d'abord la file). */
-  readonly jetonMail: (to: string, gabarit: 'verification_email' | 'reinitialisation_mot_de_passe') => Promise<string>;
+  readonly jetonMail: (to: string, gabarit: 'verification_email' | 'reinitialisation_mot_de_passe' | 'invitation_groupe') => Promise<string>;
   readonly mails: (to: string) => Array<{ template_key: string; status: string; payload_json: string }>;
 }
 
@@ -81,8 +81,9 @@ export function decor(surcharges: Partial<OptionsApp> = {}, env: NodeJS.ProcessE
     remettre,
     jetonMail: async (to, gabarit) => {
       await remettre();
-      const sujet = fr.emails[gabarit].sujet;
-      const message = envoyes.filter((m) => m.to === to && m.sujet === sujet).at(-1);
+      // Le sujet d'une invitation porte le nom du groupe : on compare ce qui précède le premier `{variable}` du gabarit.
+      const debutSujet = fr.emails[gabarit].sujet.split('{')[0] ?? '';
+      const message = envoyes.filter((m) => m.to === to && m.sujet.startsWith(debutSujet)).at(-1);
       if (message === undefined) throw new Error(`Aucun e-mail « ${gabarit} » remis à ${to}`);
       const jeton = /#jeton=([A-Za-z0-9_-]{43})/.exec(message.texte)?.[1];
       if (jeton === undefined) throw new Error('Message sans jeton');
@@ -108,7 +109,7 @@ export class Client {
   ) {}
 
   async envoyer(
-    methode: 'get' | 'post' | 'patch' | 'delete',
+    methode: 'get' | 'post' | 'put' | 'patch' | 'delete',
     chemin: string,
     corps?: unknown,
     options: { origine?: string | null; cookie?: string | null } = {},
@@ -130,6 +131,7 @@ export class Client {
 
   get = (chemin: string, options?: Parameters<Client['envoyer']>[3]): Promise<Reponse> => this.envoyer('get', chemin, undefined, options);
   post = (chemin: string, corps?: unknown, options?: Parameters<Client['envoyer']>[3]): Promise<Reponse> => this.envoyer('post', chemin, corps ?? {}, options);
+  put = (chemin: string, corps?: unknown, options?: Parameters<Client['envoyer']>[3]): Promise<Reponse> => this.envoyer('put', chemin, corps ?? {}, options);
   patch = (chemin: string, corps: unknown, options?: Parameters<Client['envoyer']>[3]): Promise<Reponse> => this.envoyer('patch', chemin, corps, options);
   delete = (chemin: string, options?: Parameters<Client['envoyer']>[3]): Promise<Reponse> => this.envoyer('delete', chemin, undefined, options);
 }

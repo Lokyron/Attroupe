@@ -33,6 +33,7 @@ const MESSAGE_CONNEXION_BRUTE =
   'Interdit : connexionBrute rend la vraie connexion ; seuls db/sql.ts, db/migrate.ts et db/connection.ts l’appellent.';
 
 const MESSAGE_BASE_DE = 'Interdit : baseDe rend la base d’une portée ; réservé à app/server/db/ (canal transverse).';
+const MESSAGE_BASE_DE_SCOPE = 'Interdit : baseDeScope rend la base d’un scope ; réservé à app/server/db/ (requêtes jointes de db/queries/).';
 const MESSAGE_TESTS =
   'Interdit : le code serveur n’importe rien de app/tests/ (fixtures/brut.ts rend la vraie connexion : verrous n° 2 et 5).';
 
@@ -65,6 +66,7 @@ const PATTERN_SQL = { regex: MODULE_SQL, message: MESSAGE_SQL };
 const PATTERN_MIGRATE = { regex: MODULE_MIGRATE, message: MESSAGE_MIGRATE };
 const PATTERN_FABRIQUE_SCOPE = { regex: MODULE_SCOPE, importNames: ['creerScope'], message: MESSAGE_FABRIQUE };
 const PATTERN_FABRIQUE_PORTEE = { regex: MODULE_PORTEE, importNames: ['creerPorteeUtilisateur'], message: MESSAGE_FABRIQUE };
+const PATTERN_BASE_DE_SCOPE = { regex: MODULE_SCOPE, importNames: ['baseDeScope'], message: MESSAGE_BASE_DE_SCOPE };
 const PATTERN_BASE_DE_PORTEE = { regex: MODULE_PORTEE, importNames: ['baseDe'], message: MESSAGE_BASE_DE };
 // Dans db/ : les fonctions qui donnent un accès brut ou transverse, par leur nom.
 const PATTERN_TRANSVERSE = { regex: SOURCE_SQL_RELATIVE, importNames: ['preparerTransverse'], message: MESSAGE_TRANSVERSE };
@@ -113,6 +115,7 @@ const IMPORTS_HORS_DB = [
   PATTERN_BIBLIOTHEQUES,
   PATTERN_TESTS,
   PATTERN_BASE_DE_PORTEE,
+  PATTERN_BASE_DE_SCOPE,
   PATTERN_CONNECTION,
   PATTERN_SQL,
   PATTERN_MIGRATE,

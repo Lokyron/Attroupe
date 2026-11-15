@@ -13,3 +13,35 @@ body {
   margin: 0 auto;
   padding: 1.5rem 1rem;
 }
+
+.entete {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.entete h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.formulaire {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 24rem;
+}
+
+.formulaire label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+button.lien {
+  background: none;
+  border: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import express, { type Express } from 'express';
+import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import type { Env } from '../config/env.js';
 import type { Base } from '../db/base.js';
 import { LimiteurCadence, REGLES_PAR_DEFAUT, type Horloge, type ReglesCadence } from '../services/cadence.js';
@@ -10,7 +10,10 @@ import { csrf } from './middleware/csrf.js';
 import { gestionnaireErreurs } from './middleware/erreurs.js';
 import { creerJournal, intergicielJournal, JOURNAL_SILENCIEUX, type Journal } from './middleware/journal.js';
 import { intergicielSession } from './middleware/session.js';
+import { declarerIntergiciel, monter } from './montage.js';
 import { routesAuth } from './routes/auth.js';
+import { routesGroupes } from './routes/groupes.js';
+import { routesInvitations } from './routes/invitations.js';
 import { routesMoi } from './routes/moi.js';
 
 // Réexporté : le gestionnaire d'erreurs vit désormais dans middleware/erreurs.ts.
@@ -58,13 +61,16 @@ export function creerApp(options: OptionsApp): Express {
   app.disable('x-powered-by');
   app.set('trust proxy', env.ATTROUPE_TRUST_PROXY);
 
-  app.use((_req, res, next) => {
-    res.set(EN_TETES_SECURITE);
-    next();
-  });
+  // Tout intergiciel non routeur est déclaré (`transversal`) : le test de complétude signale les autres (tests/fixtures/routes.ts).
+  app.use(
+    declarerIntergiciel('transversal', (_req: Request, res: Response, next: NextFunction) => {
+      res.set(EN_TETES_SECURITE);
+      next();
+    }),
+  );
 
   const journal = options.journal ?? (env.NODE_ENV === 'test' ? JOURNAL_SILENCIEUX : creerJournal(env.ATTROUPE_LOG_LEVEL));
-  app.use('/api', intergicielJournal(journal));
+  app.use('/api', declarerIntergiciel('transversal', intergicielJournal(journal)));
 
   app.get('/api/sante', (_req, res) => {
     res.json({ status: 'ok', version });
@@ -92,30 +98,36 @@ export function creerApp(options: OptionsApp): Express {
     // Ordre des intergiciels de /api : journal (ci-dessus) → CSRF (refus peu coûteux, avant de lire le corps)
     // → corps JSON borné → session (facultative) → routes (cadence posée route par route : elle lit l'e-mail du corps)
     // → 404 → gestionnaire d'erreurs, en dernier.
-    app.use('/api', csrf(env.ATTROUPE_BASE_URL));
-    app.use('/api', express.json({ limit: '16kb', strict: true }));
-    app.use('/api', intergicielSession(contexte));
-    app.use('/api/auth', routesAuth(contexte));
-    app.use('/api/moi', routesMoi(contexte));
+    app.use('/api', declarerIntergiciel('transversal', csrf(env.ATTROUPE_BASE_URL)));
+    app.use('/api', declarerIntergiciel('transversal', express.json({ limit: '16kb', strict: true })));
+    app.use('/api', declarerIntergiciel('transversal', intergicielSession(contexte)));
+    // Chaque sous-application est montée par `monter` : le registre de cloisonnement en reconstitue les chemins (tests/cloisonnement).
+    monter(app, '/api/auth', routesAuth(contexte));
+    monter(app, '/api/moi', routesMoi(contexte));
+    monter(app, '/api/groupes', routesGroupes(contexte));
+    monter(app, '/api/invitations', routesInvitations(contexte));
   }
 
   // Toute autre URL d'API est inconnue : JSON, jamais la page du client.
-  app.use('/api', (_req, res) => {
-    res.status(404).json({ error: 'route.introuvable' });
-  });
+  app.use(
+    '/api',
+    declarerIntergiciel('transversal', (_req: Request, res: Response) => {
+      res.status(404).json({ error: 'route.introuvable' });
+    }),
+  );
 
   if (dossierClient !== undefined) {
     const index = join(dossierClient, 'index.html');
     if (!existsSync(index)) {
       throw new Error(`Client construit introuvable : ${index} (lancer « npm run build » ?).`);
     }
-    app.use(express.static(dossierClient, { index: false }));
+    app.use(declarerIntergiciel('transversal', express.static(dossierClient, { index: false })));
     app.get(/^(?!\/api(\/|$)).*/, (_req, res) => {
       res.sendFile(index);
     });
   }
 
-  app.use(gestionnaireErreurs);
+  app.use(declarerIntergiciel('transversal', gestionnaireErreurs));
 
   return app;
 }

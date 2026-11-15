@@ -120,6 +120,16 @@ export interface GroupScope {
   readonly creneauxOccupes: (entre?: { readonly debut: string; readonly fin: string }) => CreneauOccupe[];
 }
 
+/** Scope → base, pour les requêtes jointes de `db/queries/` (membres avec leur compte…) : la base ne se déduit que d'un scope fabriqué ici. */
+const BASES = new WeakMap<object, Base>();
+
+/** La base d'un scope fabriqué par `creerScope` ; réservé à db/ (ESLint). Un scope forgé est refusé. */
+export function baseDeScope(scope: GroupScope): Base {
+  const base = BASES.get(scope);
+  if (base === undefined) throw new ErreurScope('Scope forgé : seule creerScope en fabrique.');
+  return base;
+}
+
 /** Aucune appartenance active pour ce couple (utilisateur, groupe) : l'intergiciel répond 404, jamais 403. */
 export class ErreurAppartenance extends ErreurScope {
   constructor() {
@@ -188,7 +198,7 @@ export function creerScope(base: Base, userId: string, groupId: string): GroupSc
     return preparer(base, texte).all(...params) as CreneauOccupe[];
   };
 
-  return Object.freeze({
+  const scope: GroupScope = Object.freeze({
     [MARQUE]: true as const,
     groupId: appartenance.group_id,
     membershipId: membreId,
@@ -206,4 +216,6 @@ export function creerScope(base: Base, userId: string, groupId: string): GroupSc
     transaction: moteur.transaction,
     creneauxOccupes,
   });
+  BASES.set(scope, base);
+  return scope;
 }

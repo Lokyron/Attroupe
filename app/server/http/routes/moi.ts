@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { mesGroupes } from '../../db/queries/transverse.js';
+import { accepter, mesInvitations, refuser } from '../../services/invitations.js';
 import { listerSessions, lireProfil, modifierProfil, revoquerAutresSessions, revoquerSession } from '../../db/queries/comptes.js';
 import { versInstant } from '../../domain/instant.js';
 import { changerMotDePasse, renvoyerVerification } from '../../services/authentification.js';
@@ -6,6 +8,7 @@ import type { Contexte } from '../contexte.js';
 import { ErreurHttp } from '../erreurs.js';
 import { cadence } from '../middleware/cadence.js';
 import { exigerSession, gardeSession, poserCookieSession } from '../middleware/session.js';
+import { parametre } from '../parametres.js';
 import { schemaChangementMotDePasse, schemaProfil } from '../schemas/auth.js';
 import { analyser } from '../schemas/valider.js';
 
@@ -17,9 +20,13 @@ export function routesMoi(contexte: Contexte): Router {
   routeur.use(gardeSession);
 
   routeur.get('/', (req, res) => {
-    const { portee } = exigerSession(req);
+    const auth = exigerSession(req);
+    const { portee } = auth;
     res.json({
       ...lireProfil(portee),
+      // Mes groupes (le sélecteur) : appartenances ACTIVES seulement, et le badge « vous avez des invitations ».
+      groupes: mesGroupes(portee),
+      invitations_en_attente: mesInvitations(contexte, auth).length,
       // Sans clé Brevo les e-mails restent en file : l'interface doit le dire (architecture §7.3).
       service_email: contexte.env.BREVO_API_KEY === undefined ? 'non_configure' : 'actif',
     });
@@ -45,6 +52,21 @@ export function routesMoi(contexte: Contexte): Router {
   routeur.post('/email/verification', cadence(contexte, 'renvoi'), (req, res) => {
     renvoyerVerification(contexte, exigerSession(req));
     res.status(202).json({ ok: true });
+  });
+
+  // Invitations reçues (par nom d'utilisateur) : adressées à CE compte seulement. Une invitation d'un autre compte est introuvable (404).
+  routeur.get('/invitations', (req, res) => {
+    res.json({ invitations: mesInvitations(contexte, exigerSession(req)) });
+  });
+
+  routeur.post('/invitations/:invitationId/acceptation', (req, res) => {
+    accepter(contexte, exigerSession(req), parametre(req, 'invitationId'));
+    res.json({ ok: true });
+  });
+
+  routeur.post('/invitations/:invitationId/refus', (req, res) => {
+    refuser(contexte, exigerSession(req), parametre(req, 'invitationId'));
+    res.json({ ok: true });
   });
 
   routeur.get('/sessions', (req, res) => {

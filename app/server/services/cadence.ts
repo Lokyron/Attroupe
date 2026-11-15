@@ -33,7 +33,7 @@ export type VerdictCadence =
   | { readonly autorise: true; readonly rembourser: () => void }
   | { readonly autorise: false; readonly retryApresSecondes: number };
 
-export type NomCadence = 'connexion' | 'inscription' | 'oubli' | 'jeton' | 'changement' | 'renvoi';
+export type NomCadence = 'connexion' | 'inscription' | 'oubli' | 'jeton' | 'changement' | 'renvoi' | 'invitation' | 'groupe';
 
 export interface CleCadence {
   readonly cle: string;
@@ -168,7 +168,12 @@ function refus(attenteMs: number): VerdictCadence {
  *    attaque répartie sur de nombreuses adresses ;
  *  - `ip`      : l'adresse IP (IPv6 ramenée à son /64), toutes cibles confondues ;
  *  - `reseau`  : le préfixe /48 des IPv6 (un abonné y choisit 2^16 préfixes /64 : sans cette clé, la limite par /64 se contourne) ;
- *  - `compte`  : le compte de la session (routes authentifiées).
+ *  - `compte`  : le compte de la session (routes authentifiées) ;
+ *  - `cibleGroupe` : (adresse e-mail OU nom d'utilisateur visé, groupe de l'URL) — le « couple » d'une invitation : un administrateur
+ *    qui martèle une cible depuis SON groupe n'épuise que cette clé, jamais celle d'un autre groupe ;
+ *  - `cible`   : la cible seule, tous groupes confondus — beaucoup plus large, elle ne retient que l'inondation d'une boîte (ou d'un
+ *    compte) par de nombreux groupes. Limite assumée : qui dispose de nombreux groupes peut l'épuiser, d'où son seuil large
+ *    et le report exponentiel (jamais un blocage définitif).
  */
 export interface ReglesRoute {
   readonly ip: RegleCadence;
@@ -176,6 +181,8 @@ export interface ReglesRoute {
   readonly couple?: RegleCadence;
   readonly email?: RegleCadence;
   readonly compte?: RegleCadence;
+  readonly cibleGroupe?: RegleCadence;
+  readonly cible?: RegleCadence;
 }
 
 export type ReglesCadence = Readonly<Record<NomCadence, ReglesRoute>>;
@@ -196,4 +203,12 @@ export const REGLES_PAR_DEFAUT: ReglesCadence = Object.freeze({
   changement: { compte: parFenetre(5), ip: parFenetre(30), reseau: parFenetre(90) },
   /** Renvoi du mail de vérification : chaque demande envoie un e-mail. */
   renvoi: { compte: parFenetre(3), ip: parFenetre(10), reseau: parFenetre(30) },
+  /**
+   * Émission d'une invitation (lot 3) : c'est l'outil du harcèlement. Par compte (un administrateur n'inonde pas), par cible (adresse
+   * OU nom d'utilisateur) ET groupe au seuil bas — la clé que martèle un tiers n'est que SON couple, elle ne rend pas la cible
+   * « non invitable » ailleurs —, par cible seule à un seuil beaucoup plus large (inondation par de nombreux groupes), et par IP.
+   */
+  invitation: { compte: parFenetre(10), cibleGroupe: parFenetre(3), cible: parFenetre(20), ip: parFenetre(30), reseau: parFenetre(90) },
+  /** Création de groupe : rien n'est envoyé à un tiers, mais chaque groupe est une ligne et un administrateur de plus qui peut inviter. */
+  groupe: { compte: parFenetre(10), ip: parFenetre(30), reseau: parFenetre(90) },
 });

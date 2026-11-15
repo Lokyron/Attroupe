@@ -57,6 +57,16 @@ export function emailDuCorps(req: Request): string | undefined {
   return email === '' ? undefined : email.slice(0, 254);
 }
 
+/** Cible d'une invitation : l'adresse e-mail, sinon le nom d'utilisateur (préfixés, pour ne jamais confondre les deux espaces de noms). */
+export function cibleDuCorps(req: Request): string | undefined {
+  const email = emailDuCorps(req);
+  if (email !== undefined) return `email:${email}`;
+  const corps: unknown = req.body;
+  if (typeof corps !== 'object' || corps === null || !('username' in corps) || typeof corps.username !== 'string') return undefined;
+  const nom = corps.username.trim().toLowerCase();
+  return nom === '' ? undefined : `username:${nom.slice(0, 64)}`;
+}
+
 export function cleEmail(nom: NomCadence, email: string): string {
   return `${nom}:email:${email}`;
 }
@@ -78,6 +88,15 @@ export function cadence(contexte: Contexte, nom: NomCadence): RequestHandler {
       if (email !== undefined) {
         if (regles.couple !== undefined) verifs.push({ cle: cleCouple(nom, email, adresse), regle: regles.couple });
         if (regles.email !== undefined) verifs.push({ cle: cleEmail(nom, email), regle: regles.email });
+      }
+    }
+    if (regles.cibleGroupe !== undefined || regles.cible !== undefined) {
+      const cible = cibleDuCorps(req);
+      if (cible !== undefined) {
+        const groupe = req.params['groupId'];
+        // Sans groupe dans l'URL (route hors groupe), la clé couple n'a pas de sens : seule la cible seule s'applique.
+        if (regles.cibleGroupe !== undefined && typeof groupe === 'string') verifs.push({ cle: `${nom}:cible-groupe:${cible}|${groupe}`, regle: regles.cibleGroupe });
+        if (regles.cible !== undefined) verifs.push({ cle: `${nom}:cible:${cible}`, regle: regles.cible });
       }
     }
     if (regles.compte !== undefined) {

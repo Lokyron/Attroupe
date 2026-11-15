@@ -23,7 +23,7 @@ export const schemaReinitialisation = z.strictObject({ token: jeton, password: m
 export const schemaChangementMotDePasse = z.strictObject({ current_password: motDePasse, new_password: motDePasse });
 export const schemaVerification = z.strictObject({ token: jeton });
 
-function fuseauValide(valeur: string): boolean {
+export function fuseauValide(valeur: string): boolean {
   try {
     new Intl.DateTimeFormat('fr', { timeZone: valeur });
     return true;

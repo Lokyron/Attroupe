@@ -3,8 +3,9 @@ import { HEURE_MS, MINUTE_MS, plus, versInstant } from '../domain/instant.js';
 import { empreinteJeton, nouveauJeton } from '../domain/jetons.js';
 import type { Base } from '../db/base.js';
 import { armerJetonEnvoi } from '../db/queries/comptes.js';
+import { armerInvitationEnvoi } from '../db/queries/invitations.js';
 import { marquerEmailEchec, marquerEmailEnvoye, reserverEmailsDus, type EmailDu } from '../db/queries/transverse.js';
-import { ErreurGabarit, GABARITS_A_JETON, jetonIdDuPayload, lienAvecJeton, rendre, type MessageRendu } from './emails.js';
+import { ErreurGabarit, GABARITS_A_JETON, groupeIdDuPayload, jetonIdDuPayload, lienAvecJeton, rendre, type MessageRendu } from './emails.js';
 
 // Remise de la file `email_outbox` à l'API transactionnelle de Brevo (architecture §7.3). Rien n'est
 // envoyé dans le cycle d'une requête HTTP : les routes écrivent dans la file, `remettreFile` (appelée
@@ -153,14 +154,13 @@ async function tenter(base: Base, transporteur: Transporteur, email: EmailDu, ma
     let complements: Record<string, string> = {};
     if (gabarit !== undefined) {
       const jeton = nouveauJeton();
-      const arme = armerJetonEnvoi(
-        base,
-        gabarit.nature,
-        jetonIdDuPayload(email.payload_json),
-        empreinteJeton(jeton),
-        versInstant(plus(maintenant, gabarit.validiteMs)),
-        versInstant(plus(maintenant, -gabarit.delaiRemiseMs)),
-      );
+      const expireLe = versInstant(plus(maintenant, gabarit.validiteMs));
+      const creeApres = versInstant(plus(maintenant, -gabarit.delaiRemiseMs));
+      const jetonId = jetonIdDuPayload(email.payload_json);
+      const arme =
+        gabarit.nature === 'invitation'
+          ? armerInvitationEnvoi(base, jetonId, groupeIdDuPayload(email.payload_json), empreinteJeton(jeton), expireLe, creeApres)
+          : armerJetonEnvoi(base, gabarit.nature, jetonId, empreinteJeton(jeton), expireLe, creeApres);
       if (!arme) {
         return { type: 'echec', definitif: true, configuration: false, erreur: 'Lien périmé ou déjà remplacé : e-mail non envoyé.' };
       }
