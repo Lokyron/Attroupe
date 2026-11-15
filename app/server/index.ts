@@ -4,16 +4,38 @@ import { chargerEnv, ErreurConfiguration } from './config/env.js';
 import { dossierClient, version } from './config/paquet.js';
 import { fermer, ouvrirEtMigrer } from './db/migrate.js';
 import { creerApp } from './http/app.js';
+import { creerJournal } from './http/middleware/journal.js';
+import { creerTransporteurBrevo } from './services/brevo.js';
+import { demarrerTaches } from './services/taches.js';
 
 // Amorçage : env → base → migrations → routes → écoute.
 function demarrer(): void {
   const env = chargerEnv();
   verifierDossierDonnees(env.ATTROUPE_DATA_DIR);
-  // Les routes (lots 2 et 3) recevront cette connexion, un « Base » opaque sans méthode ; le démarrage échoue si PRAGMA ou migrations échouent.
+  // Les routes reçoivent cette connexion, un « Base » opaque sans méthode ; le démarrage échoue si PRAGMA ou migrations échouent.
   const base = ouvrirEtMigrer(join(env.ATTROUPE_DATA_DIR, 'attroupe.sqlite'));
+  const journal = creerJournal(env.ATTROUPE_LOG_LEVEL);
+
+  // Brevo est facultatif : sans clé, l'application démarre et les e-mails restent en file (signalé dans GET /api/moi).
+  const transporteur =
+    env.BREVO_API_KEY === undefined || env.BREVO_SENDER_EMAIL === undefined
+      ? undefined
+      : creerTransporteurBrevo({
+          apiKey: env.BREVO_API_KEY,
+          expediteurEmail: env.BREVO_SENDER_EMAIL,
+          expediteurNom: env.BREVO_SENDER_NAME ?? 'Attroupe',
+          urlApi: env.BREVO_API_URL,
+        });
+  if (transporteur === undefined) {
+    journal.warn('email.non_configure', { detail: "BREVO_API_KEY absente : les e-mails restent en file d'attente et ne partiront pas." });
+  }
+  const taches = demarrerTaches({ base, transporteur, journal, baseUrl: env.ATTROUPE_BASE_URL });
+
   const app = creerApp({
     env,
     version,
+    base,
+    journal,
     ...(env.NODE_ENV === 'production' ? { dossierClient } : {}),
   });
 
@@ -36,8 +58,11 @@ function demarrer(): void {
   // Arrêt propre sur le signal de Docker : on finit les requêtes en cours.
   const arreter = (): void => {
     serveur.close(() => {
-      fermer(base);
-      process.exit(0);
+      // On laisse finir la remise d'e-mails en cours avant de fermer la base.
+      void taches.arreter().then(() => {
+        fermer(base);
+        process.exit(0);
+      });
     });
   };
   process.on('SIGTERM', arreter);

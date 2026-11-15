@@ -15,6 +15,7 @@ import { colonnesDe, listerTables } from '../fixtures/schema.js';
  */
 const TABLES_TRANSVERSES = [
   'currencies',
+  'email_verification_tokens',
   'groups',
   'password_reset_tokens',
   'schema_migrations',
@@ -46,8 +47,8 @@ describe('schéma : cloisonnement structurel', () => {
     listerTables(t.sql).filter((n) => !TABLES_TRANSVERSES.includes(n));
   const aGroupe = (table: string): boolean => colonnesDe(t.sql, table).some((c) => c.name === 'group_id');
 
-  it('la base compte les 33 tables du modèle', () => {
-    expect(listerTables(t.sql)).toHaveLength(33);
+  it('la base compte les 34 tables du modèle', () => {
+    expect(listerTables(t.sql)).toHaveLength(34);
   });
 
   it('chaque table métier porte group_id, sauf l’exception inscrite en dur', () => {

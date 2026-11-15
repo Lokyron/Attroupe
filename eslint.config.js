@@ -17,8 +17,9 @@ const MESSAGE_SQL =
 const MESSAGE_MIGRATE =
   "Interdit : « db/migrate » n'est importable que depuis app/server/index.ts (ouverture, migrations, fermeture).";
 const MESSAGE_FABRIQUE =
-  'Interdit : creerScope et creerPorteeUtilisateur ne sont appelables que depuis ' +
-  "app/server/http/middleware/appartenance.ts : c'est l'intergiciel qui prouve l'appartenance (verrou n° 3).";
+  'Interdit : creerScope n’est appelable que depuis app/server/http/middleware/appartenance.ts, et ' +
+  'creerPorteeUtilisateur que depuis appartenance.ts (appartenance au groupe prouvée, verrou n° 3) et ' +
+  "session.ts (session valide prouvée, verrou d'identité) : ce sont les intergiciels qui prouvent.";
 const MESSAGE_APPEL_BRUT =
   'Interdit : .prepare, .exec et .pragma ne s’appellent que dans db/ (connection, sql, migrate). ' +
   'Une requête passe par le GroupScope ou la PorteeUtilisateur (verrous n° 2 et 5).';
@@ -158,6 +159,14 @@ export default tseslint.config(
     rules: regles(
       IMPORTS_HORS_DB.filter((p) => p !== PATTERN_FABRIQUE_SCOPE && p !== PATTERN_FABRIQUE_PORTEE),
       SYNTAXES_HORS_DB.filter((s) => s.message !== MESSAGE_FABRIQUE),
+    ),
+  },
+  // L'intergiciel de session fabrique la PorteeUtilisateur du compte de la session (lot 2) ; il ne fabrique JAMAIS de GroupScope.
+  {
+    files: ['app/server/http/middleware/session.ts'],
+    rules: regles(
+      IMPORTS_HORS_DB.filter((p) => p !== PATTERN_FABRIQUE_PORTEE),
+      SYNTAXES_HORS_DB,
     ),
   },
   // Dans db/ : la bibliothèque est interdite, les appels bruts aussi, sauf dans trois fichiers ;

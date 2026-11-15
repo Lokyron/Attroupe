@@ -113,8 +113,33 @@ ou `ATTROUPE_TAG=<version>` (étiquettes publiées à chaque construction).
 ## 7. Endpoints & interfaces
 
 Surface d'API de la V1 par domaine :
-[`04 - Architecture.md`](Dossier%20de%20conception/04%20-%20Architecture.md) §6. À recopier ici
-au fur et à mesure de l'implémentation, une ligne par endpoint réellement livré.
+[`04 - Architecture.md`](Dossier%20de%20conception/04%20-%20Architecture.md) §6. Livré au lot 2
+(JSON, préfixe `/api`, cookie `attroupe_session` ; toute requête qui modifie exige l'en-tête
+`Origin` de l'instance, sinon 403) :
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| GET | `/api/sante` | État et version (sans session). |
+| POST | `/api/auth/inscription` | `{email, username, password, display_name?}` → 202, toujours la même réponse. 409 `nom_utilisateur.pris` si le nom est pris. |
+| POST | `/api/auth/email/verification` | `{token}` : consomme le jeton de vérification (usage unique, 24 h à partir de l'envoi). |
+| POST | `/api/auth/connexion` | `{email, password}` → pose le cookie de session. 401 uniforme. |
+| POST | `/api/auth/deconnexion` | Révoque la session courante, efface le cookie (idempotent). |
+| POST | `/api/auth/mot-de-passe/oubli` | `{email}` → 202, toujours la même réponse (durée minimale fixe). |
+| POST | `/api/auth/mot-de-passe/reinitialisation` | `{token, password}` : jeton à usage unique (1 h), révoque toutes les sessions. |
+| GET / PATCH | `/api/moi` | Compte courant (`service_email`: `actif` ou `non_configure`) ; modifie `display_name`, `time_zone`, `birthday`. |
+| POST | `/api/moi/mot-de-passe` | `{current_password, new_password}` : ancien mot de passe vérifié (400 `mot_de_passe.actuel_invalide`), autres sessions révoquées, jeton de la session courante renouvelé (nouveau cookie). |
+| POST | `/api/moi/email/verification` | Renvoie le mail de vérification (202 ; 409 `email.deja_verifie`). |
+| GET | `/api/moi/sessions` | Mes appareils (`courante` repère la session de la requête). |
+| DELETE | `/api/moi/sessions/:id` | Révoque un appareil (404 si ce n'est pas le mien). |
+| DELETE | `/api/moi/sessions` | Révoque toutes mes sessions sauf la courante. |
+
+Cadence (en mémoire, 15 min, report exponentiel au-delà), clés par **couple (e-mail, IP)**, par e-mail
+seul (large), par IP (/64 en IPv6) et par réseau /48 IPv6 : connexion 10 / 100 / 30 / 90 ; inscription
+5 / 30 / 10 / 30 ; mot de passe oublié 5 / 30 / 20 / 60 ; jeton 30 / 90 par IP / réseau ; changement de
+mot de passe 5 par compte ; renvoi de vérification 3 par compte. Un tiers ne bloque donc pas le
+propriétaire depuis une autre IP. Une requête refusée en 429 ne crée aucune clé, une clé bloquée n'est
+jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les liens des e-mails portent le jeton dans le **fragment**
+(`/verification-email#jeton=…`, `/reinitialisation#jeton=…`) : les pages du client restent à écrire.
 
 ## 8. Dette technique, TODOs & points d'attention
 
@@ -129,6 +154,18 @@ au fur et à mesure de l'implémentation, une ligne par endpoint réellement liv
   Aucune route ne s'en sert encore (lots 2 et 3). Le serveur ouvre et migre
   `$ATTROUPE_DATA_DIR/attroupe.sqlite` au démarrage ; une migration modifiée après coup, ou un
   `PRAGMA foreign_keys` inactif, font échouer le démarrage.
+- Lot 2 livré (comptes) : `db/queries/comptes.ts` (comptes, sessions, jetons ; migration
+  `0002_verification_email.sql`), file d'e-mails dans `db/queries/transverse.ts` (`email_outbox`),
+  `services/` (`mot-de-passe` scrypt, `cadence`, `authentification`, `emails`, `brevo`, `taches`),
+  `http/middleware/` (`journal`, `csrf`, `session`, `cadence`, `erreurs`), `http/routes/{auth,moi}.ts`,
+  `i18n/fr.json` (textes des e-mails). Ordre sur `/api` : journal → CSRF → corps JSON (16 Ko) → session →
+  routes (cadence posée par route) → 404 → erreurs. Brevo est facultatif : sans `BREVO_API_KEY` les
+  e-mails restent en file (`email.non_configure` au démarrage, `service_email` dans `/api/moi`). La
+  file ne contient **aucun jeton** : elle ne garde que l'identifiant de la ligne de jeton, le jeton naît à
+  l'envoi (`services/brevo.ts`, `armerJetonEnvoi`) et sa validité part de l'envoi. Une clé Brevo refusée
+  (401/403) ne consomme pas les essais. Une session ne s'ouvre que sur un `CompteProuve`
+  (`prouverParMotDePasse`). Ouvert : avatar, inscription sur invitation (lot 3, avec le rattachement
+  conditionné à `email_verified_at`), pages du client.
 - Le cloisonnement entre groupes est le risque numéro un du projet : il se traite par des
   tests dédiés, route par route (voir `ADR-0002`).
 - L'ajout d'un membre par son nom d'utilisateur ou son e-mail est une surface d'abus : l'ajout

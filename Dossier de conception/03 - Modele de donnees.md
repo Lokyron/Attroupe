@@ -46,7 +46,7 @@
 | Domaine | Tables | Portée groupe |
 |---|---|---|
 | Référence | `schema_migrations`, `currencies` | — |
-| Comptes | `users`, `user_identities`, `sessions`, `password_reset_tokens` | — (transverses) |
+| Comptes | `users`, `user_identities`, `sessions`, `password_reset_tokens`, `email_verification_tokens` | — (transverses) |
 | Groupes | `groups`, `memberships`, `invitations` | racine / `group_id` |
 | Planning groupe | `events`, `event_organizers`, `event_attendances` | `group_id` |
 | Planning perso | `personal_events`, `personal_event_shares` | exception encadrée (§3.6) |
@@ -145,6 +145,27 @@ Index : `idx_sessions_user (user_id, expires_at)`.
 Colonnes : `id` PK, `user_id` NOT NULL → `users`, `token_hash` UNIQUE NOT NULL,
 `created_at`, `expires_at` NOT NULL, `used_at` NULL. Purge au-delà de 24 h.
 
+**`email_verification_tokens`** *(ajoutée par la migration `0002`, lot 2)* — une ligne = un jeton de
+vérification d'adresse e-mail. Mêmes colonnes que `password_reset_tokens` (`id` PK, `user_id` NOT NULL
+→ `users` ON DELETE CASCADE, `token_hash` UNIQUE NOT NULL = SHA-256 du jeton, `created_at`,
+`expires_at` NOT NULL — 24 h —, `used_at` NULL : usage unique). Index `idx_email_verification_user
+(user_id, expires_at)`. Le jeton en clair n'existe que dans le lien de l'e-mail.
+
+*Cycle de vie des deux tables de jetons (lot 2, après revue) :* le jeton **naît à l'envoi**, pas à la
+demande. À la demande, la ligne est créée **inerte** (`token_hash` = empreinte d'un secret jeté,
+`expires_at = created_at` : rien ne peut la consommer) et l'e-mail mis en file ne porte que son
+identifiant (`payload_json = {"nom": …, "jeton_id": …}`). À l'envoi, le service tire le jeton, écrit
+son empreinte, fait **partir la validité de cet instant** (24 h vérification, 1 h réinitialisation) et
+ne met le clair que dans le message sortant. Rien n'est posté si la ligne est déjà utilisée ou
+remplacée (`used_at`), si la demande a plus de 24 h (vérification) ou 3 h (réinitialisation), ou si
+l'adresse est déjà vérifiée : l'e-mail passe en `failed`. La file ne contient donc jamais de jeton.
+
+*Lot 2, précisions :* `email_outbox.status` — `pending` (à envoyer ou à réessayer), `sent`,
+`failed` (refus définitif, ex. HTTP 400 de Brevo, gabarit inconnu), `abandoned` (6 échecs).
+`payload_json` est vidé (`{}`) quand l'e-mail est parti ou abandonné (il porte le nom et l'identifiant
+de la ligne de jeton, jamais le jeton). Une réponse 401/403 de Brevo (clé révoquée) est une panne de
+configuration : l'e-mail reste `pending`, retenté toutes les 15 min, **sans consommer d'essai**.
+
 ### 3.3 Groupes, appartenances et rôles
 
 **`groups`** — une ligne = un cercle étanche (la bande, les collègues, la coloc). C'est la
@@ -220,6 +241,12 @@ pour le badge « vous avez une invitation ».
 > contrepartie du fait qu'un membre s'ajoute par nom d'utilisateur. La recherche d'une cible
 > est une **correspondance exacte** sur `lower(username)` ou `lower(email)` et ne renvoie
 > jamais de liste : pas d'annuaire, pas d'énumération.
+
+> **Rattachement d'une invitation par e-mail (lot 3, à ne pas oublier)** : une invitation
+> `kind = 'email'` ne se rattache à un compte que si `users.email_verified_at` est **non nul**.
+> Sans cela, quelqu'un qui inscrit `victime@x` avant la victime (l'inscription ne vérifie rien)
+> récupérerait les invitations de la victime et verrait les groupes qui l'invitent : c'est une
+> fuite entre groupes.
 
 ### 3.5 Événements du groupe, organisateurs et présences
 

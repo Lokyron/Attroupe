@@ -3,6 +3,21 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-15 — Lot 2 : les comptes (écrit, en attente de revue)
+
+Inscription, vérification d'e-mail, connexion par session opaque hachée, sessions multiples et
+révocation, mot de passe oublié, `/api/moi`, cadence, CSRF par `Origin`, file `email_outbox` et
+service Brevo. Migration `0002_verification_email.sql` (34 tables). Vérifié par exécution : parcours
+complet en `curl` contre le serveur lancé, cadence, CSRF, file contre un faux Brevo (panne puis
+rétablissement), `docker build` et `/api/sante` à 200. **Non vérifié** : un envoi réel (pas de clé
+Brevo). Détail et écarts avec l'architecture §5 : voir le rapport de lot.
+
+**Corrections après revue** : cadence rétablie par couple (e-mail, IP) + clé e-mail large + /48 IPv6
+(la spécification §5 avait été réécrite pour coller au code : le texte d'origine est rétabli et précisé),
+table de clés qui n'évince plus un blocage en cours, `POST /api/moi/mot-de-passe` et renvoi du mail de
+vérification, jetons d'e-mail fabriqués à l'envoi (plus aucun jeton dans la file), `CompteProuve`
+exigé pour ouvrir une session, 401/403 de Brevo sans consommation d'essais.
+
 ## 2026-11-15 — Lot 1 : la base et le cloisonnement
 
 33 tables, le `GroupScope`, la `PorteeUtilisateur`, le moteur de filtres et la garde du SQL brut.

@@ -1,0 +1,17 @@
+{
+  "application": "Attroupe",
+  "emails": {
+    "verification_email": {
+      "sujet": "Confirmez votre adresse e-mail",
+      "texte": "Bonjour {nom},\n\nBienvenue sur {application}. Pour confirmer votre adresse e-mail, ouvrez le lien suivant (valable 24 heures) :\n\n{lien}\n\nSi vous n'êtes pas à l'origine de cette inscription, ignorez simplement ce message."
+    },
+    "reinitialisation_mot_de_passe": {
+      "sujet": "Réinitialisation de votre mot de passe",
+      "texte": "Bonjour {nom},\n\nUne réinitialisation du mot de passe de votre compte {application} a été demandée. Pour choisir un nouveau mot de passe, ouvrez le lien suivant (valable 1 heure, utilisable une seule fois) :\n\n{lien}\n\nToutes vos sessions ouvertes seront fermées au changement. Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe actuel reste valable."
+    },
+    "compte_existant": {
+      "sujet": "Vous avez déjà un compte",
+      "texte": "Bonjour {nom},\n\nQuelqu'un a tenté de créer un compte {application} avec votre adresse e-mail, mais un compte existe déjà. Si c'était vous, connectez-vous (ou demandez un nouveau mot de passe si vous l'avez oublié) :\n\n{lien}\n\nSinon, vous pouvez ignorer ce message : rien n'a été modifié."
+    }
+  }
+}

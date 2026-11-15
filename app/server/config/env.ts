@@ -89,6 +89,11 @@ const schemaEnv = z
     BREVO_API_KEY: z.preprocess(videEnAbsent, z.string().min(1).optional()),
     BREVO_SENDER_EMAIL: z.preprocess(videEnAbsent, z.email().optional()),
     BREVO_SENDER_NAME: z.preprocess(videEnAbsent, z.string().min(1).optional()),
+    // Adresse de l'API transactionnelle : ne se change que pour viser un faux serveur local (tests, développement).
+    BREVO_API_URL: z.preprocess(
+      videEnAbsent,
+      z.url({ protocol: /^https?$/, error: 'doit être une URL http(s) complète (ex. https://api.brevo.com/v3)' }).default('https://api.brevo.com/v3'),
+    ),
     ATTROUPE_REGISTRATION: z.preprocess(videEnAbsent, z.enum(['open', 'invite']).default('open')),
     ATTROUPE_IMMICH_ALLOW_PRIVATE: z.preprocess(videEnAbsent, booleen.default(false)),
     ATTROUPE_TRUST_PROXY: z.preprocess(videEnAbsent, z.coerce.number().int().min(0).default(1)),
@@ -112,6 +117,11 @@ const schemaEnv = z
         ctx.addIssue({ code: 'custom', path: [cle], message: `doit différer de ${doublon}` });
       }
     });
+
+    // La clé d'API voyage dans chaque appel : en production, jamais en clair sur le réseau.
+    if (env.NODE_ENV === 'production' && !env.BREVO_API_URL.startsWith('https:')) {
+      ctx.addIssue({ code: 'custom', path: ['BREVO_API_URL'], message: 'doit être en https en production' });
+    }
 
     // Brevo est optionnel, mais une clé d'API sans expéditeur ne peut rien envoyer.
     if (env.BREVO_API_KEY !== undefined && env.BREVO_SENDER_EMAIL === undefined) {

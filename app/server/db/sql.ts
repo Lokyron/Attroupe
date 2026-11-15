@@ -488,7 +488,8 @@ export function preparer(base: Base, texte: string): Requete {
 
 /**
  * Les SEULS textes SQL qui échappent à la garde : lectures qui, par nature, traversent les groupes
- * (« mes groupes » : memberships WHERE user_id = ?). Liste figée EN DUR (`Object.freeze` : un `push`
+ * (« mes groupes » : memberships WHERE user_id = ?) et la file d'e-mails `email_outbox`, globale et sans
+ * portée par nature. Liste figée EN DUR (`Object.freeze` : un `push`
  * lève une erreur à l'exécution) : un test la compare aux appels réels de `db/queries/transverse.ts`,
  * seul client de `preparerTransverse`, et l'ESLint interdit tout autre import. Il n'existe
  * volontairement AUCUNE option sur `preparer` pour y échapper. Une fonction transverse prend une
@@ -499,6 +500,17 @@ export const TEXTES_TRANSVERSES: readonly string[] = Object.freeze([
    FROM memberships AS m JOIN groups AS g ON g.id = m.group_id
    WHERE m.user_id = ? AND m.status = 'active' AND g.deleted_at IS NULL
    ORDER BY g.name, g.id`,
+  // File d'e-mails (lot 2) : table interne sans portée, lue par le seul service d'envoi (db/queries/transverse.ts).
+  `INSERT INTO email_outbox (id, to_email, template_key, payload_json, locale, status, attempts, next_attempt_at, created_at)
+   VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+  `SELECT id, to_email, template_key, payload_json, locale, attempts
+   FROM email_outbox WHERE status = 'pending' AND next_attempt_at <= ? ORDER BY next_attempt_at, id LIMIT ?`,
+  `UPDATE email_outbox SET next_attempt_at = ? WHERE id = ? AND status = 'pending'`,
+  `UPDATE email_outbox SET status = 'sent', sent_at = ?, provider_message_id = ?, payload_json = '{}', last_error = NULL
+   WHERE id = ? AND status = 'pending'`,
+  `UPDATE email_outbox SET status = ?, attempts = attempts + ?, next_attempt_at = ?, last_error = ?,
+   payload_json = CASE WHEN ? = 'pending' THEN payload_json ELSE '{}' END
+   WHERE id = ? AND status = 'pending'`,
 ]);
 
 /** Prépare un texte de `TEXTES_TRANSVERSES`, et rien d'autre. */

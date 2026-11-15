@@ -19,6 +19,7 @@ async function reglesDeclenchees(code: string, filePath: string): Promise<string
 const ROUTES = chemin('server', 'http', 'routes.ts');
 const INDEX = chemin('server', 'index.ts');
 const APPARTENANCE = chemin('server', 'http', 'middleware', 'appartenance.ts');
+const SESSION = chemin('server', 'http', 'middleware', 'session.ts');
 const QUERIES = chemin('server', 'db', 'queries', 'articles.ts');
 const TRANSVERSE = chemin('server', 'db', 'queries', 'transverse.ts');
 const SQL = chemin('server', 'db', 'sql.ts');
@@ -58,6 +59,9 @@ const BLOQUE: ReadonlyArray<[string, string, string]> = [
   ['creerScope par import()', "export const f = async () => await import('../db/scope.js');", ROUTES],
   ['creerScope ré-exporté', "export { creerScope } from '../db/scope.js';", ROUTES],
   ['creerPorteeUtilisateur depuis une route', "import { creerPorteeUtilisateur } from '../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", ROUTES],
+  ['creerScope depuis l’intergiciel de session (il ne fabrique que des portées de compte)', "import { creerScope } from '../../db/scope.js';\nexport default creerScope;", SESSION],
+  ['import() de creerPorteeUtilisateur depuis l’intergiciel de session', "export const f = async () => await import('../../db/portee-utilisateur.js');", SESSION],
+  ['preparer depuis l’intergiciel de session', "import { preparer } from '../../db/sql.js';\nexport default preparer;", SESSION],
   ['creerPorteeUtilisateur depuis index.ts', "import { creerPorteeUtilisateur } from './db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", INDEX],
   // Canal transverse et connexion brute, dans db/
   ['preparerTransverse hors de transverse.ts', "import { preparerTransverse } from '../sql.js';\nexport default preparerTransverse;", QUERIES],
@@ -83,6 +87,7 @@ describe('règles ESLint des verrous n° 2 et 5 (lot 1 corrigé)', () => {
   const AUTORISE: ReadonlyArray<[string, string, string]> = [
     ['db/migrate depuis index.ts', "import { fermer, ouvrirEtMigrer } from './db/migrate.js';\nexport default [fermer, ouvrirEtMigrer];", INDEX],
     ['creerScope depuis l’intergiciel d’appartenance', "import { creerScope } from '../../db/scope.js';\nexport default creerScope;", APPARTENANCE],
+    ['creerPorteeUtilisateur depuis l’intergiciel de session', "import { creerPorteeUtilisateur } from '../../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", SESSION],
     ['creerPorteeUtilisateur depuis l’intergiciel d’appartenance', "import { creerPorteeUtilisateur } from '../../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", APPARTENANCE],
     ['le type GroupScope depuis une route', "import type { GroupScope } from '../db/scope.js';\nexport type T = GroupScope;", ROUTES],
     ['le type Base (opaque) depuis une route', "import type { Base } from '../db/base.js';\nexport type T = Base;", ROUTES],
