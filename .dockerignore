@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+**/.env*
+!.env.example
+node_modules
+**/node_modules
+**/dist
+data
+*.log
+.DS_Store
+Dossier de conception
+Avancement du projet
+docs
+app/tests

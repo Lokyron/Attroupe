@@ -1,0 +1,43 @@
+# Dépendances
+node_modules/
+.pnp
+.pnp.js
+__pycache__/
+.venv/
+venv/
+
+# Build
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Environnement & secrets
+.env
+.env.*
+!.env.example
+
+# Données locales
+*.sqlite
+*.sqlite3
+*.db
+data/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Système
+.DS_Store
+Thumbs.db
+
+# Éditeurs
+.vscode/
+.idea/
+
+# Claude Code — on versionne les agents et settings.json,
+# pas les réglages locaux ni l'état de session
+.claude/settings.local.json
+.claude/state/

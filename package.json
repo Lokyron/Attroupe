@@ -1,0 +1,34 @@
+{
+  "name": "attroupe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Attroupe : organisateur auto-hébergé pour groupes d'amis",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "app/server",
+    "app/client"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc -p app/server --noEmit && tsc -p app/client --noEmit && tsc -p app/tests --noEmit",
+    "test": "vitest run",
+    "build": "npm run build -w app/server -w app/client",
+    "dev": "npm run dev -w app/server & npm run dev -w app/client & wait",
+    "start": "node --enable-source-maps --env-file-if-exists=.env app/server/dist/index.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.2",
+    "@types/supertest": "^7.2.1",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
+    "supertest": "^7.3.2",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
+  }
+}

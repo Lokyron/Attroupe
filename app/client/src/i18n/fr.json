@@ -1,0 +1,9 @@
+{
+  "app.nom": "Attroupe",
+  "app.accroche": "Attrouper les potes, sans prise de tête.",
+  "sante.titre": "État du serveur",
+  "sante.chargement": "Vérification en cours…",
+  "sante.ok": "Le serveur répond.",
+  "sante.version": "Version {version}",
+  "sante.erreur": "Le serveur ne répond pas."
+}

@@ -1,0 +1,131 @@
+# Avancement — Attroupe
+
+> Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
+> pas ce qui est prévu (le prévu vit dans le dossier de conception).
+
+## 2026-11-15 — Lot 0 : le squelette du dépôt
+
+- Domaine **attroupe.fr acheté**.
+- Premier code du projet : espaces de travail npm (`app/server`, `app/client`), TypeScript
+  strict, ESLint en configuration plate, Vitest, `Dockerfile` multi-étapes,
+  `docker-compose.yml`, `.env.example`, et les deux workflows (`ci.yml`, `image.yml`).
+- **Vérifié par l'orchestrateur, en exécutant** : `lint`, `typecheck`, `build` et `test`
+  (5 fichiers, 23 tests) passent ; le serveur démarre et `/api/sante` renvoie
+  `200 {"status":"ok","version":"0.1.0"}` ; `/` sert le client ; `/api/inexistant` renvoie un
+  404 en JSON ; la validation de l'environnement refuse de démarrer sans clé et liste tous les
+  problèmes d'un coup, en français. `npm audit --omit=dev` : **0 vulnérabilité en production**
+  (les 7 « moderate » sont dans l'outillage de développement).
+- **Verrou n° 4 du cloisonnement en place** : une règle ESLint interdit d'importer
+  `db/connection` — et les bibliothèques SQLite, par l'ADR-0008 — ailleurs que dans
+  `app/server/db/`. Le `dev` l'a prouvée en la faisant mordre sur un fichier d'essai, supprimé
+  depuis.
+- **Conteneur vérifié** (Docker installé en cours de séance) : image construite
+  (`docker build`, 376 Mo), conteneur démarré, `/api/sante` répond `200` depuis l'hôte, la page
+  d'accueil est servie, le processus tourne bien en **non root** (`uid=1000(node)`) et le
+  `HEALTHCHECK` passe à **healthy**. Construction multi-étapes conforme : `node:24-bookworm`
+  pour la construction, `npm prune --omit=dev`, `node:24-bookworm-slim` à l'exécution,
+  22 Mo d'application et de dépendances de production dans l'image finale.
+- **Reste non vérifié** : les deux workflows GitHub (`ci.yml`, `image.yml`), qui ne peuvent
+  l'être qu'à la première poussée, et le `docker compose up` tel quel — le compose tire l'image
+  publiée sur GHCR, qui n'existe pas encore.
+### Revue du lot 0 : verdict **bloquant**, puis corrigé
+
+Le `reviewer` (Opus 5.5) a rendu trois bloquants et seize points secondaires. Trois trouvailles
+ont été re-vérifiées par l'orchestrateur avant correction, et tout a été re-vérifié après.
+
+| Trouvaille | État |
+|---|---|
+| **Verrou ESLint contournable de onze façons** — dont un simple fichier-baril `db/index.ts` qui ré-exporte `connection.js`, écrit par réflexe au lot 1, faisait disparaître le verrou en silence | corrigé : motifs `regex`, extensions `mts`/`cts`/`js`/`mjs`/`cjs`, `no-restricted-syntax` contre les `import()` non littéraux, `require`, `createRequire` et **tout ré-export de `connection`, y compris dans `db/`** |
+| **Validation acceptant des secrets factices** (`aaaa…`, trois secrets identiques, 32 octets nuls, valeurs contenant « remplacer ») | corrigé : base64 canonique, au moins 16 octets distincts sur 32, trois secrets deux à deux différents, mots interdits |
+| **Jeton GHCR en écriture exposé** au job qui lance `npm ci` et les tests, et écrit dans `.git/config` par `actions/checkout` : un `postinstall` malveillant aurait pu publier une image piégée sur `:latest` | corrigé : `contents: read` au niveau du workflow, `packages: write` sur le seul job de publication, `persist-credentials: false` |
+| **URL de base acceptant n'importe quel schéma** : `localhost:3000` et `javascript:alert(1)` passaient, alors qu'elle sert à fabriquer les liens des e-mails | corrigé : `http(s)` seulement, `https` imposé en production, ni chemin ni requête ni fragment |
+| **Erreur d'écoute avalée** : port occupé → « à l'écoute » affiché puis sortie avec le code **0** | corrigé : message explicite et code 1 |
+| Retour arrière impossible (seules `latest` et `beta` publiées) | corrigé : étiquettes `sha-<court>` et version, plus `concurrency` |
+| Dossier de données non inscriptible au lot 1 | corrigé : refus au démarrage avec le `chown` à faire, documenté en section 5 |
+| Test anti-bancaire trompable (`\b` traite `_` comme une lettre) | corrigé : sous-chaînes, `card`, `payment`, `account_number`, parcours des migrations |
+| Pas d'en-têtes de sécurité, `HEALTHCHECK` codé en dur sur 3000, statuts écrasés en 500, messages Zod en anglais, texte en dur possible dans le JSX, `react` en dépendance de production, `.dockerignore` incomplet, liaison sur `0.0.0.0` | tous corrigés |
+
+**Vérifications indépendantes de l'orchestrateur après correction** :
+- `lint`, `typecheck`, `build` et `test` passent — **102 tests** (23 avant la revue).
+- **Huit contournements du verrou écrits à la main** sont tous bloqués par ESLint, fichier-baril
+  compris ; et les deux cas légitimes (`better-sqlite3` dans `db/connection.ts`, un import
+  ordinaire) passent — un verrou qui crie au loup serait désactivé au premier agacement.
+- **Onze configurations piégées** se comportent toutes comme attendu, dont la nuance
+  `http://` refusé en production mais accepté en développement.
+- **`.env.example` copié tel quel ne démarre pas** : trois refus « doit être du base64 canonique
+  (openssl rand -base64 32) », code de sortie 1. Le défaut est clos de bout en bout.
+- Port déjà occupé : « Impossible d'écouter : le port 3999 est déjà utilisé. », code 1.
+- Image reconstruite, conteneur lancé avec `PORT=4000` : `/api/sante` répond 200, les trois
+  en-têtes de sécurité sont là (`frame-ancestors 'none'`), et le `HEALTHCHECK` suit bien le port.
+
+- `.claude/settings.json` : la règle de refus `Read(./.env.*)`, trop large, bloquait
+  `.env.example` — un fichier public. Restreinte, sur accord explicite, aux fichiers qui portent
+  de vrais secrets (`.env`, `.env.local`, `.env.production`, `app/server/.env`) : la protection
+  est désormais plus étroite **et** plus complète, le joker ne couvrant même pas
+  `app/server/.env`.
+- **Limite connue** : un ré-export indirect en deux temps (`import {db} from './connection'`
+  puis `export {db}`) dans `db/` échappe encore à ESLint. À surveiller en revue au lot 1.
+- Versions retenues : TypeScript 6.0 (contrainte de `typescript-eslint`), Express 5.3, Zod 4.6,
+  Vite 8.3, Vitest 5.1, React 19.3, ESLint 10. Node 24 dans l'image et l'intégration continue,
+  conformément à l'ADR-0001 (la machine de développement tourne en Node 26).
+
+## 2026-11-15 — Conception de la V1 écrite
+
+- **Modèle de données complet** : `Dossier de conception/03 - Modele de donnees.md`, 33 tables,
+  40 index, toutes en `STRICT`. **Migration initiale rejouée et vérifiée indépendamment** sur
+  SQLite 3.54 : elle passe sur une base neuve.
+- **Architecture** : `Dossier de conception/04 - Architecture.md` — structure du dépôt, surface
+  d'API de la V1, les trois intégrations (iCal, Immich, Brevo), stratégie de tests, conteneur,
+  et découpage de l'implémentation en lots.
+- Trois ADR de plus : `ADR-0006` cloisonnement structurel (cinq verrous), `ADR-0007`
+  authentification (session opaque hachée, `scrypt`, Google purement additif en V2),
+  `ADR-0008` bibliothèque SQLite (`better-sqlite3`, **encore à l'état de proposition**).
+- **Cloisonnement vérifié dans les faits** : les clés étrangères composites `(id, group_id)`
+  font refuser l'écriture croisée par la base elle-même. Trois essais joués à la main sur la
+  base de test : un article du groupe B greffé sur une liste du groupe A → rejeté ; un membre
+  du groupe B qui réclame un article du groupe A → rejeté ; l'écriture légitime → acceptée.
+- **Le projet s'appelle désormais Attroupe.** « Rameute » a été abandonné : `rameute.fr` sert
+  déjà un site intitulé « Rameute » (enregistré le 22 octobre 2026) et `rameute.com` a été pris
+  le 12 novembre 2026. Quatre candidats ont été vérifiés (domaines, site vivant, dépôts
+  GitHub) ; **Attroupe** est le seul libre partout — `.fr`, `.com`, `.io`, aucun dépôt, aucun
+  compte GitHub, aucun site. Dossier renommé, documentation reprise (53 remplacements).
+- Restent ouverts : le nom et donc le sous-domaine (bloquant avant le lot 2), GPL ou AGPL,
+  le journal d'audit en V1 ou en V2, et le statut de `node:sqlite` sur Node 24.
+
+## 2026-11-15 — Cadrage terminé
+
+- Nom retenu ce jour-là : « Rameute », remplacé depuis par **Attroupe** (voir l'entrée du
+  dessus). *ACB* reste le nom de code interne et le clin d'œil dans l'interface.
+- Décisions actées : Immich **hors de la pile**, branché par API et configuré par groupe
+  (`ADR-0003`) ; dépenses **multi-devises sans aucun flux bancaire** (`ADR-0004`) ;
+  déploiement en **deux conteneurs LXC 112 (prod) et 113 (beta)** sur images GHCR, mise à jour
+  à la main (`ADR-0005`).
+- Inscription ouverte, ajout d'un membre existant par nom d'utilisateur ou e-mail exact via une
+  invitation à accepter. E-mails par Brevo (compte personnel à créer). Interface en français.
+- Licence posée à la racine (`LICENSE`) : GPL-3.0 d'abord, **remplacée par l'AGPL-3.0** avant la
+  première publication — c'est l'AGPL qui couvre une application servie par le réseau.
+- Restent ouverts : sous-domaine, disponibilité du nom, ressources des conteneurs, liste finale
+  des devises.
+- **Prochaine étape : modèle de données et architecture de la V1.**
+
+## 2026-11-15 — Amorçage du projet
+
+- Arborescence créée : `app/`, `docs/`, `Dossier de conception/`, `Avancement du projet/`.
+- Système d'agents mis en place : six sous-agents dans `.claude/agents/`
+  (`explorateur`, `scraper`, `utilitaire`, `dev`, `reviewer`, `architecte`),
+  règles de routage dans `docs/AGENTS.md`, règles de travail dans `CLAUDE.md`.
+- Dépôt git propre initialisé sur `main` (le dossier dépendait jusque-là du dépôt
+  « Projet DEV », d'où la branche `sna-refonte-maquettes` affichée par erreur).
+- Premier brief recueilli : organisateur pour un groupe d'amis (planning, soirées, listes de
+  courses, albums photos par e-mail), auto-hébergé, Docker en une commande, mise à jour depuis
+  l'interface, dépôt GitHub public.
+- Rédigé : `Dossier de conception/00 - Vision.md` et `01 - Fonctionnalites proposees.md`
+  (43 fonctionnalités proposées, à trier par jalon).
+- Cadrage tranché : stack Node 24 + Express + SQLite + React/Vite en mono-conteneur
+  (`ADR-0001`), plusieurs groupes étanches sur une instance (`ADR-0002`), périmètre de la V1
+  arrêté dans `Dossier de conception/02 - Perimetre et jalons.md`. Les photos passeront par
+  Immich, le mode d'intégration restant à arbitrer (`ADR-0003`).
+- Mise à jour depuis l'interface **abandonnée** : images construites par l'intégration
+  continue, `docker compose pull` lancé à la main, deux canaux (`main` et `beta`).
+- Restent ouverts : nom du produit, intégration Immich, politique d'inscription, service SMTP,
+  numéro du conteneur LXC, licence.

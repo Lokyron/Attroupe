@@ -1,0 +1,27 @@
+# Installation et mise à jour (ADR-0005) :
+#   docker compose pull && docker compose up -d
+# Le même fichier sert la production (ATTROUPE_TAG=latest) et la pré-production (beta).
+services:
+  attroupe:
+    image: ghcr.io/lokyron/attroupe:${ATTROUPE_TAG:-latest}
+    container_name: attroupe
+    restart: unless-stopped
+    ports:
+      # Liaison locale par défaut : la confiance au proxy (ATTROUPE_TRUST_PROXY=1) suppose qu'un
+      # proxy inverse est seul à joindre le conteneur. Sinon un client forgerait X-Forwarded-For.
+      - "${ATTROUPE_BIND:-127.0.0.1}:${ATTROUPE_PORT:-3000}:3000"
+    env_file: .env
+    volumes:
+      # base SQLite (+ -wal, -shm) et fichiers déposés. Préparer : mkdir data && chown 1000:1000 data
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/sante').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: false # /data doit rester inscriptible
