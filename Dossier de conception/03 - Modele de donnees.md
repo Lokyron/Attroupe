@@ -306,11 +306,18 @@ Index : `idx_personal_events_user (user_id, starts_at)`.
 | Colonne | Type | Contraintes | Rôle |
 |---|---|---|---|
 | `personal_event_id` | TEXT | NOT NULL → `personal_events(id)` ON DELETE CASCADE | Cascade acceptée : un partage n'a pas de valeur historique. |
-| `group_id` | TEXT | NOT NULL → `groups(id)` | **C'est cette colonne que la couche d'accès filtre.** |
+| `membership_id` | TEXT | NOT NULL | L'appartenance de **l'auteur du partage** dans ce groupe. |
+| `group_id` | TEXT | NOT NULL → `groups(id)` | **C'est cette colonne que la couche d'accès filtre** : `personal_event_shares` fait partie du `GroupScope`. |
 | `visibility` | TEXT | NOT NULL, `CHECK (visibility IN ('busy','details'))` | `busy` : le serveur ne renvoie que l'intervalle et le libellé traduit « Occupé ». `details` : titre et lieu. |
 | `created_at` | TEXT | NOT NULL | |
 
-**PK `(personal_event_id, group_id)`**. Index `idx_pes_group (group_id, visibility)`.
+**PK `(personal_event_id, group_id)`**. **Clé étrangère composite `(membership_id, group_id)` →
+`memberships(id, group_id)`** : on ne peut pas publier un créneau vers un groupe dont on n'est pas
+membre, ni usurper l'appartenance d'un autre. Une appartenance qui prend fin (`left`, `removed`)
+ne supprime pas la ligne (§4.4) : la projection « occupé » ne retient que les appartenances
+`active`. Le fait que le créneau appartienne bien à l'auteur du partage n'est pas exprimable en
+clé étrangère : la couche d'accès le vérifie à l'insertion (`personal_events.user_id` = auteur).
+Index `idx_pes_group (group_id, visibility)`.
 
 **Décision** : le niveau de visibilité vit sur le **partage**, pas sur l'événement. Motif :
 quelqu'un accepte volontiers de montrer « Dîner chez les parents » à la bande et seulement
@@ -319,7 +326,9 @@ quelqu'un accepte volontiers de montrer « Dîner chez les parents » à la band
 automatiquement à la création d'un créneau, pour que personne n'ait à cocher quatre cases.
 
 > **Garde-fou côté serveur** : la projection « occupé » est faite **en SQL**, par une requête
-> dédiée qui ne sélectionne pas les colonnes de texte quand `visibility = 'busy'`. On ne
+> dédiée (`GroupScope.creneauxOccupes`) qui ne sélectionne jamais les colonnes de texte de
+> `personal_events`. La garde du SQL brut n'admet une lecture de `personal_events` que par
+> `user_id = ?` (son propre agenda, `PorteeUtilisateur`) ou par jointure avec les partages du groupe. On ne
 > charge pas l'objet complet pour le masquer ensuite : une fuite d'affichage serait alors à
 > un oubli de `delete obj.title` de distance.
 >
@@ -626,6 +635,12 @@ pas source de vérité** : Immich reste maître.
 
 Index : `idx_feeds_user (user_id, revoked_at)`.
 
+> **Création d'un jeton** : la `PorteeUtilisateur` n'accepte un `group_id` non nul que si le compte
+> est **membre actif** de ce groupe (la clé étrangère seule ne l'impose pas), et ne le laisse plus
+> modifier ensuite. **Le lot 5 devra revérifier l'appartenance active à chaque service du flux** : un
+> jeton créé avant un départ ne doit pas continuer à servir. Même contrôle sur
+> `notification_preferences.group_id` (`'*'` ou groupe dont on est membre actif).
+>
 > `group_id` est **nullable** ici, et c'est une entorse apparente à la règle 1. Elle est sûre
 > parce que la résolution du contenu du flux ne lit jamais « les événements du groupe X » mais
 > « les événements des groupes où `memberships.status = 'active'` pour ce `user_id` » : le
@@ -835,8 +850,8 @@ Rien dans le code ne suppose « 2 décimales » ni « diviser par 100 ».
 
 ## 5. Migration initiale
 
-Contenu destiné à `app/migrations/0001_socle.sql` — **à écrire lors du lot 1 de
-l'implémentation, pas maintenant**. Elle est idempotente par construction (`IF NOT EXISTS`
+Contenu de `app/migrations/0001_socle.sql` (lot 1, **corrigé après revue avant tout déploiement** : le fichier n'a
+jamais été joué ailleurs que sur des bases de test, d'où la possibilité de modifier des contraintes). Elle est idempotente par construction (`IF NOT EXISTS`
 partout) comme l'exige l'[`ADR-0005`](../docs/decisions/ADR-0005-deploiement.md), et jouée au
 démarrage du conteneur.
 
@@ -1051,6 +1066,7 @@ CREATE TABLE IF NOT EXISTS date_polls (
   deleted_at                TEXT,
   CHECK (status IN ('open', 'closed', 'converted', 'cancelled')),
   FOREIGN KEY (created_by_membership_id, group_id) REFERENCES memberships (id, group_id),
+  FOREIGN KEY (resulting_event_id, group_id)       REFERENCES events (id, group_id),  -- events est créée plus bas : SQLite l'accepte
   UNIQUE (id, group_id)
 ) STRICT;
 
@@ -1137,9 +1153,8 @@ CREATE TABLE IF NOT EXISTS event_attendances (
 
 CREATE INDEX IF NOT EXISTS idx_attendances_membership ON event_attendances (group_id, membership_id);
 
--- resulting_event_id ne peut être contraint qu'ici, events étant créée après date_polls.
--- SQLite ne permet pas d'ajouter une FK à une table existante : la colonne reste donc
--- vérifiée par la couche d'accès (même transaction que la conversion du sondage).
+-- resulting_event_id est contraint par la clé étrangère composite de date_polls (circulaire avec
+-- events.source_date_poll_id, ce que SQLite accepte) ; l'index sert la jointure inverse.
 CREATE INDEX IF NOT EXISTS idx_polls_event ON date_polls (group_id, resulting_event_id);
 
 CREATE TABLE IF NOT EXISTS date_poll_options (
@@ -1153,10 +1168,10 @@ CREATE TABLE IF NOT EXISTS date_poll_options (
   created_at    TEXT NOT NULL,
   CHECK (all_day IN (0, 1)),
   CHECK (
-    (all_day = 0 AND length(starts_at) = 20)
+    (all_day = 0 AND length(starts_at) = 20 AND substr(starts_at, 20, 1) = 'Z')
     OR (all_day = 1 AND length(starts_at) = 10)
   ),
-  CHECK (ends_at IS NULL OR ends_at >= starts_at),
+  CHECK (ends_at IS NULL OR (length(ends_at) = length(starts_at) AND ends_at >= starts_at)),
   UNIQUE (date_poll_id, starts_at, ends_at),
   FOREIGN KEY (date_poll_id, group_id) REFERENCES date_polls (id, group_id),
   UNIQUE (id, group_id)
@@ -1199,21 +1214,23 @@ CREATE TABLE IF NOT EXISTS personal_events (
   deleted_at       TEXT,
   CHECK (all_day IN (0, 1)),
   CHECK (
-    (all_day = 0 AND length(starts_at) = 20)
+    (all_day = 0 AND length(starts_at) = 20 AND substr(starts_at, 20, 1) = 'Z')
     OR (all_day = 1 AND length(starts_at) = 10)
   ),
-  CHECK (ends_at IS NULL OR ends_at >= starts_at)
+  CHECK (ends_at IS NULL OR (length(ends_at) = length(starts_at) AND ends_at >= starts_at))
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_personal_events_user ON personal_events (user_id, starts_at);
 
 CREATE TABLE IF NOT EXISTS personal_event_shares (
   personal_event_id  TEXT NOT NULL REFERENCES personal_events (id) ON DELETE CASCADE,
+  membership_id      TEXT NOT NULL,
   group_id           TEXT NOT NULL REFERENCES groups (id),
   visibility         TEXT NOT NULL,
   created_at         TEXT NOT NULL,
   PRIMARY KEY (personal_event_id, group_id),
-  CHECK (visibility IN ('busy', 'details'))
+  CHECK (visibility IN ('busy', 'details')),
+  FOREIGN KEY (membership_id, group_id) REFERENCES memberships (id, group_id)
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_pes_group ON personal_event_shares (group_id, visibility);
@@ -1622,30 +1639,41 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON email_outbox (status, next_atte
 
 ### 5.1 Ce fichier a été exécuté
 
-Le SQL ci-dessus a été joué tel quel sur **SQLite 3.54** avant d'être consigné ici : 33 tables
-créées, `PRAGMA integrity_check` à `ok`, relance du fichier sans erreur (idempotence), et sept
-tentatives d'écriture illégitimes **refusées par la base** :
+Le SQL ci-dessus est celui du fichier `app/migrations/0001_socle.sql`, **identique** au
+caractère près (un test de la suite le compare, et la revue le compare par `diff`). Il a été joué
+sur **SQLite 3.54** : 33 tables créées, 40 index, `PRAGMA integrity_check` à `ok`, relance du
+fichier sans erreur (idempotence), et des tentatives d'écriture illégitimes **refusées par la
+base** :
 
 | Tentative | Refusée par |
 |---|---|
 | Rattacher un article du groupe B à une liste du groupe A | clé étrangère composite |
 | Enregistrer la présence d'un membre de B à un événement de A | clé étrangère composite |
 | Un événement « journée entière » portant un instant UTC | `CHECK` de format de date |
+| Un instant sans `Z` final (`2026-12-01T20:00:00+`) dans `events`, `personal_events`, `date_poll_options` | `CHECK` de format de date |
+| Une fin dont la longueur diffère du début, dans ces trois tables | `CHECK` de format de date |
 | Une dépense EUR→EUR avec un taux différent de 1 | `CHECK` de cohérence du taux |
 | Passer une appartenance à `removed` sans `ended_at` | `CHECK` croisé statut/date |
 | Deux invitations en attente pour la même personne dans le même groupe | index unique partiel |
+| Un sondage de A pointant vers un événement de B (`resulting_event_id`) | clé étrangère composite |
+| Publier un créneau d'agenda vers un groupe dont on n'est pas membre | clé étrangère composite |
 | Une dépense JPY→EUR correctement formée | *acceptée* (contrôle négatif) |
+
+La règle « toute clé étrangère vers un parent à groupe est composite » n'est plus vérifiée par une
+liste d'exemples : un test la dérive de `pragma_foreign_key_list`, donc une migration future qui
+l'enfreindrait est refusée.
 
 ### 5.2 Deux remarques sur ce fichier
 
 - **`PRAGMA foreign_keys` n'est pas persistant.** Le démarrage lit `PRAGMA foreign_keys;` et
   **refuse de servir** si la réponse n'est pas `1` : sans cela, les clés étrangères composites
   du §4.1 — c'est-à-dire la moitié du cloisonnement — seraient décoratives.
-- **`date_polls.resulting_event_id` n'a pas de clé étrangère**, parce que `date_polls` est
-  créée avant `events` (dépendance circulaire) et que SQLite ne sait pas ajouter une contrainte
-  à une table existante. Le lien est garanti par la transaction de conversion du sondage, et
-  vérifié par la commande de contrôle d'intégrité ci-dessous. C'est la seule entorse du schéma,
-  elle est sans conséquence sur le cloisonnement (`date_polls` porte son `group_id`).
+- **`date_polls.resulting_event_id` a sa clé étrangère composite** vers `events (id, group_id)`,
+  bien que `date_polls` soit créée avant `events` et que `events.source_date_poll_id` pointe en
+  retour vers `date_polls` : SQLite accepte une référence vers une table créée plus loin, y compris
+  circulaire (la table cible n'est résolue qu'à l'écriture). La conversion d'un sondage s'écrit
+  donc dans une transaction : création de l'événement avec `source_date_poll_id`, puis
+  `resulting_event_id` du sondage. Un sondage ne peut plus pointer vers l'événement d'un autre groupe.
 
 ## 6. Requêtes de référence
 

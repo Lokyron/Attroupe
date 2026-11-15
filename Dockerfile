@@ -16,6 +16,7 @@ RUN npm ci
 
 COPY app/server app/server
 COPY app/client app/client
+COPY app/migrations app/migrations
 RUN npm run build
 
 # Dépendances de production seules, pour l'image finale.
@@ -43,6 +44,8 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/app/server/package.json ./app/server/package.json
 COPY --from=build /app/app/server/dist ./app/server/dist
 COPY --from=build /app/app/client/dist ./app/client/dist
+# Migrations SQL lues au démarrage par db/migrate.ts (dossier voisin de app/server).
+COPY --from=build /app/app/migrations ./app/migrations
 
 # Le dossier de données appartient à l'utilisateur non root. Avec un volume monté depuis
 # l'hôte (./data), c'est le dossier de l'hôte qui compte : le serveur refuse de démarrer

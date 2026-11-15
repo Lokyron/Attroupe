@@ -29,7 +29,11 @@ a été **écartée** au profit d'un `docker compose pull` manuel (voir
 
 Node 24, Express, SQLite (`better-sqlite3`, voir
 [`ADR-0008`](docs/decisions/ADR-0008-bibliotheque-sqlite.md)), React + Vite, TypeScript strict,
-SQL explicite sans ORM. Validation par Zod, tests par Vitest + Supertest, temps réel par
+SQL explicite sans ORM. Accès à la base par `better-sqlite3` ^13 (ADR-0008 **Acceptée** au
+lot 1 : `node:sqlite` est encore en *release candidate* sur Node 24, même s'il sait désormais
+sauvegarder ; binaires fournis pour linux-x64 et linux-arm64), confiné à `app/server/db/connection.ts`.
+Migrations SQL dans `app/migrations/` (suivies par checksum, sauvegarde `VACUUM INTO` avant
+toute migration sur une base existante). Validation par Zod, tests par Vitest + Supertest, temps réel par
 événements serveur (SSE). Un seul conteneur
 ([`ADR-0001`](docs/decisions/ADR-0001-stack-technique.md)).
 
@@ -89,6 +93,14 @@ cp .env.example .env   # puis remplir les clés (trois secrets : openssl rand -b
 docker compose pull && docker compose up -d
 ```
 
+**Le dossier de données doit être un disque local.** La base passe en mode WAL au démarrage
+(`PRAGMA journal_mode = WAL`, relu et vérifié). Sur un volume réseau (NFS, SMB/CIFS), SQLite ne
+sait pas le faire : le serveur **refuse alors de démarrer**, avec un message qui le dit. C'est
+volontaire (sans WAL, ni la sauvegarde à chaud ni la concurrence ne tiennent) ; ne contournez pas
+l'échec, montez `./data` depuis un disque local. Deux conteneurs qui démarrent ensemble sur le même
+volume ne se gênent pas : le passage en WAL est réessayé et chaque migration est relue sous
+verrou d'écriture avant d'être jouée.
+
 Le port est publié sur `127.0.0.1` par défaut (`ATTROUPE_BIND`, `ATTROUPE_PORT`) : seul un
 proxy inverse local doit joindre le conteneur, car la confiance à `X-Forwarded-For` est
 active (`ATTROUPE_TRUST_PROXY=1`). Retour arrière : relancer avec `ATTROUPE_TAG=sha-<court>`
@@ -108,8 +120,15 @@ au fur et à mesure de l'implémentation, une ligne par endpoint réellement liv
 
 - Modèle de données et architecture : **écrits** (`03` et `04` du dossier de conception) ;
   l'implémentation n'a pas commencé. Le découpage en 13 lots est au §10 de `04`.
-- `ADR-0008` est en statut **Proposée** : le statut de `node:sqlite` sur Node 24 et les binaires
-  précompilés de `better-sqlite3` restent à vérifier au premier lot.
+- `ADR-0008` est **Acceptée** (lot 1). À revoir quand `node:sqlite` passera en « Stable ».
+- Lot 1 livré, puis corrigé après revue : `app/server/db/` (`base` : connexion opaque, `connection`,
+  `migrate`, `moteur`, `scope` : GroupScope, `portee-utilisateur`, `sql` : garde du SQL brut,
+  `identifiant` : UUID v7, `queries/transverse`) et `0001_socle.sql`. Les filtres sont des listes
+  `{ colonne, operateur, valeur }` (plus de clause SQL en chaîne libre) ; la connexion n'est pas
+  utilisable hors de `db/` ; `creerScope(base, userId, groupId)` relit l'appartenance en base.
+  Aucune route ne s'en sert encore (lots 2 et 3). Le serveur ouvre et migre
+  `$ATTROUPE_DATA_DIR/attroupe.sqlite` au démarrage ; une migration modifiée après coup, ou un
+  `PRAGMA foreign_keys` inactif, font échouer le démarrage.
 - Le cloisonnement entre groupes est le risque numéro un du projet : il se traite par des
   tests dédiés, route par route (voir `ADR-0002`).
 - L'ajout d'un membre par son nom d'utilisateur ou son e-mail est une surface d'abus : l'ajout

@@ -8,6 +8,8 @@ import ts from 'typescript';
 export const RACINE_APP = join(import.meta.dirname, '..', '..');
 export const DOSSIER_DB = join(RACINE_APP, 'server', 'db') + sep;
 const CONNECTION_SANS_EXTENSION = join(RACINE_APP, 'server', 'db', 'connection');
+/** Seul fichier de test autorisé à importer db/connection (voir eslint.config.js) : il rend la vraie connexion aux tests. */
+export const FIXTURE_BRUT = join(RACINE_APP, 'tests', 'fixtures', 'brut.ts');
 const BIBLIOTHEQUES_SQL = /^(better-)?sqlite3?(\/|$)|^node:sqlite$/;
 const EXTENSION = /\.(d\.)?[cm]?[jt]sx?$/;
 
@@ -37,6 +39,7 @@ export function violationsDuVerrou(code: string, fichier: string): string[] {
   const source = ts.createSourceFile(fichier, code, ts.ScriptTarget.ES2023, true);
   const dansDb = fichier.startsWith(DOSSIER_DB);
   const estConnection = resolve(fichier).replace(EXTENSION, '') === CONNECTION_SANS_EXTENSION;
+  const estFixtureBrut = resolve(fichier) === FIXTURE_BRUT;
   const violations: string[] = [];
 
   const signaler = (noeud: ts.Node, message: string): void => {
@@ -49,7 +52,7 @@ export function violationsDuVerrou(code: string, fichier: string): string[] {
     if (estBibliothequeSql(specificateur, resolu) && !estConnection) {
       signaler(noeud, `bibliothèque SQLite « ${specificateur} » hors de db/connection.ts`);
     }
-    if (resolu === CONNECTION_SANS_EXTENSION && (!dansDb || reexport)) {
+    if (resolu === CONNECTION_SANS_EXTENSION && (!dansDb || reexport) && !(estFixtureBrut && !reexport)) {
       signaler(noeud, `« ${specificateur} » mène à db/connection${reexport ? ' (ré-export interdit)' : ''}`);
     }
   };

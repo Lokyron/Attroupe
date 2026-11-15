@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DOSSIER_DB, RACINE_APP, violationsDuVerrou } from '../fixtures/verrou-db.js';
+import { DOSSIER_DB, FIXTURE_BRUT, RACINE_APP, violationsDuVerrou } from '../fixtures/verrou-db.js';
 
 // Filet de sécurité de la règle ESLint (verrou n° 5, architecture §4) : même si la
 // configuration du linter dérivait, ce test échouerait. Il s'appuie sur le compilateur
@@ -60,6 +60,14 @@ describe('verrou n° 5 : seul app/server/db/ parle à la base', () => {
 
     it.each(cas)('%s', (_nom, code, fichier) => {
       expect(violationsDuVerrou(code, fichier)).not.toEqual([]);
+    });
+
+    it('la fixture brut.ts est la seule exception côté tests', () => {
+      const import_ = "import { connexionBrute } from '../../server/db/connection.js';";
+      expect(violationsDuVerrou(import_, FIXTURE_BRUT)).toEqual([]);
+      expect(violationsDuVerrou(import_, join(RACINE_APP, 'tests', 'fixtures', 'base.ts'))).not.toEqual([]);
+      expect(violationsDuVerrou("export { connexionBrute } from '../../server/db/connection.js';", FIXTURE_BRUT)).not.toEqual([]);
+      expect(violationsDuVerrou("import Database from 'better-sqlite3';", FIXTURE_BRUT)).not.toEqual([]);
     });
 
     it('laisse passer l’usage légitime dans db/', () => {

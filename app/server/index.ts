@@ -1,12 +1,16 @@
+import { join } from 'node:path';
 import { verifierDossierDonnees } from './config/donnees.js';
 import { chargerEnv, ErreurConfiguration } from './config/env.js';
 import { dossierClient, version } from './config/paquet.js';
+import { fermer, ouvrirEtMigrer } from './db/migrate.js';
 import { creerApp } from './http/app.js';
 
-// Amorçage : env → (base → migrations : lot 1) → routes → écoute.
+// Amorçage : env → base → migrations → routes → écoute.
 function demarrer(): void {
   const env = chargerEnv();
   verifierDossierDonnees(env.ATTROUPE_DATA_DIR);
+  // Les routes (lots 2 et 3) recevront cette connexion, un « Base » opaque sans méthode ; le démarrage échoue si PRAGMA ou migrations échouent.
+  const base = ouvrirEtMigrer(join(env.ATTROUPE_DATA_DIR, 'attroupe.sqlite'));
   const app = creerApp({
     env,
     version,
@@ -31,7 +35,10 @@ function demarrer(): void {
 
   // Arrêt propre sur le signal de Docker : on finit les requêtes en cours.
   const arreter = (): void => {
-    serveur.close(() => process.exit(0));
+    serveur.close(() => {
+      fermer(base);
+      process.exit(0);
+    });
   };
   process.on('SIGTERM', arreter);
   process.on('SIGINT', arreter);

@@ -184,19 +184,46 @@ export interface GroupScope {
   readonly groupId: string;
   readonly membershipId: string;
   readonly role: 'admin' | 'member';
-  /** Ajoute group_id = ? et deleted_at IS NULL, puis exécute. */
-  readonly tous: <T>(table: TableMetier, where: Clause, params: Params) => T[];
-  readonly un: <T>(table: TableMetier, id: string) => T | undefined;
-  readonly inserer: (table: TableMetier, valeurs: Valeurs) => void;
-  // …
+  readonly groupe: <T>() => T | undefined;           // SA ligne `groups`, et aucune autre
+  readonly tous: <T>(table: TableMetier, filtres?: readonly Condition[], options?: OptionsLecture) => T[];
+  readonly un: <T>(table: TableAvecId, id: string) => T | undefined;
+  readonly inserer: (table, valeurs) => string;      // pose group_id, auteur, horodatages, id (UUID v7)
+  readonly modifier / modifierPar / upsert / supprimerDoux / supprimer / transaction;
+  readonly creneauxOccupes: (entre?) => CreneauOccupe[];  // projection « occupé », sans titre
 }
 
-/** Seul l'intergiciel d'appartenance appelle cette fonction. */
-export function creerScope(appartenance: LigneAppartenance): GroupScope { /* … */ }
+/** Lit l'appartenance ACTIVE en base ; lève ErreurAppartenance sinon. Seul l'intergiciel l'appelle. */
+export function creerScope(base: Base, userId: string, groupId: string): GroupScope { /* … */ }
 ```
 
-Le symbole de marque rend l'objet **non falsifiable** : on ne peut pas passer
-`{ groupId: 'gB' }` à une fonction de requête. Et surtout :
+Le dispositif tient en six points :
+
+1. **Le symbole de marque** rend l'objet non falsifiable : `{ groupId: 'gB' }` n'est pas un
+   `GroupScope` pour le compilateur.
+2. **`creerScope` ne croit rien.** Elle reçoit `(userId, groupId)`, lit `memberships` avec
+   `status = 'active'` et refuse (`ErreurAppartenance`, que l'intergiciel traduit en 404) si la
+   ligne n'existe pas. Aucun appelant ne peut affirmer une appartenance.
+3. **Il n'y a pas de clause SQL libre.** Un filtre est une liste de `{ colonne, operateur,
+   valeur }`, combinée par ET : la colonne est vérifiée contre `pragma_table_info` de la table
+   visée (liste blanche dérivée du schéma), l'opérateur vient d'un ensemble fermé (`=`, `<>`, `<`,
+   `<=`, `>`, `>=`, `IN`, `IS NULL`, `IS NOT NULL`, `LIKE`), les valeurs sont **toujours liées**.
+   Aucun identifiant entre `[ ]`, `" "` ou accents graves, aucun appel de fonction, aucun mot-clé
+   ne peut entrer. Le texte généré est plat (`SELECT * FROM t WHERE group_id = ? AND deleted_at IS
+   NULL AND …`, le filtre de groupe en premier) : la garde du SQL brut refuse les sous-requêtes.
+4. **Le scope est assez riche pour qu'on n'ait jamais besoin de SQL brut** : lecture, insertion,
+   modification par `id` ou par clé composite, upsert (la clause de conflit est bornée au groupe :
+   une clé forgée vers un autre groupe ne touche pas sa ligne), suppression douce, suppression
+   réelle des lignes d'association (§4.4 du modèle), transaction, valeurs `Buffer`, ligne `groups`
+   du groupe, créneaux d'agenda partagés en projection « occupé ». L'`id` est généré dans `db/`.
+5. **La connexion est opaque hors de `db/`.** `ouvrirEtMigrer` renvoie un `Base` : un type marqué
+   sans aucune méthode (`db/base.ts`), la vraie connexion restant dans `connection.ts`
+   (`connexionBrute`, réservée par ESLint à `sql.ts` et `migrate.ts`). `base.prepare(…)` ne
+   compile pas, et `.prepare`, `.exec`, `.pragma` sont de toute façon interdits par ESLint hors de
+   `connection.ts`, `sql.ts` et `migrate.ts`.
+6. **Les tables d'un compte** (`notifications`, `calendar_feed_tokens`, `notification_preferences`,
+   `personal_events`) ont leur `PorteeUtilisateur`, fabriquée par `creerPorteeUtilisateur(base,
+   userId)` avec le même moteur et le filtre `user_id = ?` posé par la portée. `email_outbox`,
+   sans colonne de compte, n'est accessible par aucune portée.
 
 > **Aucune fonction de `db/queries/` ne prend de paramètre `groupId: string`.** Elles prennent
 > `scope: GroupScope` en premier argument. En TypeScript strict, écrire une requête sans
@@ -217,7 +244,7 @@ export const exigerAppartenance: RequestHandler = (req, res, next) => {
   if (estArchive(appartenance.group_id) && req.method !== 'GET') {
     return next(new ErreurHttp(409, 'groupe.archive'));
   }
-  req.scope = creerScope(appartenance);
+  req.scope = creerScope(base, req.auth.userId, req.params.groupId); // relit l'appartenance, lève ErreurAppartenance sinon
   next();
 };
 ```
@@ -236,14 +263,48 @@ premiers laisseraient passer, y compris dans un script d'exploitation écrit à 
 
 ### Verrou 5 — Les garde-fous automatiques
 
-- **Garde sur le SQL brut** : en développement et en test, `db/sql.ts` enveloppe `prepare()` et
-  **lève une erreur** si le texte de la requête mentionne une table métier sans contenir
-  `group_id`. En production, le même cas est journalisé en `error` (on ne casse pas une soirée
-  pour un faux positif, mais on le voit).
+- **Garde sur le SQL brut** : `db/sql.ts` enveloppe `prepare()` et **refuse** (partout, production
+  comprise : le texte est statique, aucune branche ne lit `NODE_ENV`) toute requête qui touche une
+  table métier sans **filtre lié** : `group_id = ?`, `user_id = ?` pour les tables d'un compte et
+  pour `personal_events`, `g.id = ?` pour `groups` (qualifié par sa propre référence). La garde est
+  **fermée** : elle analyse des jetons et n'admet que ce qu'elle sait prouver ; le reste est refusé,
+  même s'il est légitime. Un filtre n'est admis que comme **conjoint direct** d'un `WHERE` ou d'un
+  `ON` (parenthèses de simple groupement seulement, suivies d'une fin de conjoint) ; un lien
+  `a.group_id = b.group_id` suit la même règle. Une insertion est couverte par la colonne de portée,
+  et un `ON CONFLICT … DO UPDATE` exige `WHERE <table>.group_id = excluded.group_id`.
+  **Refusés** : sous-requêtes (un seul `select`), alias ou nom de table réutilisé, `OR`, `UNION`,
+  `WITH`, `BETWEEN`, `NOT EXISTS`, `NOT` hors de `IS NOT`/`NOT IN`/`NOT LIKE`, `CASE` hors liste de
+  sélection ou `ORDER BY`, `RIGHT`/`FULL`/`CROSS`/`NATURAL`, commentaires, identifiants entre
+  crochets, guillemets ou accents graves, `;`, non-ASCII, modification de `group_id`.
+  **Admis** : `JOIN` interne, `LEFT [OUTER] JOIN` (la table jointe hérite du groupe par son propre
+  `ON … AND b.group_id = a.group_id`, la table de gauche est filtrée dans le `WHERE`), `CASE` dans le
+  `SELECT`, `NOT IN`, `NOT LIKE`. **À la place du refusé** : `OR` → `IN (?, ?)` ou deux requêtes ;
+  `BETWEEN` → `x >= ? AND x <= ?` ; sous-requête, `EXISTS`/`NOT EXISTS`, `WITH` → jointure
+  interne/externe, ou deux requêtes assemblées en TypeScript dans `db/queries/` ; `groups` → 
+  `scope.groupe()`. **Jamais** : ajouter un texte à `TEXTES_TRANSVERSES` pour contourner un refus ;
+  ce canal est réservé aux lectures qui traversent les groupes par nature. Un refus que la liste
+  ci-dessus ne résout pas se signale : on étend la garde (et ses tests), on ne la contourne pas.
+  La garde prouve qu'un filtre lié existe, pas quelle valeur on lie : c'est le rôle du scope.
+  `personal_events` n'est lisible que par `user_id = ?` ou par une jointure avec
+  `personal_event_shares` filtrée par `group_id = ?`.
+- **Canal transverse** : les lectures qui traversent les groupes par nature (« mes groupes » :
+  `memberships WHERE user_id = ?`) passent par `preparerTransverse`, fonction **non exportée hors
+  de `db/`**, appelée seulement par `db/queries/transverse.ts`, dont les textes SQL sont **figés
+  en dur** dans `TEXTES_TRANSVERSES` (`Object.freeze`). Chaque fonction transverse prend une
+  `PorteeUtilisateur` (`mesGroupes(portee)`), jamais un identifiant nu. Un test compare cette liste aux appels réels ; il n'existe
+  aucune option sur `preparer` pour y échapper.
+- **ESLint** (`eslint.config.js`, prouvé par `ESLint.lintText`) : la bibliothèque SQLite n'est
+  importable que depuis `connection.ts` ; `db/connection`, `db/sql` et `db/migrate` ne le sont que
+  depuis `db/` (et `migrate` depuis `index.ts`) ; `creerScope` et `creerPorteeUtilisateur`
+  uniquement depuis `http/middleware/appartenance.ts` ; `.prepare`, `.exec`, `.pragma` interdits
+  hors de `connection.ts`, `sql.ts` et `migrate.ts`.
 - **Test de schéma** : la liste des tables métier est dérivée de `sqlite_master`, et le test
-  exige `group_id` sur chacune. La seule exception admise est inscrite en dur dans le test —
-  `personal_events` — avec un commentaire qui renvoie au §3.6 du modèle. Ajouter une exception
-  demande donc de modifier le test, ce qui se voit en revue.
+  exige `group_id` sur chacune ; chaque table est rangée dans exactement une portée (groupe ou
+  compte) et chaque description du scope est comparée aux colonnes réelles. La seule exception
+  admise est inscrite en dur dans le test — `personal_events` — avec un commentaire qui renvoie
+  au §3.6 du modèle. Ajouter une exception demande donc de modifier le test, ce qui se voit en revue.
+- **Test des clés étrangères** : dérivé de `pragma_foreign_key_list`, il exige que toute clé
+  étrangère vers un parent portant `group_id` soit composite et inclue `group_id`.
 - **Test anti-bancaire** : aucune colonne ne doit correspondre à `%iban%`, `%bic%`, `%card%`,
   `%payment%`, `%account_number%`.
 - **Suite de cloisonnement** : §7.

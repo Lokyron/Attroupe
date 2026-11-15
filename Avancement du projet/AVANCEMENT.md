@@ -3,6 +3,65 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-15 — Lot 1 : la base et le cloisonnement
+
+33 tables, le `GroupScope`, la `PorteeUtilisateur`, le moteur de filtres et la garde du SQL brut.
+**488 tests** (102 au lot 0). Trois passes ont été nécessaires : la première a été refusée par la
+revue sur une **fuite de lecture entre groupes**.
+
+### Ce qui a été trouvé, et fermé
+
+| Défaut | Comment il a été trouvé | État |
+|---|---|---|
+| **Fuite entre groupes** : la clause de filtrage était une chaîne libre, filtrée par liste noire ; les identifiants entre crochets de SQLite (`[(]`) déséquilibrent le compteur de parenthèses. `CAST(1 AS [(]) = 1) OR 1=1 OR (CAST(1 AS [)]) = 1` lisait l'événement d'un autre groupe | revue, rejouée par l'orchestrateur | fermé : plus de chaîne libre, filtres `{colonne, operateur, valeur}`, colonne vérifiée contre `pragma_table_info`, opérateurs fermés, valeurs liées |
+| **`creerScope` croyait l'appartenance qu'on lui passait** : affirmer « je suis membre de B » donnait accès à tout B | revue, rejouée | fermé : `creerScope(base, userId, groupId)` lit l'appartenance **active** en base |
+| **La connexion brute sortait de `db/`** par le type de retour de `ouvrirEtMigrer`, redonnant `prepare()` sans garde — contraire à l'ADR-0008 | revue, rejouée | fermé : connexion **opaque à l'exécution** (`base.exec` n'existe plus hors de `db/`) |
+| **Garde naïve** : elle exigeait la *mention* de `group_id`. `SELECT *, NULL AS group_id FROM events WHERE id = ?` lisait l'autre groupe | revue, rejouée | fermé : analyse par jetons, filtre lié exigé |
+| **Six formes encore admises** par la garde réécrite, dont `ON CONFLICT … DO UPDATE` sans clause de portée (l'upsert écrit à la main réécrivait la ligne d'un autre groupe) et `id = ?` non qualifié qui couvrait `groups` | deuxième revue, les six rejouées par l'orchestrateur | fermé : sous-requêtes, alias réutilisés, `BETWEEN` et filtres non conjoints refusés ; `TEXTES_TRANSVERSES` gelé |
+| **Jeton de flux iCal vers un groupe étranger** : un non-membre pouvait créer un jeton visant un autre groupe — un jeton de flux est un secret d'accès | deuxième revue, rejouée | fermé : appartenance active exigée à l'insertion ; le lot 5 devra la revérifier à chaque service du flux (§3.12) |
+| **IDOR en puissance** : `mesGroupes(base, userId)` prenait un identifiant nu et était importable de partout | deuxième revue | fermé : `mesGroupes(portee)` |
+| Rappel `async` dans `transaction` validé à moitié ; un membre pouvait répondre à une présence à la place d'un autre ; `app/tests/**` importable depuis `app/server/**` | deuxième revue | fermés |
+
+### Corrections apportées à la migration `0001`, avant tout déploiement
+
+Trois défauts de conception, corrigés tant que la reconstruction de table restait gratuite (en
+SQLite, changer une contrainte après déploiement l'exige, et le moteur de migrations ne le
+permet pas) :
+- `personal_event_shares` pointait vers `groups` : on pouvait partager son agenda vers un groupe
+  dont on n'est pas membre. Devenu `(membership_id, group_id)` avec clé étrangère composite.
+- `personal_events` et `date_poll_options` n'avaient pas le contrôle de format de date de
+  `events` (`'2026-12-01T20:00:00+'` était accepté).
+- `date_polls.resulting_event_id` n'avait pas de clé étrangère : un sondage de A pouvait pointer
+  vers un événement de B. La justification du §5.2 était fausse — SQLite accepte une référence
+  vers une table créée plus loin.
+
+### Vérifications de l'orchestrateur, indépendantes du rapport des agents
+
+- `lint`, `typecheck`, `build` verts ; **488 tests** passés, 1 ignoré.
+- Migration **identique** au §5 du modèle de données (`diff` vide), rejouée sur base neuve :
+  33 tables, 33 `STRICT`, 40 index, intégrité correcte.
+- **Preuve par mutation** : en rendant la marque du `GroupScope` facultative, `typecheck` échoue
+  (`TS2578`). Le garde-fou est donc exécutoire, pas décoratif.
+- **Charges rejouées à la main** : la fuite d'origine et trois variantes, les **six** formes
+  admises par la garde, le scope forgé, le jeton iCal étranger, la lecture d'un identifiant de
+  l'autre groupe — **toutes refusées**. Les cas légitimes passent (lecture du groupe,
+  `scope.groupe()`, jeton sur son propre groupe).
+- Image Docker reconstruite, conteneur répondant 200 sur `/api/sante`.
+
+### Faux positifs assumés de la garde
+
+`OR`, `BETWEEN`, `NOT EXISTS`, les sous-requêtes et `WITH` sont refusés ; la voie de
+remplacement est écrite dans `04 - Architecture.md` §4 verrou 5 (`IN (?, ?)`, `>= ? AND <= ?`,
+jointure, ou deux requêtes assemblées en TypeScript). **Ajouter un texte transverse pour
+contourner un refus est explicitement interdit** : c'était la porte dérobée la plus probable.
+
+### Reste ouvert
+
+- `notifications.group_id` non contrôlé (une invitation précède l'appartenance).
+- `email_outbox` sans portée : tout accès passera par le canal transverse.
+- ADR-0008 passée en **Acceptée** : `node:sqlite` sait désormais faire `backup()` et
+  `VACUUM INTO`, mais reste en « release candidate » ; `better-sqlite3` maintenu, à revoir.
+
 ## 2026-11-15 — Lot 0 : le squelette du dépôt
 
 - Domaine **attroupe.fr acheté**.
