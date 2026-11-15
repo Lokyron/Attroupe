@@ -25,9 +25,21 @@
   `HEALTHCHECK` passe à **healthy**. Construction multi-étapes conforme : `node:24-bookworm`
   pour la construction, `npm prune --omit=dev`, `node:24-bookworm-slim` à l'exécution,
   22 Mo d'application et de dépendances de production dans l'image finale.
-- **Reste non vérifié** : les deux workflows GitHub (`ci.yml`, `image.yml`), qui ne peuvent
-  l'être qu'à la première poussée, et le `docker compose up` tel quel — le compose tire l'image
-  publiée sur GHCR, qui n'existe pas encore.
+- **Publié** : premier commit (69 fichiers, 10 674 lignes) poussé sur
+  <https://github.com/Lokyron/Attroupe>, branches `main` et `beta` créées. Licence **AGPL-3.0**
+  posée avant la publication.
+- **Les quatre exécutions d'intégration continue sont vertes** (lint, types, tests et
+  construction, sur `main` comme sur `beta`), et l'image est publiée sur GHCR : son manifeste se
+  lit **sans authentification**, donc le paquet est bien public et l'installation par un tiers
+  tient en une commande.
+- **Le lot 0 est donc terminé**, critère de fin compris.
+- À savoir : l'image publiée est **`linux/amd64` seulement** (les exécuteurs GitHub sont x86).
+  C'est l'architecture des conteneurs 112 et 113, donc sans conséquence en production ; mais
+  elle ne tourne pas telle quelle sur un Mac Apple Silicon — en local, `docker build` suffit.
+  Ajouter `arm64` demanderait `buildx` et QEMU, et doublerait le temps de construction.
+- `.claude/settings.json` : l'interdiction `Bash(git push:*)` a été levée sur accord explicite,
+  en gardant une barrière sur `git push --force` et `-f` — on ne réécrit pas l'historique d'un
+  dépôt public sans le demander.
 ### Revue du lot 0 : verdict **bloquant**, puis corrigé
 
 Le `reviewer` (Opus 5.5) a rendu trois bloquants et seize points secondaires. Trois trouvailles

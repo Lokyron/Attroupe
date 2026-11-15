@@ -53,6 +53,8 @@ Homelab personnel (pas Cazalia). Accès par Internet derrière le Nginx Proxy Ma
 sous-domaine à définir. Immich tourne **à part**, sur sa ou ses propres instances, et n'est
 jamais embarqué dans la pile du projet.
 
+Image publiée sur GHCR, **paquet public** et **`linux/amd64`** uniquement.
+
 Mise à jour, sur le conteneur concerné :
 
 ```bash
