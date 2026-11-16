@@ -53,6 +53,18 @@ verrous dont deux font échouer la compilation et un l'écriture en base
 | Pré-production | **113** | `10.1.20.113` | `ghcr.io/lokyron/attroupe:beta` (branche `beta`) |
 
 Les deux conteneurs ont les mêmes spécifications ; seule l'étiquette d'image diffère.
+
+**Créés le 2026-11-16** sur le nœud `PVE-TXLHOME` (Proxmox 9.2), aux conventions des autres conteneurs
+de ce homelab : Debian 13, **non privilégié**, `features: nesting=1,keyctl=1` (indispensable à Docker
+dans un LXC non privilégié), `rootfs` sur `local-zfs`, 2 cœurs, 2 Gio de mémoire, 512 Mio de swap,
+16 Gio de disque, `net0` sur `vmbr0` avec IP statique et passerelle `10.1.20.1`, `onboot: 1`.
+Docker CE et le greffon Compose y sont installés et actifs, et l'exécution est **vérifiée** dans les
+deux (`docker run --rm hello-world`). Accès `root` par la clé `~/.ssh/id_ed25519_pve` ; **aucun mot de
+passe root n'est posé**, l'accès se fait par clé.
+
+> L'application n'y est pas encore déployée : il manque le sous-domaine, l'entrée dans le Nginx Proxy
+> Manager et le fichier `.env` (dont `ATTROUPE_SESSION_SECRET`). Voir §5 pour la marche à suivre.
+
 Homelab personnel (pas Cazalia). Accès par Internet derrière le Nginx Proxy Manager, sur un
 sous-domaine à définir. Immich tourne **à part**, sur sa ou ses propres instances, et n'est
 jamais embarqué dans la pile du projet.
