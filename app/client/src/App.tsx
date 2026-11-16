@@ -8,11 +8,15 @@ import { Agenda } from './pages/Agenda';
 import { Evenement, NouvelEvenement } from './pages/Evenement';
 import { Groupe } from './pages/Groupe';
 import { InvitationLien } from './pages/InvitationLien';
+import { Liste } from './pages/Liste';
+import { Listes } from './pages/Listes';
 import { Invitations } from './pages/Invitations';
 import { NouveauGroupe } from './pages/NouveauGroupe';
 
 type Route = { type: 'accueil' } | { type: 'nouveau' } | { type: 'invitations' } | { type: 'compte' } | { type: 'groupe'; id: string }
   | { type: 'agenda'; id: string }
+  | { type: 'listes'; id: string }
+  | { type: 'liste'; id: string; listeId: string }
   | { type: 'evenement'; id: string; evenementId: string }
   | { type: 'evenement-nouveau'; id: string };
 type Etat = { type: 'chargement' } | { type: 'anonyme' } | { type: 'connecte'; moi: Moi };
@@ -25,6 +29,8 @@ function lireRoute(): Route {
   if (premier === 'groupe' && second !== undefined && second !== '') {
     const id = decodeURIComponent(second);
     if (troisieme === 'agenda') return { type: 'agenda', id };
+    if (troisieme === 'listes') return { type: 'listes', id };
+    if (troisieme === 'liste' && quatrieme !== undefined && quatrieme !== '') return { type: 'liste', id, listeId: decodeURIComponent(quatrieme) };
     if (troisieme === 'evenement-nouveau') return { type: 'evenement-nouveau', id };
     if (troisieme === 'evenement' && quatrieme !== undefined && quatrieme !== '') return { type: 'evenement', id, evenementId: decodeURIComponent(quatrieme) };
     return { type: 'groupe', id };
@@ -67,7 +73,8 @@ export function App() {
   }
 
   const { moi } = etat;
-  const groupeCourant = route.type === 'groupe' || route.type === 'agenda' || route.type === 'evenement' || route.type === 'evenement-nouveau' ? route.id : '';
+  const groupeCourant =
+    route.type === 'groupe' || route.type === 'agenda' || route.type === 'listes' || route.type === 'liste' || route.type === 'evenement' || route.type === 'evenement-nouveau' ? route.id : '';
   return (
     <main className="accueil">
       <header className="entete">
@@ -117,6 +124,8 @@ export function App() {
         />
       )}
       {!lien && route.type === 'agenda' && <Agenda key={route.id} groupId={route.id} />}
+      {!lien && route.type === 'listes' && <Listes key={route.id} groupId={route.id} />}
+      {!lien && route.type === 'liste' && <Liste key={route.listeId} groupId={route.id} listeId={route.listeId} />}
       {!lien && route.type === 'evenement-nouveau' && <NouvelEvenement key={route.id} groupId={route.id} />}
       {!lien && route.type === 'evenement' && <Evenement key={route.evenementId} groupId={route.id} evenementId={route.evenementId} />}
     </main>

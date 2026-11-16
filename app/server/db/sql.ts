@@ -642,11 +642,17 @@ function estThenable(valeur: unknown): boolean {
   return (typeof valeur === 'object' || typeof valeur === 'function') && valeur !== null && 'then' in valeur && typeof valeur.then === 'function';
 }
 
-/** Groupe des écritures en une transaction (imbriquable : points de sauvegarde). Synchrone uniquement. */
+/**
+ * Groupe des écritures en une transaction (imbriquable : points de sauvegarde). Synchrone uniquement.
+ * `BEGIN IMMEDIATE` : le verrou d'écriture est pris au DÉBUT, donc `busy_timeout` s'applique et la transaction attend son tour. Avec le
+ * `BEGIN` différé par défaut, une transaction qui commence par lire puis écrit (« lis la fin de la liste, ajoute après ») échoue sur-le-champ
+ * en SQLITE_BUSY / SQLITE_BUSY_SNAPSHOT dès qu'un autre processus a écrit entre-temps, sans jamais attendre : constaté au lot 6 par des
+ * processus qui écrivent ensemble sur la même liste (tests/integration/listes-concurrence.test.ts).
+ */
 export function executerEnTransaction<T>(base: Base, fn: () => T): T {
   return connexionBrute(base).transaction(() => {
     const resultat = fn();
     if (estThenable(resultat)) throw new ErreurTransactionAsynchrone();
     return resultat;
-  })();
+  }).immediate();
 }

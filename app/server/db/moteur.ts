@@ -80,7 +80,7 @@ export interface Moteur {
   readonly tous: <T>(table: string, filtres?: readonly Condition[], options?: OptionsLecture) => T[];
   readonly un: <T>(table: string, id: string) => T | undefined;
   readonly inserer: (table: string, valeurs: Valeurs) => string | undefined;
-  readonly modifierPar: (table: string, cle: Valeurs, valeurs: Valeurs) => boolean;
+  readonly modifierPar: (table: string, cle: Valeurs, valeurs: Valeurs, conditions?: readonly Condition[]) => boolean;
   readonly supprimerDoux: (table: string, id: string) => boolean;
   readonly supprimer: (table: string, cle: Valeurs) => boolean;
   readonly upsert: (table: string, valeurs: Valeurs) => boolean;
@@ -257,7 +257,12 @@ export function creerMoteur(config: ConfigMoteur): Moteur {
     return d.avecId ? (toutes.get('id') as string) : undefined;
   };
 
-  const modifierPar = (table: string, cle: Valeurs, valeurs: Valeurs): boolean => {
+  /**
+   * `conditions` (facultatives, liées, combinées par ET) rendent la mise à jour CONDITIONNELLE : `UPDATE … WHERE clé AND groupe AND
+   * conditions`. C'est ce qui ferme une course (deux « je le prends » simultanés) sans « lire puis écrire » : la base tranche, et
+   * `false` veut dire « la condition ne tenait plus ».
+   */
+  const modifierPar = (table: string, cle: Valeurs, valeurs: Valeurs, conditions: readonly Condition[] = []): boolean => {
     const d = description(table);
     const colonnesCle = verifierCle(table, d, cle);
     const interdites = [
@@ -274,10 +279,15 @@ export function creerMoteur(config: ConfigMoteur): Moteur {
       affectations.push('updated_at = ?');
       params.push(instantUtc());
     }
+    if (!Array.isArray(conditions)) throw new ErreurScope('Conditions refusées : une liste de conditions { colonne, operateur, valeur } est attendue.');
+    const gardes = conditions.map((c) => compiler(table, c));
     const r = reserve(d);
     const criteres = [...colonnesCle.map((c) => `${c} = ?`), `${colonnePortee} = ?`];
-    const texte = `UPDATE ${table} SET ${affectations.join(', ')} WHERE ${criteres.join(' AND ')}${d.supprimable ? ' AND deleted_at IS NULL' : ''}${r.texte}`;
-    return preparer(base, texte).run(...params, ...colonnesCle.map((c) => cle[c] ?? null), valeurPortee, ...r.valeurs).changes > 0;
+    const supplements = gardes.map((g) => ` AND ${g.texte}`).join('');
+    const texte = `UPDATE ${table} SET ${affectations.join(', ')} WHERE ${criteres.join(' AND ')}${d.supprimable ? ' AND deleted_at IS NULL' : ''}${r.texte}${supplements}`;
+    return (
+      preparer(base, texte).run(...params, ...colonnesCle.map((c) => cle[c] ?? null), valeurPortee, ...r.valeurs, ...gardes.flatMap((g) => g.valeurs)).changes > 0
+    );
   };
 
   const supprimerDoux = (table: string, id: string): boolean => {

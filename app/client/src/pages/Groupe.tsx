@@ -64,6 +64,9 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
       <p>
         <a href={`#/groupe/${encodeURIComponent(groupId)}/agenda`}>{t('groupe.agenda')}</a>
       </p>
+      <p>
+        <a href={`#/groupe/${encodeURIComponent(groupId)}/listes`}>{t('groupe.listes')}</a>
+      </p>
       <Erreur message={erreur} />
 
       <h3>{t('membres.titre')}</h3>

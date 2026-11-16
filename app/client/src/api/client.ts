@@ -5,6 +5,8 @@ export class ErreurApi extends Error {
   constructor(
     public readonly statut: number,
     public readonly cle: string,
+    /** Corps JSON de la réponse d'erreur (ex. `pris_par` d'un 409) : relu champ par champ par qui s'en sert. */
+    public readonly donnees: unknown = null,
   ) {
     super(cle);
     this.name = 'ErreurApi';
@@ -24,7 +26,7 @@ export async function appeler(methode: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELET
   const json: unknown = await reponse.json().catch(() => null);
   if (!reponse.ok) {
     const cle = estObjet(json) && typeof json['error'] === 'string' ? json['error'] : 'erreur.interne';
-    throw new ErreurApi(reponse.status, cle);
+    throw new ErreurApi(reponse.status, cle, json);
   }
   return json;
 }

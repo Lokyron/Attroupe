@@ -155,6 +155,7 @@ describe('config/env : validation de l’environnement', () => {
       'ATTROUPE_IMMICH_ALLOW_PRIVATE',
       'ATTROUPE_TRUST_PROXY',
       'ATTROUPE_LOG_LEVEL',
+      'ATTROUPE_SSE_MAX_CONNECTIONS',
       'TZ',
     ]) {
       expect(exemple, `clé ${cle} absente de .env.example`).toMatch(new RegExp(`^#? ?${cle}=`, 'm'));

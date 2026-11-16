@@ -1,6 +1,7 @@
 import type { Base } from '../db/base.js';
 import type { Env } from '../config/env.js';
 import type { Horloge, LimiteurCadence, ReglesCadence } from '../services/cadence.js';
+import type { DiffuseurTempsReel } from '../services/temps-reel.js';
 import type { ParametresScrypt } from '../services/mot-de-passe.js';
 import type { Journal } from './middleware/journal.js';
 
@@ -17,4 +18,6 @@ export interface Contexte {
   readonly delaiMinimalOubliMs: number;
   /** Les cookies ne sont `Secure` que si l'instance est servie en https (toujours le cas en production, cf. env.ts). */
   readonly cookieSecurise: boolean;
+  /** Diffusion en mémoire du flux temps réel, indexée par groupe (services/temps-reel.ts). */
+  readonly diffuseur: DiffuseurTempsReel;
 }

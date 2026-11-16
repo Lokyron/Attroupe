@@ -58,6 +58,20 @@ export function exigerAppartenance(contexte: Contexte): RequestHandler {
 }
 
 /**
+ * L'appartenance ACTIVE (et le groupe) existe-t-elle encore ? Relue en base à chaque appel. Les routes ordinaires la prouvent à chaque
+ * requête ; une connexion qui reste ouverte (flux temps réel) doit la REPROUVER avant chaque envoi, sinon quelqu'un retiré du groupe
+ * continuerait d'y recevoir tout ce qui s'y passe. C'est ici, avec `exigerAppartenance`, qu'on fabrique le scope qui la prouve.
+ */
+export function appartenanceActive(contexte: Contexte, userId: string, groupId: string): boolean {
+  try {
+    return creerScope(contexte.base, userId, groupId).groupe() !== undefined;
+  } catch (erreur) {
+    if (erreur instanceof ErreurAppartenance) return false;
+    throw erreur;
+  }
+}
+
+/**
  * Second contrôle, distinct du premier : « ai-je le droit ? ». À poser sur une route réservée aux administrateurs du
  * groupe, APRÈS `exigerAppartenance`. 403 : la ressource existe, dans MON groupe, mais le droit manque. Un échec de
  * cloisonnement reste un 404 : les deux codes ne se croisent jamais.

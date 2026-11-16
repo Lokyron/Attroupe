@@ -98,6 +98,7 @@ const schemaEnv = z
     ATTROUPE_IMMICH_ALLOW_PRIVATE: z.preprocess(videEnAbsent, booleen.default(false)),
     ATTROUPE_TRUST_PROXY: z.preprocess(videEnAbsent, z.coerce.number().int().min(0).default(1)),
     ATTROUPE_LOG_LEVEL: z.preprocess(videEnAbsent, z.enum(['debug', 'info', 'warn', 'error']).default('info')),
+    ATTROUPE_SSE_MAX_CONNECTIONS: z.preprocess(videEnAbsent, z.coerce.number().int().min(1).max(100_000).default(200)),
     TZ: z.preprocess(videEnAbsent, z.string().min(1).default('Europe/Paris')),
   })
   .superRefine((env, ctx) => {

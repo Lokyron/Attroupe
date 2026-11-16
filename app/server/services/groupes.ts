@@ -62,11 +62,14 @@ export function retirerMembre(contexte: Contexte, scope: GroupScope, membreId: s
   if (resultat === 'soi_meme') throw new ErreurHttp(409, 'membre.retrait_de_soi');
   if (resultat === 'inactif') throw new ErreurHttp(409, 'membre.inactif');
   if (resultat === 'dernier_admin') throw new ErreurHttp(409, 'groupe.dernier_admin');
+  // Fermeture ACTIVE de ses flux temps réel dans CE groupe. Le filet reste la revérification avant chaque envoi (services/temps-reel.ts).
+  contexte.diffuseur.fermerMembre(scope, membreId);
 }
 
 export function quitter(contexte: Contexte, scope: GroupScope): void {
   const resultat = quitterEnBase(scope, versInstant(contexte.horloge()));
   if (resultat === 'dernier_admin') throw new ErreurHttp(409, 'groupe.dernier_admin');
+  contexte.diffuseur.fermerMembre(scope, scope.membershipId);
 }
 
 export type CorpsInvitation =

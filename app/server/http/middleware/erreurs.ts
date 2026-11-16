@@ -17,7 +17,7 @@ export function gestionnaireErreurs(erreur: unknown, _req: Request, res: Respons
   }
   if (erreur instanceof ErreurHttp) {
     if (erreur.retryApresSecondes !== undefined) res.setHeader('Retry-After', String(erreur.retryApresSecondes));
-    res.status(erreur.statut).json({ error: erreur.cle, ...(erreur.champs === undefined ? {} : { champs: erreur.champs }) });
+    res.status(erreur.statut).json({ ...erreur.donnees, error: erreur.cle, ...(erreur.champs === undefined ? {} : { champs: erreur.champs }) });
     return;
   }
   const statut = statutClient(erreur);

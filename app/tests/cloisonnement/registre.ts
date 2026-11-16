@@ -30,7 +30,19 @@ export type Methode = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 export type Exigence = 'aucune' | 'session' | 'appartenance' | 'admin' | 'organisateur' | 'jetonFlux';
 
 /** Ressource désignée par un paramètre d'URL. Chacune existe en un exemplaire dans chaque monde (A et B) : voir monde.ts. */
-export type Ressource = 'membre' | 'evenement' | 'invitation' | 'invitationRecue' | 'jeton' | 'session' | 'abonnement' | 'jetonFlux';
+export type Ressource =
+  | 'membre'
+  | 'evenement'
+  | 'invitation'
+  | 'invitationRecue'
+  | 'jeton'
+  | 'session'
+  | 'abonnement'
+  | 'jetonFlux'
+  | 'liste'
+  | 'article'
+  | 'articleVoisin'
+  | 'tache';
 
 export interface EntreeRoute {
   readonly methode: Methode;
@@ -46,6 +58,12 @@ export interface EntreeRoute {
   readonly requete?: Readonly<Record<string, string>>;
   /** Corps JSON valide pour la route (les attaques doivent buter sur le cloisonnement, pas sur la validation). */
   readonly corps?: unknown;
+  /**
+   * Route à réponse ININTERROMPUE (flux SSE) : la suite l'appelle par un vrai socket, lit le statut et le premier message, puis COUPE
+   * (tests/fixtures/flux-sse.ts). Sans cela, la suite attendrait une fin qui n'arrive jamais. Les attaques ne changent pas : un étranger
+   * doit recevoir son 404 AVANT que le flux ne s'ouvre, et le cas légitime doit s'ouvrir (200, `text/event-stream`).
+   */
+  readonly flux?: true;
 }
 
 /** Clé d'erreur attendue quand la ressource forgée n'existe pas pour l'appelant. */
@@ -58,6 +76,10 @@ export const INTROUVABLE: Readonly<Record<Ressource, string>> = {
   session: 'session.introuvable',
   abonnement: 'flux.introuvable',
   jetonFlux: 'flux.introuvable',
+  liste: 'liste.introuvable',
+  article: 'article.introuvable',
+  articleVoisin: 'article.introuvable',
+  tache: 'tache.introuvable',
 };
 
 export const PREFIXE_GROUPE = '/api/groupes/:groupId';
@@ -120,6 +142,30 @@ export const REGISTRE: readonly EntreeRoute[] = [
   // Deux identifiants lus : l'événement ET le membre. Promouvoir un membre de B sur un événement de A (ou l'inverse) est un 404 du membre.
   { methode: 'POST', chemin: '/api/groupes/:groupId/evenements/:evenementId/organisateurs/:membreId', exige: 'organisateur', ressources: { evenementId: 'evenement', membreId: 'membre' } },
   { methode: 'DELETE', chemin: '/api/groupes/:groupId/evenements/:evenementId/organisateurs/:membreId', exige: 'organisateur', ressources: { evenementId: 'evenement', membreId: 'membre' } },
+
+  // --- Listes de courses, tâches et temps réel (lot 6) ---------------------------------------------------------------------------------
+  // Toutes `appartenance` : tout membre actif modifie une liste ou une tâche (aucun droit fin, donc aucun 403 ; le seul droit du lot, réassigner
+  // la tâche de quelqu'un d'autre, relève d'un test d'intégration). Les identifiants lus dans un corps ou une requête sont déclarés :
+  // `event_id` (liste, tâche), `after_item_id` (réordonnancement), `assignee_membership_id` (désigner quelqu'un).
+  { methode: 'GET', chemin: '/api/groupes/:groupId/listes', exige: 'appartenance', ressourcesRequete: { event_id: 'evenement' } },
+  { methode: 'POST', chemin: '/api/groupes/:groupId/listes', exige: 'appartenance', corps: { title: 'Courses', event_id: 'a-remplacer' }, ressourcesCorps: { event_id: 'evenement' } },
+  { methode: 'GET', chemin: '/api/groupes/:groupId/listes/:listeId', exige: 'appartenance', ressources: { listeId: 'liste' } },
+  { methode: 'PATCH', chemin: '/api/groupes/:groupId/listes/:listeId', exige: 'appartenance', ressources: { listeId: 'liste' }, corps: { title: 'Pirate' } },
+  { methode: 'DELETE', chemin: '/api/groupes/:groupId/listes/:listeId', exige: 'appartenance', ressources: { listeId: 'liste' } },
+  { methode: 'POST', chemin: '/api/groupes/:groupId/listes/:listeId/articles', exige: 'appartenance', ressources: { listeId: 'liste' }, corps: { label: 'Pain' } },
+  // `after_item_id` doit être un AUTRE article de la même liste : le monde en porte deux (`article`, `articleVoisin`).
+  { methode: 'PATCH', chemin: '/api/groupes/:groupId/listes/:listeId/articles/:articleId', exige: 'appartenance', ressources: { listeId: 'liste', articleId: 'article' }, corps: { label: 'Pirate', after_item_id: 'a-remplacer' }, ressourcesCorps: { after_item_id: 'articleVoisin' } },
+  { methode: 'DELETE', chemin: '/api/groupes/:groupId/listes/:listeId/articles/:articleId', exige: 'appartenance', ressources: { listeId: 'liste', articleId: 'article' } },
+  { methode: 'PUT', chemin: '/api/groupes/:groupId/listes/:listeId/articles/:articleId/preneur', exige: 'appartenance', ressources: { listeId: 'liste', articleId: 'article' }, corps: { prend: true } },
+  { methode: 'PUT', chemin: '/api/groupes/:groupId/listes/:listeId/articles/:articleId/fait', exige: 'appartenance', ressources: { listeId: 'liste', articleId: 'article' }, corps: { fait: true } },
+  { methode: 'GET', chemin: '/api/groupes/:groupId/taches', exige: 'appartenance', ressourcesRequete: { event_id: 'evenement' } },
+  { methode: 'POST', chemin: '/api/groupes/:groupId/taches', exige: 'appartenance', corps: { title: 'Apporter la glace', event_id: 'a-remplacer' }, ressourcesCorps: { event_id: 'evenement' } },
+  { methode: 'PATCH', chemin: '/api/groupes/:groupId/taches/:tacheId', exige: 'appartenance', ressources: { tacheId: 'tache' }, corps: { title: 'Pirate', event_id: 'a-remplacer' }, ressourcesCorps: { event_id: 'evenement' } },
+  { methode: 'DELETE', chemin: '/api/groupes/:groupId/taches/:tacheId', exige: 'appartenance', ressources: { tacheId: 'tache' } },
+  // Désigner quelqu'un : un identifiant de MEMBRE lu dans le corps. Un membre de B ne s'assigne pas à une tâche de A (404 `membre.introuvable`).
+  { methode: 'PUT', chemin: '/api/groupes/:groupId/taches/:tacheId/assignation', exige: 'appartenance', ressources: { tacheId: 'tache' }, corps: { assignee_membership_id: 'a-remplacer' }, ressourcesCorps: { assignee_membership_id: 'membre' } },
+  // Le flux SSE : ouvert par un vrai socket, coupé par la suite (`flux`). Ses attaques propres (membre retiré en cours de flux, deux groupes) sont dans tests/integration/temps-reel.test.ts.
+  { methode: 'GET', chemin: '/api/groupes/:groupId/temps-reel', exige: 'appartenance', flux: true },
 
   // --- Le flux de calendrier (lot 5) : hors /api, sans cookie, le jeton est le seul secret ----------------------------------------------
   { methode: 'GET', chemin: '/ical/:jeton.ics', exige: 'jetonFlux', ressources: { jeton: 'jetonFlux' } },

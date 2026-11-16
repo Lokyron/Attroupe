@@ -13,6 +13,9 @@ import { parametre } from '../parametres.js';
 import { schemaChangementRole, schemaCreationGroupe, schemaInvitation, schemaModificationGroupe } from '../schemas/groupes.js';
 import { analyser } from '../schemas/valider.js';
 import { routesEvenements } from './evenements.js';
+import { routesListes } from './listes.js';
+import { routesTaches } from './taches.js';
+import { routesTempsReel } from './temps-reel.js';
 
 // /api/groupes. Deux étages :
 //  - `/` (le sélecteur) relève du COMPTE : session seule, portée utilisateur ;
@@ -90,6 +93,11 @@ function routesDuGroupe(contexte: Contexte): Router {
 
   // L'agenda du groupe (lot 4) : monté par `monter`, pour que le registre de cloisonnement en voie les routes.
   monter(routeur, '/evenements', routesEvenements(contexte));
+
+  // Listes de courses, tâches et flux temps réel (lot 6) : mêmes règles, `monter` pour que le registre en voie les routes.
+  monter(routeur, '/listes', routesListes(contexte));
+  monter(routeur, '/taches', routesTaches(contexte));
+  monter(routeur, '/temps-reel', routesTempsReel(contexte));
 
   return routeur;
 }

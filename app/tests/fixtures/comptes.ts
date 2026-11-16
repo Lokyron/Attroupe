@@ -106,7 +106,7 @@ export class Client {
   cookie: string | undefined;
 
   constructor(
-    private readonly app: Express,
+    readonly app: Express,
     private readonly adresse: string = '203.0.113.7',
   ) {}
 

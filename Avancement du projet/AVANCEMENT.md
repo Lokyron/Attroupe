@@ -3,6 +3,49 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-16 — Lot 6 : listes de courses, tâches et flux temps réel
+
+`/listes` (articles, preneur, case cochée, réordonnancement), `/taches` (assignation, « qui apporte quoi » rattaché à un événement)
+et `GET /api/groupes/:groupId/temps-reel` (SSE, sans dépendance). Page de liste de courses « debout, à une main » et tâches visibles
+depuis l'événement, côté client. Aucune migration. Décisions et raisons dans
+[`ADR-0011`](../docs/decisions/ADR-0011-temps-reel-listes-taches.md).
+
+**Le risque propre au lot, et sa réponse.** Une connexion qui reste ouverte ne revérifie rien d'elle-même : quelqu'un retiré du
+groupe continuerait de recevoir tout ce qui s'y passe. Le diffuseur relit donc l'appartenance **et** la session en base avant chaque envoi
+et à chaque battement ; en plus, retrait et départ par l'API ferment les flux tout de suite. Le message poussé est minimal (type,
+identifiant, parent, auteur, instant) : même une indexation fausse du registre ne ferait fuir que des identifiants.
+
+**Un défaut antérieur au lot, trouvé par la concurrence réelle.** Quatre vrais processus écrivant sur le même fichier ont fait échouer
+des dizaines d'écritures en `SQLITE_BUSY` / `SQLITE_BUSY_SNAPSHOT` : le `BEGIN` différé de `executerEnTransaction` ne laisse pas jouer
+`busy_timeout` quand la transaction commence par lire. Corrigé par `BEGIN IMMEDIATE`. Sans effet avec un seul processus (better-sqlite3
+est synchrone) ; c'est pourquoi le test existe sous les deux formes (requêtes simultanées sur une application, puis processus).
+
+**Mutations jouées** : retirer la revérification de l'appartenance du flux fait échouer 4 tests, dont « un membre retiré a reçu un
+événement du groupe après son retrait » ; indexer la diffusion sur tous les groupes fait échouer les deux tests « deux flux » ; retirer la
+vérification du membre assigné fait échouer la suite générique (500 au lieu de 404) ; retirer `IS NULL` du preneur fait échouer 4 tests,
+dont le test à plusieurs processus ; retirer `BEGIN IMMEDIATE` fait échouer le test à plusieurs processus.
+
+**Corrections de revue** : un compte *suspendu ou anonymisé* gardait son flux ouvert (la suspension s'écrit sur `users`, sans toucher
+`sessions`) : `sessionVivante` relit maintenant `users`, avec deux tests qui échouent quand on retire la jointure ; un article pris par
+un membre retiré est libérable et reprenable ; le harnais de cloisonnement joue les écritures d'Erin dans un second monde (l'étape 5 de
+`PUT …/preneur` renvoyait 409) et exige désormais un succès à l'étape 5 de toute route `appartenance` ; plafond global de flux
+(`ATTROUPE_SSE_MAX_CONNECTIONS`), arrêt qui refuse les ouvertures, 500 articles par liste ; départ des processus du test de concurrence sur
+« prêt »/« go » plutôt qu'une barrière horaire ; côté client, rechargements ordonnés et regroupés, 401 du flux traité.
+
+**Vérifié par exécution de ma part** : `lint`, `typecheck`, `build` verts, **1 118 tests** passés (1 ignoré, antérieur au lot),
+`git diff app/server/db/sql.ts` limité au seul `BEGIN IMMEDIATE` et à son commentaire. Les trois pièces du socle que ce lot touche
+ont été relues ligne à ligne : les `conditions` du moteur passent par le **même `compiler`** que les filtres de lecture (colonne
+vérifiée contre `pragma_table_info`, opérateurs fermés, valeurs liées) et ne peuvent que restreindre ; `appartenanceActive` vit dans
+le fichier qui a **déjà** le droit d'appeler `creerScope`, donc le verrou n° 3 n'est pas élargi. Mutations rejouées par moi :
+retirer `appartenanceActive` du contrôle avant envoi fait échouer 4 tests (« un membre retiré a reçu un événement du groupe après
+son retrait ») ; dé-indexer la diffusion fait échouer les deux tests « deux flux » (« événement étranger dans le flux de A ») ;
+retirer la jointure sur `users` de `sessionVivante` fait échouer les deux tests de compte suspendu et anonymisé. Et le test de
+démonstration **écrit par le reviewer**, qui affirmait que le défaut était présent, échoue maintenant de lui-même : « Aucun
+événement attendu en 3000 ms. Reçu : [] ».
+
+**Non vérifié** : l'interface n'a jamais été ouverte dans un navigateur ni sur un téléphone ; le critère n° 3 est établi par des tests
+serveur (trois comptes, trois flux, une rafale de cases) et reste à valider à la main.
+
 ## 2026-11-16 — Lot 5 : les flux iCal
 
 Jetons d'abonnement par compte (`GET`/`POST`/`DELETE /api/moi/flux-ical`, 32 octets en base32, stockés hachés, le

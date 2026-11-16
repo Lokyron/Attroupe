@@ -14,6 +14,7 @@ import { lireGroupe, listerMembres, type Membre } from '../api/groupes';
 import { libelleDateHoraire } from '../agenda/format';
 import { FormulaireEvenement } from '../components/FormulaireEvenement';
 import { Erreur, messageDe } from '../components/Erreur';
+import { TachesEvenement } from '../components/TachesEvenement';
 import { t } from '../i18n';
 
 const REPONSES: readonly ReponsePresence[] = ['yes', 'maybe', 'no'];
@@ -202,6 +203,8 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
           <p>{presences.sans_reponse.map((m) => m.display_name).join(', ')}</p>
         </>
       )}
+
+      <TachesEvenement groupId={groupId} evenementId={evenement.id} titreEvenement={evenement.title} membres={membres} />
 
       <h3>{t('organisateurs.titre')}</h3>
       <p>{t('organisateurs.auteur', { nom: evenement.auteur.display_name })}</p>

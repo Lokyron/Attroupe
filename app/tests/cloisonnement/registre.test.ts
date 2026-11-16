@@ -68,6 +68,21 @@ describe('registre de cloisonnement : complétude', () => {
     for (const e of REGISTRE.filter((x) => x.chemin.startsWith('/ical/'))) expect(e.exige, cle(e)).toBe('jetonFlux');
   });
 
+  it('une entrée `flux` est un GET de groupe ouvert à un simple membre, et le flux temps réel en est une (sinon la suite se bloquerait ou ne l’attaquerait pas)', () => {
+    const flux = REGISTRE.filter((x) => x.flux === true);
+    expect(flux.map(cle)).toEqual(['GET /api/groupes/:groupId/temps-reel']);
+    for (const e of flux) {
+      expect(e.methode, cle(e)).toBe('GET');
+      expect(e.exige, `${cle(e)} : la suite le fait ouvrir par une simple membre (Erin) ; une exigence admin la ferait échouer en 403`).toBe('appartenance');
+    }
+  });
+
+  it('les routes du lot 6 sont ouvertes à tout membre actif (`appartenance`) : aucun droit fin n’y est caché derrière une exigence plus faible', () => {
+    const lot6 = REGISTRE.filter((x) => /\/(listes|taches|temps-reel)(\/|$)/.test(x.chemin));
+    expect(lot6.length).toBe(16);
+    for (const e of lot6) expect(e.exige, cle(e)).toBe('appartenance');
+  });
+
   it('une entrée `organisateur` déclare l’événement dans `ressources` (sinon l’ordre « trouver puis autoriser » n’est jamais attaqué)', () => {
     for (const e of REGISTRE.filter((x) => x.exige === 'organisateur')) {
       expect(Object.values(e.ressources ?? {}), cle(e)).toContain('evenement');

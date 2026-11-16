@@ -194,6 +194,33 @@ les agrégats, sans lecture d'événement. `DTSTART` en UTC pour les événement
 journées entières (écart à §7.1 acté par l'ADR-0010) ; `include_personal` est stocké mais **sans effet** jusqu'au
 lot 8.
 
+Lot 6 (listes de courses, tâches, temps réel, [`ADR-0011`](docs/decisions/ADR-0011-temps-reel-listes-taches.md)). Même
+préfixe, donc même règle (404 `groupe.introuvable` hors du groupe). Tout membre actif modifie une liste ou une tâche ; les
+seuls 403 sont `droit.assignation_requise` (réassigner la tâche de quelqu'un d'autre). Une liste, un article, une tâche ou
+un événement d'un autre groupe (ou d'une autre liste) est un **404** (`liste.introuvable`, `article.introuvable`,
+`tache.introuvable`, `evenement.introuvable`). Suppressions **logiques** (`deleted_at`) ; supprimer une liste supprime ses
+articles. `category` (V2) n'est ni écrite ni exposée.
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| GET / POST | `/api/groupes/:groupId/listes` | Lister avec compteurs (`articles_total`, `articles_faits`), filtrable par `?event_id=` (404 si l'événement n'est pas du groupe) ; créer `{title, event_id?}`. |
+| GET / PATCH / DELETE | `/api/groupes/:groupId/listes/:listeId` | Détail (avec `articles`, ordre `position` puis `id`) ; renommer `{title}` ; supprimer. |
+| POST | `/api/groupes/:groupId/listes/:listeId/articles` | `{label, quantity?}` → 201, ajouté en fin de liste. 409 `liste.pleine` au-delà de 500 articles. |
+| PATCH / DELETE | `/api/groupes/:groupId/listes/:listeId/articles/:articleId` | `{label?, quantity?, after_item_id?}` : `after_item_id` = placer **après** cet article (`null` : en tête), ce doit être un autre article de la même liste (404 sinon). |
+| PUT | `…/articles/:articleId/preneur` | `{prend: boolean}`. Toujours **mon** marquage. `UPDATE` conditionnel : le second preneur reçoit **409** `article.deja_pris` avec `pris_par: {membership_id, display_name}` ; retirer le marquage d'un autre : 409 `article.pas_le_votre`. Refaire ce qui est fait : 200 sans changement. Le marquage d'un membre qui a quitté le groupe est libre : tout membre peut le libérer ou le reprendre. |
+| PUT | `…/articles/:articleId/fait` | `{fait: boolean}`. `is_done` et `done_at` ensemble ; cocher deux fois garde l'instant du premier. |
+| GET / POST | `/api/groupes/:groupId/taches` | Lister (filtrable par `?event_id=`), créer `{title, details?, event_id?, due_at?}` (`todo`, sans assigné). |
+| PATCH / DELETE | `/api/groupes/:groupId/taches/:tacheId` | `{title?, details?, event_id?, due_at?, status?}` (`todo`/`doing`/`done`/`dropped`) ; `done_at` se déduit de `status`. |
+| PUT | `/api/groupes/:groupId/taches/:tacheId/assignation` | `{assignee_membership_id: id \| null}` : « je m'en occupe » (mon appartenance), désigner un membre **actif de ce groupe** (404 `membre.introuvable`, 409 `membre.inactif`), ou libérer. Tâche déjà à un autre : seuls l'assigné, l'auteur ou un administrateur (403 sinon). |
+| GET | `/api/groupes/:groupId/temps-reel` | **Flux SSE** du groupe, descendant seulement. `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `X-Accel-Buffering: no`, battement de cœur toutes les 25 s. 429 `flux.trop_de_connexions` au-delà de 8 flux par compte ou de `ATTROUPE_SSE_MAX_CONNECTIONS` (200) flux au total. |
+
+Messages du flux (`data:` JSON, type `message`) : `{type, ressource, id, parent_id, par, at}` — **jamais l'objet métier** ; le client
+recharge par les routes ci-dessus. Types : `liste.creee|renommee|supprimee`, `article.ajoute|modifie|pris|libere|coche|decoche|supprime`,
+`tache.creee|modifiee|assignee|supprimee` (un changement sans effet — déjà coché, déjà pris par moi — et un refus ne poussent rien).
+**Révocation active** : l'appartenance, la session et l'état du compte (ni suspendu ni anonymisé) sont relus en base **avant chaque envoi** (et à chaque battement) ; un membre retiré ne
+reçoit rien et son flux se ferme. Pas de reprise par `Last-Event-ID` : le client recharge tout à chaque (re)connexion. Proxy : prévoir un
+`proxy_read_timeout` supérieur à 25 s (celui de Nginx Proxy Manager, 60 s par défaut, convient).
+
 Registre de cloisonnement : `app/tests/cloisonnement/registre.ts` recense chaque route et son exigence ; le test de
 complétude échoue si une route montée n'y figure pas (les routeurs se montent avec `monter()`, `http/montage.ts`).
 
@@ -208,8 +235,8 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
 ## 8. Dette technique, TODOs & points d'attention
 
 - Modèle de données et architecture : **écrits** (`03` et `04` du dossier de conception). Le découpage
-  est au §10 de `04` : **lots 0 à 5 livrés** (squelette, base et cloisonnement, comptes, groupes et
-  membres, agenda du groupe, flux iCal), le prochain est le lot 6 (listes de courses et tâches).
+  est au §10 de `04` : **lots 0 à 6 livrés** (squelette, base et cloisonnement, comptes, groupes et
+  membres, agenda du groupe, flux iCal, listes de courses / tâches / temps réel), le prochain est le lot 7 (sondages de dates).
 - `ADR-0008` est **Acceptée** (lot 1). À revoir quand `node:sqlite` passera en « Stable ».
 - Lot 1 livré, puis corrigé après revue : `app/server/db/` (`base` : connexion opaque, `connection`,
   `migrate`, `moteur`, `scope` : GroupScope, `portee-utilisateur`, `sql` : garde du SQL brut,
@@ -269,3 +296,15 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
 - **Licence AGPL-3.0** retenue avant la première publication : pour une application servie par
   le réseau, c'est elle — et non la GPL — qui oblige celui qui héberge une version modifiée à
   publier ses modifications. Même choix que Glassboard.
+- Lot 6 livré (listes de courses, tâches, temps réel) : `db/queries/{listes,taches}.ts`, `services/{listes,taches-evenement,temps-reel}.ts`
+  (`services/taches.ts` est déjà le planificateur du processus), `http/{schemas,routes}/{listes,taches}.ts`,
+  `http/routes/temps-reel.ts`, et côté client `api/{listes,taches,tempsReel}.ts`, `pages/{Listes,Liste}.tsx`,
+  `components/TachesEvenement.tsx` (tâches et listes visibles depuis l'événement). Changements transverses : le scope accepte des
+  `conditions` sur `modifier` / `modifierPar` (écriture conditionnelle) ; **`executerEnTransaction` est en `BEGIN IMMEDIATE`** (trouvé par un
+  test à plusieurs processus : le `BEGIN` différé échouait en `SQLITE_BUSY`) ; `ErreurHttp` peut porter des `donnees` publiques (le nom du
+  preneur d'un 409) ; `index.ts` ferme les flux à l'arrêt. Le registre de cloisonnement connaît `flux: true` et les ressources `liste`,
+  `article`, `articleVoisin`, `tache`.
+- **Ouvert sur le lot 6** : l'interface n'a jamais été ouverte dans un navigateur, ni sur un vrai téléphone (le critère n° 3 est prouvé côté
+  serveur par des tests, pas à la main) ; la reconnexion automatique d'`EventSource` n'est vérifiée que par lecture du code ; un membre retiré
+  dont l'onglet reste ouvert réessaie (30 s) indéfiniment (404 muet) ; sur macOS, lancer `npm test` deux fois de suite en moins d'une minute
+  peut épuiser les ports éphémères (`EADDRNOTAVAIL`, supertest ouvre un serveur par requête) — attendre 30 s. C'est `connect EADDRNOTAVAIL 127.0.0.1:<port>` : sans gravité, sans rapport avec le code testé ; peu probable sous Linux.

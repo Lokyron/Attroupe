@@ -767,6 +767,7 @@ vraie, et la mise à jour est `docker compose pull && docker compose up -d`.
 | `ATTROUPE_IMMICH_ALLOW_PRIVATE` | non (`false`) | Autorise des URL Immich sur adresses privées (cas normal en homelab). |
 | `ATTROUPE_TRUST_PROXY` | non (`1`) | Nombre de proxys de confiance en amont, pour l'adresse réelle du client. |
 | `ATTROUPE_LOG_LEVEL` | non (`info`) | |
+| `ATTROUPE_SSE_MAX_CONNECTIONS` | non (`200`) | plafond global de flux temps réel (lot 6) |
 | `TZ` | non (`Europe/Paris`) | Fuseau du conteneur, pour les journaux et les tâches quotidiennes. |
 
 Le démarrage **échoue bruyamment** si une clé obligatoire manque ou si un secret fait moins de
@@ -827,4 +828,5 @@ l'argent est écrit et testé **avant** la première route de dépense.
 | 4 | **Quotas** (taille des dépôts, nombre de membres) | Aucun en V1. Si l'instance est réellement ouverte à des inconnus, c'est le prochain sujet de sécurité après le cloisonnement. |
 | 5 | **Journal d'audit** (F7) | En V2 au périmètre. Mon avis : les cinq actions sensibles (retrait de membre, suppression de groupe, suppression d'album, clôture des comptes, changement de configuration Immich) mériteraient d'être tracées dès le lot 3, pour quelques dizaines de lignes. |
 | 6 | **Écritures concurrentes** | SQLite sérialise ; `busy_timeout` à 5 s. Le risque réel est le flux SSE combiné aux cases cochées en rafale par huit personnes dans un magasin : à éprouver au lot 6, c'est le seul endroit où la charge est en pointe. |
+|   | *Amendement du 2026-11-16 (lot 6)* | Éprouvé : requêtes simultanées (huit comptes) **et** quatre processus sur le même fichier (`tests/integration/listes-concurrence.test.ts`). Ce dernier a montré qu'avec le `BEGIN` différé, une transaction qui lit puis écrit échoue en `SQLITE_BUSY` sans attendre : `executerEnTransaction` est en `BEGIN IMMEDIATE`. Voir [`ADR-0011`](../docs/decisions/ADR-0011-temps-reel-listes-taches.md). |
 | 7 | **Hors ligne** (F1 mentionne la consultation hors ligne) | La PWA du lot 12 met en cache la coquille et la dernière vue consultée, sans écriture hors ligne. Une vraie synchronisation différée est un projet à elle seule : à écarter explicitement de la V1. |

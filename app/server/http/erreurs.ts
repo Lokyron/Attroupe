@@ -7,6 +7,8 @@ export class ErreurHttp extends Error {
     public readonly retryApresSecondes?: number,
     /** Noms des champs refusés (validation) : jamais leurs valeurs. */
     public readonly champs?: readonly string[],
+    /** Données publiques jointes à la réponse (ex. QUI a déjà pris l'article) : jamais une donnée hors du groupe de l'appelant. */
+    public readonly donnees?: Readonly<Record<string, unknown>>,
   ) {
     super(cle);
     this.name = 'ErreurHttp';

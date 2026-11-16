@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Client, Reponse } from '../fixtures/comptes.js';
 import { attaquerFlux } from './flux.js';
+import { sonderFlux } from '../fixtures/flux-sse.js';
 import { avecRequete, poserDansCorps } from './forge.js';
 import { monde, type Monde } from './monde.js';
 import { cle, INTROUVABLE, REGISTRE, type EntreeRoute } from './registre.js';
@@ -60,6 +61,8 @@ function corpsDe(e: EntreeRoute, ids: Identifiants): unknown {
 }
 
 function appeler(c: Client, e: EntreeRoute, ids: Identifiants, options?: Parameters<Client['envoyer']>[3]): Promise<Reponse> {
+  // Route à réponse ininterrompue (flux SSE) : un vrai socket, coupé après le premier message (sinon la suite attendrait sans fin).
+  if (e.flux === true) return sonderFlux(c.app, c, url(e, ids));
   const methode = e.methode.toLowerCase() as 'get' | 'post' | 'put' | 'patch' | 'delete';
   return c.envoyer(methode, url(e, ids), corpsDe(e, ids) ?? (methode === 'get' || methode === 'delete' ? undefined : {}), options);
 }
@@ -138,11 +141,13 @@ describe('suite générique de cloisonnement : une attaque par route du registre
 
     // 3 bis. Erin (simple membre, SANS aucun droit sur l'événement) forge l'événement de B : 404, jamais 403. C'est ce qui prouve l'ordre
     // « trouver puis autoriser » avec quelqu'un à qui le 403 s'appliquerait ; les administratrices ci-dessus n'y sont jamais exposées.
-    // (Seul l'événement : un membre forgé est jugé APRÈS le droit, donc Erin recevrait légitimement un 403 avant.)
-    if (e.exige === 'organisateur') {
+    // (Pour une route `organisateur`, seul l'événement : un membre forgé est jugé APRÈS le droit, donc Erin recevrait légitimement un 403
+    // avant.) Lot 6 : une route `appartenance` est aussi attaquée par Erin, pour CHAQUE identifiant déclaré — un raccourci réservé aux
+    // administrateurs (« l'admin passe, donc on ne vérifie pas la cible ») ne se verrait jamais avec deux attaquantes administratrices.
+    if (e.exige === 'organisateur' || e.exige === 'appartenance') {
       for (const [endroit, declaration, libelle] of ENDROITS) {
         for (const [cleForgee, nature] of Object.entries(e[declaration] ?? {})) {
-          if (nature !== 'evenement') continue;
+          if (e.exige === 'organisateur' && nature !== 'evenement') continue;
           const forges: Identifiants = { ...idsA, [endroit]: { ...idsA[endroit], [cleForgee]: w.ressources.b[nature] } };
           await attaquer(`${libelle} (${cleForgee}), par Erin (sans droit)`, w.erin.client, forges, 404, INTROUVABLE[nature]);
         }
@@ -159,9 +164,17 @@ describe('suite générique de cloisonnement : une attaque par route du registre
 
     // 4 bis. Sous-déclaration : une route déclarée `appartenance` doit rester ouverte à une simple membre. Un 403 révèle qu'elle exige
     // l'admin sans que le registre le dise (et la boucle ci-dessus n'aurait jamais attaqué ce droit). Erin ouvre sa propre porte.
+    // Une route qui ÉCRIT (supprime, marque un article…) consommerait la ressource ou changerait l'état qu'Alice attend à l'étape 5 (article déjà
+    // pris : 409 au lieu de 200). Erin joue alors dans un second monde, jeté après ; seules les lectures partagent le monde d'Alice.
     if (e.exige === 'appartenance') {
-      const membre = await appeler(w.erin.client, e, idsA);
-      expect(membre.statut, `${cle(e)} est déclarée « appartenance » mais refuse une simple membre : sous-déclarée (admin ?) — ${JSON.stringify(membre.corps)}`).not.toBe(403);
+      const autre = e.methode === 'GET' ? undefined : await monde();
+      try {
+        const scene = autre ?? w;
+        const membre = await appeler(scene.erin.client, e, { groupId: scene.a.groupId, ...ressourcesDe(e, scene, 'a') });
+        expect(membre.statut, `${cle(e)} est déclarée « appartenance » mais refuse une simple membre : sous-déclarée (admin ?) — ${JSON.stringify(membre.corps)}`).not.toBe(403);
+      } finally {
+        autre?.d.nettoyer();
+      }
     }
 
     // 4 ter. Une route `organisateur` doit s'ouvrir à un CO-ORGANISATEUR simple membre (Carole, inscrite dans event_organizers de
@@ -179,8 +192,11 @@ describe('suite générique de cloisonnement : une attaque par route du registre
     // 5. Sa propre route : elle fonctionne (donc les 404 ci-dessus ne viennent pas d'un chemin faux), et ne montre rien de B.
     const propre = await appeler(w.alice.client, e, idsA);
     expect([401, 403, 404], `${cle(e)} avec ses propres identifiants : ${JSON.stringify(propre.corps)}`).not.toContain(propre.statut);
+    // Le chemin de SUCCÈS de la route est prouvé : une étape 5 qui ne renvoie plus 2xx (état pollué par une attaque antérieure : article déjà
+    // pris, ressource consommée) ne prouverait plus rien.
+    if (e.exige === 'appartenance') expect(propre.statut, `${cle(e)} : l'appel légitime d'Alice ne réussit plus (${JSON.stringify(propre.corps)})`).toBeLessThan(300);
     expect(propre.statut).toBeLessThan(500);
-    const corps = JSON.stringify(propre.corps);
+    const corps = JSON.stringify(propre.corps) + propre.texte;
     for (const marque of w.marquesDeB) expect(corps, `fuite de « ${marque} » vers un membre de A`).not.toContain(marque);
 
     // 6. Ancien membre : retirée de A, ses propres identifiants ne mènent plus à rien.

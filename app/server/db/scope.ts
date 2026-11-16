@@ -101,10 +101,13 @@ export interface GroupScope {
   readonly un: <T>(table: TableAvecId, id: string) => T | undefined;
   /** Insère en posant `group_id`, l'auteur (membre du scope), l'`id` (UUID v7) et les horodatages UTC. Renvoie l'`id`. */
   readonly inserer: <K extends TableMetier>(table: K, valeurs: Valeurs) => K extends TableAvecId ? string : undefined;
-  /** Met à jour une ligne du groupe par `id` ; `false` si aucune ligne n'a été touchée. */
-  readonly modifier: (table: TableAvecId, id: string, valeurs: Valeurs) => boolean;
-  /** Met à jour une ligne du groupe désignée par sa clé primaire (hors `group_id`). */
-  readonly modifierPar: (table: TableMetier, cle: Valeurs, valeurs: Valeurs) => boolean;
+  /**
+   * Met à jour une ligne du groupe par `id` ; `false` si aucune ligne n'a été touchée. Avec `conditions` (liées, combinées par ET), la mise
+   * à jour est CONDITIONNELLE : `false` veut aussi dire « la condition ne tenait plus » (course perdue), décidé par la base elle-même.
+   */
+  readonly modifier: (table: TableAvecId, id: string, valeurs: Valeurs, conditions?: readonly Condition[]) => boolean;
+  /** Met à jour une ligne du groupe désignée par sa clé primaire (hors `group_id`), éventuellement sous conditions. */
+  readonly modifierPar: (table: TableMetier, cle: Valeurs, valeurs: Valeurs, conditions?: readonly Condition[]) => boolean;
   /** Insère, ou met à jour la ligne de MÊME clé si elle est dans le groupe (clé forgée : sans effet, `false`). */
   readonly upsert: (table: TableSansId, valeurs: Valeurs) => boolean;
   /** Pose `deleted_at` ; `false` si la ligne n'existe pas dans ce groupe ou est déjà supprimée. */
@@ -208,7 +211,7 @@ export function creerScope(base: Base, userId: string, groupId: string): GroupSc
     tous: moteur.tous,
     un: moteur.un,
     inserer: moteur.inserer as GroupScope['inserer'],
-    modifier: (table: TableAvecId, id: string, valeurs: Valeurs) => moteur.modifierPar(table, { id }, valeurs),
+    modifier: (table: TableAvecId, id: string, valeurs: Valeurs, conditions?: readonly Condition[]) => moteur.modifierPar(table, { id }, valeurs, conditions),
     modifierPar: moteur.modifierPar,
     upsert: moteur.upsert,
     supprimerDoux: moteur.supprimerDoux,

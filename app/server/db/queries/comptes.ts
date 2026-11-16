@@ -353,6 +353,22 @@ export function trouverSession(base: Base, empreinte: string, maintenant: string
   return { id: s.id, userId: s.user_id, createdAt: s.created_at, lastSeenAt: s.last_seen_at };
 }
 
+/**
+ * La session est-elle toujours vivante (ni révoquée ni échue) ET le compte toujours actif (ni suspendu ni anonymisé) ? Relue en base :
+ * sert aux connexions longues (flux temps réel), qui ne repassent pas par l'intergiciel de session entre deux envois. La suspension
+ * s'écrit sur `users`, sans toucher `sessions` : c'est `creerPorteeUtilisateur` qui la fait respecter à chaque requête, donc il faut la
+ * relire ici aussi.
+ */
+export function sessionVivante(portee: PorteeUtilisateur, sessionId: string, maintenant: string): boolean {
+  return (
+    preparer(
+      baseDe(portee),
+      `SELECT 1 FROM sessions AS s JOIN users AS u ON u.id = s.user_id
+       WHERE s.user_id = ? AND s.id = ? AND s.revoked_at IS NULL AND s.expires_at > ? AND u.disabled_at IS NULL AND u.anonymized_at IS NULL`,
+    ).get(portee.userId, sessionId, maintenant) !== undefined
+  );
+}
+
 /** Prolonge une session (glissante) de CE compte : nouvelle échéance et dernière activité. */
 export function prolongerSession(portee: PorteeUtilisateur, sessionId: string, maintenant: string, expireLe: string): void {
   preparer(baseDe(portee), 'UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL').run(

@@ -5,6 +5,7 @@ import type { Env } from '../config/env.js';
 import type { Base } from '../db/base.js';
 import { LimiteurCadence, REGLES_PAR_DEFAUT, type Horloge, type ReglesCadence } from '../services/cadence.js';
 import { empreinteLeurre, PARAMETRES_PRODUCTION, type ParametresScrypt } from '../services/mot-de-passe.js';
+import { DiffuseurTempsReel } from '../services/temps-reel.js';
 import type { Contexte } from './contexte.js';
 import { csrf } from './middleware/csrf.js';
 import { gestionnaireErreurs } from './middleware/erreurs.js';
@@ -33,6 +34,8 @@ export interface OptionsApp {
   regles?: ReglesCadence;
   limiteur?: LimiteurCadence;
   journal?: Journal;
+  /** La diffusion du temps réel : `index.ts` la fournit pour pouvoir fermer les flux à l'arrêt ; les tests l'injectent (battement court, plafond). */
+  diffuseur?: DiffuseurTempsReel;
   delaiMinimalOubliMs?: number;
 }
 
@@ -90,6 +93,7 @@ export function creerApp(options: OptionsApp): Express {
       parametresScrypt,
       delaiMinimalOubliMs: options.delaiMinimalOubliMs ?? DELAI_MINIMAL_OUBLI_MS,
       cookieSecurise: env.ATTROUPE_BASE_URL.startsWith('https:'),
+      diffuseur: options.diffuseur ?? new DiffuseurTempsReel({ horloge, journal, plafondGlobal: env.ATTROUPE_SSE_MAX_CONNECTIONS }),
     };
     // Empreinte leurre chauffée au démarrage : la première connexion sur une adresse inconnue ne doit pas durer deux fois plus.
     empreinteLeurre(parametresScrypt).catch((erreur: unknown) => {

@@ -7,6 +7,7 @@ import { creerApp } from './http/app.js';
 import { creerJournal } from './http/middleware/journal.js';
 import { creerTransporteurBrevo } from './services/brevo.js';
 import { demarrerTaches } from './services/taches.js';
+import { DiffuseurTempsReel } from './services/temps-reel.js';
 
 // Amorçage : env → base → migrations → routes → écoute.
 function demarrer(): void {
@@ -31,11 +32,14 @@ function demarrer(): void {
   }
   const taches = demarrerTaches({ base, transporteur, journal, baseUrl: env.ATTROUPE_BASE_URL });
 
+  // Créé ici pour pouvoir fermer les flux à l'arrêt : un flux SSE ne se termine jamais de lui-même.
+  const diffuseur = new DiffuseurTempsReel({ journal, plafondGlobal: env.ATTROUPE_SSE_MAX_CONNECTIONS });
   const app = creerApp({
     env,
     version,
     base,
     journal,
+    diffuseur,
     ...(env.NODE_ENV === 'production' ? { dossierClient } : {}),
   });
 
@@ -57,6 +61,8 @@ function demarrer(): void {
 
   // Arrêt propre sur le signal de Docker : on finit les requêtes en cours.
   const arreter = (): void => {
+    // Sans cela, `serveur.close()` attendrait indéfiniment les flux temps réel ouverts.
+    diffuseur.fermerTout();
     serveur.close(() => {
       // On laisse finir la remise d'e-mails en cours avant de fermer la base.
       void taches.arreter().then(() => {

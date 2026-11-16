@@ -122,6 +122,25 @@ export async function monde(): Promise<Monde> {
   // qu'une route `organisateur` s'ouvre vraiment à un co-organisateur et pas seulement à un administrateur.
   const coOrganisatrice = await alice.client.post(`/api/groupes/${a.groupId}/evenements/${evenementA}/organisateurs/${membreDe(a, carole)}`);
   if (coOrganisatrice.statut !== 200) throw new Error(`Co-organisatrice refusée : ${JSON.stringify(coOrganisatrice.corps)}`);
+  // Une liste de courses (rattachée à l'événement) avec DEUX articles, et une tâche, dans chaque monde (lot 6). Le second article sert de
+  // voisin au réordonnancement (`after_item_id` doit être un autre article de la même liste).
+  const courses = async (auteur: Personne, g: GroupeAmorce, evenementId: string, titre: string, article: string, voisin: string, tache: string): Promise<Pick<Record<Ressource, string>, 'liste' | 'article' | 'articleVoisin' | 'tache'>> => {
+    const liste = await auteur.client.post(`/api/groupes/${g.groupId}/listes`, { title: titre, event_id: evenementId });
+    if (liste.statut !== 201) throw new Error(`Liste refusée : ${JSON.stringify(liste.corps)}`);
+    const listeId = liste.corps['id'] as string;
+    const ajout = async (label: string): Promise<string> => {
+      const r = await auteur.client.post(`/api/groupes/${g.groupId}/listes/${listeId}/articles`, { label });
+      if (r.statut !== 201) throw new Error(`Article refusé : ${JSON.stringify(r.corps)}`);
+      return r.corps['id'] as string;
+    };
+    const articleId = await ajout(article);
+    const voisinId = await ajout(voisin);
+    const t = await auteur.client.post(`/api/groupes/${g.groupId}/taches`, { title: tache, event_id: evenementId });
+    if (t.statut !== 201) throw new Error(`Tâche refusée : ${JSON.stringify(t.corps)}`);
+    return { liste: listeId, article: articleId, articleVoisin: voisinId, tache: t.corps['id'] as string };
+  };
+  const coursesA = await courses(alice, a, evenementA, 'Courses du groupe A', 'Baguettes de A', 'Fromage de A', 'Apporter la glace de A');
+  const coursesB = await courses(bob, b, evenementB, 'Courses de B secret', 'Pain de B', 'Vin de B', 'Tâche secrète de B');
   const recueA = await recue(alice);
   const recueB = await recue(bob);
   // Flux iCal : un abonnement d'Alice et un de Bob (route de révocation), puis les jetons des simples membres.
@@ -136,8 +155,8 @@ export async function monde(): Promise<Monde> {
     manonRestreintB: await creerFlux(manon, { group_id: b.groupId }),
   };
   const ressources = {
-    a: { membre: membreDe(a, carole), evenement: evenementA, invitation: invitationA, session: await idSession(alice), abonnement: abonnementAlice.id, jetonFlux: flux.erin.jeton, ...recueA },
-    b: { membre: membreDe(b, dave), evenement: evenementB, invitation: invitationB, session: await idSession(bob), abonnement: abonnementBob.id, jetonFlux: flux.dave.jeton, ...recueB },
+    a: { membre: membreDe(a, carole), evenement: evenementA, invitation: invitationA, session: await idSession(alice), abonnement: abonnementAlice.id, jetonFlux: flux.erin.jeton, ...coursesA, ...recueA },
+    b: { membre: membreDe(b, dave), evenement: evenementB, invitation: invitationB, session: await idSession(bob), abonnement: abonnementBob.id, jetonFlux: flux.dave.jeton, ...coursesB, ...recueB },
   };
   const marquesDeB = [
     b.groupId,
@@ -150,6 +169,10 @@ export async function monde(): Promise<Monde> {
     dave.username,
     'invite-b@exemple.test',
     'Soirée du groupe B secret',
+    'Courses de B secret',
+    'Pain de B',
+    'Vin de B',
+    'Tâche secrète de B',
     ...Object.values(ressources.b),
   ];
   return { d, alice, bob, carole, dave, erin, manon, frank, a, b, ressources, marquesDeB, flux };
