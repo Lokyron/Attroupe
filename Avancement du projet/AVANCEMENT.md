@@ -3,6 +3,39 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-16 — Le défaut qu'aucun test ne pouvait trouver : le lien `webcal://`
+
+En éprouvant la bêta sur un vrai iPhone, l'abonnement iCal s'est révélé **inutilisable**, alors que le serveur était
+irréprochable : `HEAD`, `OPTIONS` et `GET` en 200, `text/calendar; charset=utf-8`, `ETag` et `304`, `VCALENDAR`
+conforme au pliage à 75 octets près, DNS public correct, service joignable depuis Internet. Tout vert, 1 118 tests
+passés — et la fonctionnalité ne marchait pas.
+
+**La cause** : l'application ne donnait qu'une URL en `https://`. Sur iOS, un lien `https` vers un `.ics` fait
+*télécharger* le fichier et propose « ajouter les événements » : c'est une **copie figée**, jamais rafraîchie. Seul le
+schéma **`webcal://`** fait créer un **abonnement**. Le mot `webcal` n'existait nulle part dans le dépôt.
+
+**Comment ça s'est vu** : les journaux du proxy. Les événements apparaissaient bien sur le téléphone, mais aucun agent
+de calendrier n'avait **jamais** requis le flux — uniquement Safari. Et un événement ajouté ensuite n'apparaissait
+pas. Le journal a donc départagé « ça a l'air de marcher » et « ça marche », ce qu'aucune capture d'écran n'aurait
+fait.
+
+**Corrigé** : `POST /api/moi/flux-ical` renvoie `url` **et** `url_webcal`, l'interface fait du lien `webcal://` son
+action principale (un vrai `href`, sans JavaScript : c'est le navigateur qui doit passer la main au Calendrier), avec
+le texte qui explique la différence entre abonnement et copie figée, et un avertissement sur Google Agenda — dont la
+première récupération dort souvent plusieurs heures, puis rafraîchit toutes les 8 à 24 h sans moyen de forcer.
+Le jeton reste affiché **une seule fois** : un lien perdu se révoque et se recrée, ce que l'interface dit désormais
+au lieu de le laisser deviner. 1 122 tests. Déployé sur le 113 et vérifié sur l'instance : les deux champs sont
+rendus, ils portent le même jeton, et la liste des abonnements ne laisse filtrer ni jeton, ni `webcal`, ni `/ical/`.
+
+**La leçon, et elle vaut pour la suite du projet.** J'ai répété cinq lots de suite que l'interface n'avait jamais été
+ouverte, sans pouvoir dire ce que ça cachait. Voilà ce que ça cachait : un serveur parfait livrant une fonctionnalité
+morte, parce que la chaîne donnée à l'utilisateur portait le mauvais schéma. **Aucun test automatique de ce dépôt ne
+pouvait le trouver** — il fallait un vrai téléphone, et il en faudra un à chaque lot qui produit quelque chose qu'un
+appareil doit consommer (lot 11 et les photos, lot 12 et la PWA installable).
+
+**Reste à éprouver** : l'annulation. Un événement annulé doit **disparaître** du téléphone (`STATUS:CANCELLED`) et non
+y rester figé. C'est la seconde moitié du critère n° 2, toujours pas vérifiée à la main.
+
 ## 2026-11-16 — Mise en service de la bêta et première validation réelle
 
 Conteneurs **112** (`attroupe`, `10.1.20.112`) et **113** (`attroupe-beta`, `10.1.20.113`) créés sur `PVE-TXLHOME`
