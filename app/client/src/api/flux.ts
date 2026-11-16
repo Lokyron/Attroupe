@@ -15,8 +15,10 @@ export interface Abonnement {
 }
 
 export interface AbonnementCree extends Abonnement {
-  /** Adresse complète à coller dans le calendrier. Jamais relue ailleurs. */
+  /** Adresse `https` complète, à coller dans Google Agenda ou un client de bureau. Jamais relue ailleurs. */
   url: string;
+  /** Même adresse en `webcal://` : c'est ce lien, ouvert depuis le téléphone, qui crée un abonnement qui se met à jour. */
+  url_webcal: string;
 }
 
 function abonnement(a: unknown): Abonnement {
@@ -39,7 +41,7 @@ export async function listerAbonnements(): Promise<Abonnement[]> {
 
 export async function creerAbonnement(corps: { label: string | null; group_id: string | null; include_declined: boolean }): Promise<AbonnementCree> {
   const r = await appeler('POST', '/api/moi/flux-ical', corps);
-  return { ...abonnement(r), url: texte(champ(r, 'url')) };
+  return { ...abonnement(r), url: texte(champ(r, 'url')), url_webcal: texte(champ(r, 'url_webcal')) };
 }
 
 export async function revoquerAbonnement(id: string): Promise<void> {

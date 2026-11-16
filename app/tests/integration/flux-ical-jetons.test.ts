@@ -30,6 +30,8 @@ describe('abonnements calendrier : /api/moi/flux-ical', () => {
       const jeton = r.corps['token'] as string;
       expect(jeton).toMatch(/^[a-z2-7]{52}$/);
       expect(r.corps['url']).toBe(`https://attroupe.test/ical/${jeton}.ics`);
+      // Même jeton dans les deux formes ; seul le schéma change (webcal:// = abonnement sur iOS, https = copier-coller).
+      expect(r.corps['url_webcal']).toBe(`webcal://attroupe.test/ical/${jeton}.ics`);
       expect(r.corps).toMatchObject({ label: 'Mon iPhone', group_id: null, group_name: null, include_personal: 0, include_declined: 1, last_used_at: null, revoked_at: null });
       const [ligne] = lignes();
       expect(ligne?.['token_hash']).toBe(createHash('sha256').update(jeton, 'utf8').digest('hex'));
@@ -116,6 +118,9 @@ describe('abonnements calendrier : /api/moi/flux-ical', () => {
       const texte = JSON.stringify(r.corps);
       expect(texte).not.toContain(jeton);
       expect(texte).not.toContain('token');
+      expect(texte).not.toContain('url');
+      expect(texte).not.toContain('webcal');
+      expect(texte).not.toContain('/ical/');
       expect(texte).not.toContain(createHash('sha256').update(jeton, 'utf8').digest('hex'));
       expect(r.corps['abonnements']).toEqual([
         {

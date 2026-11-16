@@ -50,7 +50,15 @@ function NouvelAbonnement({ groupes, abonnements, onCree }: { groupes: GroupeRes
       <div role="status">
         <h3>{t('flux.url_titre')}</h3>
         <p role="alert">{t('flux.url_avertissement')}</p>
-        <input type="text" readOnly value={cree.url} aria-label={t('flux.url_titre')} onFocus={(e) => e.target.select()} />
+        <p>
+          <a href={cree.url_webcal} className="bouton">
+            {t('flux.ajouter_calendrier')}
+          </a>
+        </p>
+        <p>{t('flux.difference')}</p>
+        <p>{t('flux.rafraichissement')}</p>
+        <p>{t('flux.url_https_aide')}</p>
+        <input type="text" readOnly value={cree.url} aria-label={t('flux.url_https_titre')} onFocus={(e) => e.target.select()} />
         <button type="button" onClick={() => copier(cree.url)}>
           {t('flux.copier')}
         </button>

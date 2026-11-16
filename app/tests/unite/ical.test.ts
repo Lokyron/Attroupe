@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { echapperTexte, genererCalendrier, plierLigne, sequenceDe, type EvenementIcal, type LibellesIcal } from '../../server/domain/ical.js';
-import { base32, FORME_JETON_FLUX, nouveauJetonFlux } from '../../server/domain/jetons.js';
+import { base32, FORME_JETON_FLUX, nouveauJetonFlux, urlFlux, urlWebcal } from '../../server/domain/jetons.js';
 
 // Format iCalendar (RFC 5545) : pliage en OCTETS, échappement, structure du VCALENDAR. Logique pure, sans base.
 
@@ -186,5 +186,30 @@ describe('jeton de flux', () => {
     expect(a).toMatch(FORME_JETON_FLUX);
     expect(a).toHaveLength(52);
     expect(nouveauJetonFlux()).not.toBe(a);
+  });
+});
+
+describe('URL du flux : https pour copier, webcal:// pour s’abonner', () => {
+  const jeton = 'a'.repeat(52);
+
+  it('construit l’URL depuis une base https, avec ou sans barre oblique finale', () => {
+    expect(urlFlux('https://attroupe.test', jeton)).toBe(`https://attroupe.test/ical/${jeton}.ics`);
+    expect(urlFlux('https://attroupe.test/', jeton)).toBe(`https://attroupe.test/ical/${jeton}.ics`);
+    expect(urlFlux('https://attroupe.test///', jeton)).toBe(`https://attroupe.test/ical/${jeton}.ics`);
+  });
+
+  it('remplace https:// par webcal://', () => {
+    expect(urlWebcal(urlFlux('https://attroupe.test', jeton))).toBe(`webcal://attroupe.test/ical/${jeton}.ics`);
+    expect(urlWebcal(urlFlux('https://attroupe.test/', jeton))).toBe(`webcal://attroupe.test/ical/${jeton}.ics`);
+  });
+
+  it('remplace http:// par webcal:// (développement local), port conservé', () => {
+    expect(urlWebcal(urlFlux('http://localhost:3000', jeton))).toBe(`webcal://localhost:3000/ical/${jeton}.ics`);
+    expect(urlWebcal(urlFlux('http://localhost:3000/', jeton))).toBe(`webcal://localhost:3000/ical/${jeton}.ics`);
+  });
+
+  it('refuse une URL qui n’est ni http ni https plutôt que de la déguiser', () => {
+    expect(() => urlWebcal('ftp://attroupe.test/x.ics')).toThrow();
+    expect(() => urlWebcal('attroupe.test/x.ics')).toThrow();
   });
 });

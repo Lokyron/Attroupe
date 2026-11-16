@@ -53,3 +53,19 @@ export function base32(octets: Uint8Array): string {
 export function nouveauJetonFlux(): string {
   return base32(randomBytes(32));
 }
+
+/** URL complète d'un flux : la base (barres obliques finales ignorées) puis `/ical/<jeton>.ics`. */
+export function urlFlux(baseUrl: string, jeton: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/ical/${jeton}.ics`;
+}
+
+/**
+ * Même URL avec le schéma `webcal://` à la place de `https://` (ou `http://`, en développement local). C'est ce schéma qui fait
+ * créer un ABONNEMENT par le Calendrier d'iOS ; une URL `https` vers un `.ics` n'est qu'un téléchargement, donc une copie figée.
+ * Une URL qui n'est ni `http` ni `https` est une erreur de configuration : on la signale plutôt que de la déguiser.
+ */
+export function urlWebcal(url: string): string {
+  const reste = url.replace(/^https?:\/\//i, '');
+  if (reste === url || reste === '') throw new Error(`URL de flux inattendue (http ou https attendu) : ${url}`);
+  return `webcal://${reste}`;
+}

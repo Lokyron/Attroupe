@@ -79,3 +79,12 @@ rien et coûterait un écart à §7.1. Elle est écartée.
 - **Sortir `calendar_feed_tokens` de la garde**, comme `sessions` : on perdrait la protection des routes
   `/api/moi/flux-ical`, qui listent et révoquent des jetons appartenant à un compte.
 - **CalDAV** : hors périmètre V1 (§7.1). L'abonnement en lecture seule couvre le besoin.
+
+## Note du 2026-11-16 — le schéma `webcal://` est une exigence de l'interface
+
+Éprouvé sur un vrai iPhone : une URL `https://…/ical/<jeton>.ics` ouverte dans Safari est **téléchargée** (« ajouter les
+événements » : copie unique, jamais rafraîchie) ; seul `webcal://` passe la main au Calendrier, qui crée un
+**abonnement**. Ce n'est pas une exigence du **transport** (le serveur répond identiquement, et `webcal://` est traduit
+en `http://` puis redirigé en `https://` par les clients) mais de **l'interface** : `POST /api/moi/flux-ical` renvoie
+donc `url` et `url_webcal`, et l'écran propose le lien `webcal://` en action principale. Le jeton, lui, reste affiché
+à la création seulement : `GET` ne rend aucune adresse.

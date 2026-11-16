@@ -4,7 +4,7 @@ import { mesGroupes } from '../../db/queries/transverse.js';
 import { accepter, mesInvitations, refuser } from '../../services/invitations.js';
 import { listerSessions, lireProfil, modifierProfil, revoquerAutresSessions, revoquerSession } from '../../db/queries/comptes.js';
 import { versInstant } from '../../domain/instant.js';
-import { empreinteJeton, nouveauJetonFlux } from '../../domain/jetons.js';
+import { empreinteJeton, nouveauJetonFlux, urlFlux, urlWebcal } from '../../domain/jetons.js';
 import { changerMotDePasse, renvoyerVerification } from '../../services/authentification.js';
 import type { Contexte } from '../contexte.js';
 import { ErreurHttp } from '../erreurs.js';
@@ -114,6 +114,7 @@ export function routesMoi(contexte: Contexte): Router {
     const groupe = corps.group_id === null ? undefined : groupes.find((g) => g.group_id === corps.group_id);
     if (corps.group_id !== null && groupe === undefined) throw new ErreurHttp(404, 'groupe.introuvable');
     const jeton = nouveauJetonFlux();
+    const url = urlFlux(contexte.env.ATTROUPE_BASE_URL, jeton);
     const abonnement = creerAbonnement(portee, {
       empreinte: empreinteJeton(jeton),
       groupId: corps.group_id,
@@ -121,12 +122,14 @@ export function routesMoi(contexte: Contexte): Router {
       includePersonal: corps.include_personal,
       includeDeclined: corps.include_declined,
     });
-    // Seule réponse qui porte le jeton, et il ne sera plus jamais relisible.
+    // Seule réponse qui porte le jeton ET ses URL, jamais relisibles : la liste n'a que l'empreinte. `url_webcal` fait créer un
+    // abonnement sur iOS ; `url` (https) sert au copier-coller (Google Agenda, clients de bureau).
     res.status(201).json({
       ...abonnement,
       group_name: groupe?.name ?? null,
       token: jeton,
-      url: `${contexte.env.ATTROUPE_BASE_URL.replace(/\/+$/, '')}/ical/${jeton}.ics`,
+      url,
+      url_webcal: urlWebcal(url),
     });
   });
 
