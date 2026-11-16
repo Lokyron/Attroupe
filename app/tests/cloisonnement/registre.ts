@@ -19,12 +19,14 @@ export type Methode = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
  *  - `aucune`       : route publique (inscription, connexion, santé…) ;
  *  - `session`      : exige une session ; elle relève du COMPTE (`/api/moi/*`, sélecteur de groupes) ;
  *  - `appartenance` : sous `/api/groupes/:groupId/…`, exige d'être membre ACTIF du groupe (404 sinon) ;
- *  - `admin`        : idem, et exige d'être administrateur du groupe (403 sinon).
+ *  - `admin`        : idem, et exige d'être administrateur du groupe (403 `droit.admin_requis` sinon) ;
+ *  - `organisateur` : idem, et exige de pouvoir modifier l'événement visé (auteur, co-organisateur ou administrateur du groupe :
+ *                     403 `droit.organisateur_requis` sinon). La ressource `evenement` est donc déclarée dans `ressources`.
  */
-export type Exigence = 'aucune' | 'session' | 'appartenance' | 'admin';
+export type Exigence = 'aucune' | 'session' | 'appartenance' | 'admin' | 'organisateur';
 
 /** Ressource désignée par un paramètre d'URL. Chacune existe en un exemplaire dans chaque monde (A et B) : voir monde.ts. */
-export type Ressource = 'membre' | 'invitation' | 'invitationRecue' | 'jeton' | 'session';
+export type Ressource = 'membre' | 'evenement' | 'invitation' | 'invitationRecue' | 'jeton' | 'session';
 
 export interface EntreeRoute {
   readonly methode: Methode;
@@ -36,6 +38,8 @@ export interface EntreeRoute {
   readonly ressourcesCorps?: Readonly<Record<string, Ressource>>;
   /** Paramètre de la chaîne de requête → ressource qu'il désigne. */
   readonly ressourcesRequete?: Readonly<Record<string, Ressource>>;
+  /** Chaîne de requête OBLIGATOIRE de la route (valide), à laquelle s'ajoutent les identifiants déclarés dans `ressourcesRequete`. */
+  readonly requete?: Readonly<Record<string, string>>;
   /** Corps JSON valide pour la route (les attaques doivent buter sur le cloisonnement, pas sur la validation). */
   readonly corps?: unknown;
 }
@@ -43,6 +47,7 @@ export interface EntreeRoute {
 /** Clé d'erreur attendue quand la ressource forgée n'existe pas pour l'appelant. */
 export const INTROUVABLE: Readonly<Record<Ressource, string>> = {
   membre: 'membre.introuvable',
+  evenement: 'evenement.introuvable',
   invitation: 'invitation.introuvable',
   invitationRecue: 'invitation.introuvable',
   jeton: 'invitation.introuvable',
@@ -90,6 +95,19 @@ export const REGISTRE: readonly EntreeRoute[] = [
   { methode: 'GET', chemin: '/api/groupes/:groupId/invitations', exige: 'admin' },
   { methode: 'POST', chemin: '/api/groupes/:groupId/invitations', exige: 'admin', corps: { email: 'forge@exemple.test' } },
   { methode: 'DELETE', chemin: '/api/groupes/:groupId/invitations/:invitationId', exige: 'admin', ressources: { invitationId: 'invitation' } },
+
+  // --- L'agenda du groupe (lot 4) ---------------------------------------------------------------------------------
+  // `host_membership_id` est le seul identifiant que le corps de création LIT : un hôte de B ne doit pas entrer dans un événement de A.
+  { methode: 'GET', chemin: '/api/groupes/:groupId/evenements', exige: 'appartenance', requete: { du: '2027-03-01', au: '2027-03-31' } },
+  { methode: 'POST', chemin: '/api/groupes/:groupId/evenements', exige: 'appartenance', corps: { title: 'Apéro', starts_at: '2027-03-20T18:00:00Z', time_zone: 'Europe/Paris', host_membership_id: 'a-remplacer' }, ressourcesCorps: { host_membership_id: 'membre' } },
+  { methode: 'GET', chemin: '/api/groupes/:groupId/evenements/:evenementId', exige: 'appartenance', ressources: { evenementId: 'evenement' } },
+  { methode: 'PATCH', chemin: '/api/groupes/:groupId/evenements/:evenementId', exige: 'organisateur', ressources: { evenementId: 'evenement' }, corps: { title: 'Pirate', host_membership_id: 'a-remplacer' }, ressourcesCorps: { host_membership_id: 'membre' } },
+  { methode: 'DELETE', chemin: '/api/groupes/:groupId/evenements/:evenementId', exige: 'organisateur', ressources: { evenementId: 'evenement' } },
+  { methode: 'PUT', chemin: '/api/groupes/:groupId/evenements/:evenementId/ma-presence', exige: 'appartenance', ressources: { evenementId: 'evenement' }, corps: { status: 'yes', guests_count: 1 } },
+  { methode: 'GET', chemin: '/api/groupes/:groupId/evenements/:evenementId/presences', exige: 'appartenance', ressources: { evenementId: 'evenement' } },
+  // Deux identifiants lus : l'événement ET le membre. Promouvoir un membre de B sur un événement de A (ou l'inverse) est un 404 du membre.
+  { methode: 'POST', chemin: '/api/groupes/:groupId/evenements/:evenementId/organisateurs/:membreId', exige: 'organisateur', ressources: { evenementId: 'evenement', membreId: 'membre' } },
+  { methode: 'DELETE', chemin: '/api/groupes/:groupId/evenements/:evenementId/organisateurs/:membreId', exige: 'organisateur', ressources: { evenementId: 'evenement', membreId: 'membre' } },
 ];
 
 export const cle = (e: Pick<EntreeRoute, 'methode' | 'chemin'>): string => `${e.methode} ${e.chemin}`;

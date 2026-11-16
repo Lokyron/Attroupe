@@ -15,7 +15,7 @@ function estObjet(valeur: unknown): valeur is Record<string, unknown> {
   return typeof valeur === 'object' && valeur !== null;
 }
 
-export async function appeler(methode: 'GET' | 'POST' | 'PATCH' | 'DELETE', chemin: string, corps?: unknown): Promise<unknown> {
+export async function appeler(methode: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', chemin: string, corps?: unknown): Promise<unknown> {
   const reponse = await fetch(chemin, {
     method: methode,
     credentials: 'same-origin',
@@ -57,4 +57,13 @@ export function nombre(valeur: unknown): number {
 export function role(valeur: unknown): 'admin' | 'member' {
   if (valeur !== 'admin' && valeur !== 'member') throw new Error('Réponse inattendue : rôle inconnu.');
   return valeur;
+}
+
+export function booleen(valeur: unknown): boolean {
+  if (typeof valeur !== 'boolean') throw new Error('Réponse inattendue : booléen attendu.');
+  return valeur;
+}
+
+export function nombreOuNul(valeur: unknown): number | null {
+  return valeur === null ? null : nombre(valeur);
 }

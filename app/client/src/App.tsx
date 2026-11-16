@@ -3,19 +3,30 @@ import { ErreurApi } from './api/client';
 import { deconnecter, lireMoi, type Moi } from './api/groupes';
 import { t } from './i18n';
 import { Connexion } from './pages/Connexion';
+import { Agenda } from './pages/Agenda';
+import { Evenement, NouvelEvenement } from './pages/Evenement';
 import { Groupe } from './pages/Groupe';
 import { InvitationLien } from './pages/InvitationLien';
 import { Invitations } from './pages/Invitations';
 import { NouveauGroupe } from './pages/NouveauGroupe';
 
-type Route = { type: 'accueil' } | { type: 'nouveau' } | { type: 'invitations' } | { type: 'groupe'; id: string };
+type Route = { type: 'accueil' } | { type: 'nouveau' } | { type: 'invitations' } | { type: 'groupe'; id: string }
+  | { type: 'agenda'; id: string }
+  | { type: 'evenement'; id: string; evenementId: string }
+  | { type: 'evenement-nouveau'; id: string };
 type Etat = { type: 'chargement' } | { type: 'anonyme' } | { type: 'connecte'; moi: Moi };
 
 function lireRoute(): Route {
-  const [, premier, second] = window.location.hash.split('/');
+  const [, premier, second, troisieme, quatrieme] = window.location.hash.split('/');
   if (premier === 'nouveau') return { type: 'nouveau' };
   if (premier === 'invitations') return { type: 'invitations' };
-  if (premier === 'groupe' && second !== undefined && second !== '') return { type: 'groupe', id: decodeURIComponent(second) };
+  if (premier === 'groupe' && second !== undefined && second !== '') {
+    const id = decodeURIComponent(second);
+    if (troisieme === 'agenda') return { type: 'agenda', id };
+    if (troisieme === 'evenement-nouveau') return { type: 'evenement-nouveau', id };
+    if (troisieme === 'evenement' && quatrieme !== undefined && quatrieme !== '') return { type: 'evenement', id, evenementId: decodeURIComponent(quatrieme) };
+    return { type: 'groupe', id };
+  }
   return { type: 'accueil' };
 }
 
@@ -54,7 +65,7 @@ export function App() {
   }
 
   const { moi } = etat;
-  const groupeCourant = route.type === 'groupe' ? route.id : '';
+  const groupeCourant = route.type === 'groupe' || route.type === 'agenda' || route.type === 'evenement' || route.type === 'evenement-nouveau' ? route.id : '';
   return (
     <main className="accueil">
       <header className="entete">
@@ -101,6 +112,9 @@ export function App() {
           }}
         />
       )}
+      {!lien && route.type === 'agenda' && <Agenda key={route.id} groupId={route.id} />}
+      {!lien && route.type === 'evenement-nouveau' && <NouvelEvenement key={route.id} groupId={route.id} />}
+      {!lien && route.type === 'evenement' && <Evenement key={route.evenementId} groupId={route.id} evenementId={route.evenementId} />}
     </main>
   );
 }

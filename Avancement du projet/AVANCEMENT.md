@@ -3,12 +3,56 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
-## 2026-11-16 — Lot 3 : groupes, membres, invitations (écrit, en attente de revue)
+## 2026-11-16 — Lot 4 : l'agenda du groupe
+
+Neuf routes sous `/api/groupes/:groupId/evenements` : fenêtre d'agenda, création, détail, modification, annulation
+(`status = 'cancelled'`, jamais de suppression physique), présences avec invités, compteurs, co-organisateurs.
+L'événement et son fil de discussion (`threads.kind = 'event'`) naissent dans **la même transaction**. L'autorisation fine
+(`peutModifierEvenement` : auteur, co-organisateur ou admin) est une **seconde** vérification, après le cloisonnement :
+403 `droit.organisateur_requis` pour un droit manquant, 404 `evenement.introuvable` pour un groupe étranger, jamais l'un
+à la place de l'autre. Les compteurs se calculent en SQL dans la portée du groupe. Client : vues mois / semaine / liste,
+formulaire de création et de modification, détail avec les trois réponses et les compteurs. Aucune migration — les tables
+`events`, `event_organizers` et `event_attendances` existaient depuis `0001_socle.sql`.
+
+**Vérifié par exécution de ma part** : `lint`, `typecheck`, `build` verts, **881 tests** passés (1 ignoré, antérieur au lot),
+`git diff app/server/db/sql.ts` vide (ni `TEXTES_TRANSVERSES` ni `ACCES_ALTERNATIFS` n'ont grossi). Le critère de « terminé »
+du lot tient : trois comptes répondent (oui + 2 invités, peut-être + 4 invités, non) et les compteurs donnent
+`{yes: 1, maybe: 1, no: 1, attendus: 3, sans_reponse: 1}`.
+
+**Le défaut trouvé en revue, et confirmé par mutation.** Le lot a introduit une exigence `organisateur` dans le registre de
+cloisonnement — donc modifié le harnais qui protège *toutes* les routes du projet. En réduisant `peutModifierEvenement` à
+`return scope.role === 'admin'`, la suite de cloisonnement restait **entièrement verte** (318 tests) : les deux attaquantes
+et la personne de contrôle étaient toutes administratrices, si bien qu'une route future déclarée `organisateur` mais
+réservée en fait à l'admin aurait passé la suite sans un bruit. Corrigé : Carole, simple membre, est co-organisatrice de
+l'événement de A (étape 4 ter : elle ne doit pas recevoir 403), Erin forge l'événement de B et doit recevoir **404** et non
+403 (c'est ce qui prouve l'ordre « trouver puis autoriser » avec quelqu'un qui n'a aucun droit), et `registre.test.ts` exige
+qu'une entrée `organisateur` déclare bien sa ressource `evenement`. La même mutation rejouée après correction fait échouer
+les **4** routes `organisateur`, chacune nommée.
+
+**Autres corrections après revue** : `PATCH` déclare enfin `host_membership_id` dans `ressourcesCorps` (il le lisait sans
+que la suite ne le forge jamais) ; `du` devient obligatoire sur la fenêtre d'agenda, parce que sans lui la route renvoyait
+les 1000 événements **les plus anciens** et escamotait silencieusement les soirées à venir ; l'auteur de l'événement est
+exposé et affiché comme organisateur principal (la page annonçait « aucun organisateur ») ; la vue d'agenda ignore la
+réponse d'une fenêtre abandonnée (deux clics rapides affichaient un mois vide) ; le fuseau est nettoyé au même endroit
+pour la conversion des heures et pour `time_zone`.
+
+**Non vérifié** : l'interface n'a jamais été ouverte dans un navigateur (typecheck, lint, build et tests des calculs de
+dates seulement) ; il n'existe aucun test de composant React, faute d'outillage client dans le dépôt. Assumé : `capacity`
+reste informative (un « oui » au-delà n'est pas bloqué), `responded_at` garde la première réponse, et `PATCH` reste permis
+sur un événement annulé — sans danger, le schéma n'accepte aucun champ `status`, donc rien ne peut être « désannulé ».
+
+## 2026-11-16 — Lot 3 : groupes, membres, invitations
 
 Création de groupe, verrou 3 (`exigerAppartenance`, `exigerAdminGroupe`), membres, rôles, retrait, départ, invitations par e-mail
 (lien à jeton, adresse vérifiée exigée) et par nom d'utilisateur exact (à accepter), règles d'intégrité (`ADR-0009`), registre de
 cloisonnement + test de complétude + suite générique, client (connexion, sélecteur, groupe, invitations). La garde du SQL brut est
 complétée de trois exceptions nommées (architecture §4 verrou 5) ; le canal transverse n'a pas grossi. Aucune migration.
+
+**Corrections après revue** : une exception de la garde du SQL brut (reconnaître `invitations` par `target_user_id` ou
+`token_hash`) s'était transformée en clé maîtresse, parce que la couverture se propageait par les jointures
+`group_id = group_id`. Cinq requêtes admises à tort ont été rejouées et sont désormais refusées, dont
+`UPDATE memberships SET role = 'admin'` et la réattribution d'une invitation. Règle posée : une couverture obtenue par une
+colonne de preuve ne couvre que `invitations` et **ne se propage jamais** ; les colonnes de preuve sont interdites en `SET`.
 
 ## 2026-11-15 — Lot 2 : les comptes (écrit, en attente de revue)
 

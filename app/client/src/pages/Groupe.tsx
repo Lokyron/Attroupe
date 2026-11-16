@@ -61,6 +61,9 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
       <p>{t('groupe.devise', { devise: groupe.default_currency_code })}</p>
       <p>{t('groupe.fuseau', { fuseau: groupe.time_zone })}</p>
       <p>{t(admin ? 'groupe.mon_role_admin' : 'groupe.mon_role_member')}</p>
+      <p>
+        <a href={`#/groupe/${encodeURIComponent(groupId)}/agenda`}>{t('groupe.agenda')}</a>
+      </p>
       <Erreur message={erreur} />
 
       <h3>{t('membres.titre')}</h3>

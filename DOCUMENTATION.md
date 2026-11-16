@@ -154,6 +154,24 @@ Lot 3 (groupes, membres, invitations). Tout ce qui est sous `/api/groupes/:group
 | GET / POST | `/api/groupes/:groupId/invitations` | Lister ; inviter `{email}` **ou** `{username}` exact, `role?`, `message?` *(admin)*. POST : 202 identique dans tous les cas, cadence 10/compte, 3 par (cible, groupe), 20 par cible. |
 | DELETE | `/api/groupes/:groupId/invitations/:invitationId` | Révoquer *(admin)* ; 409 `invitation.non_en_attente`. |
 
+Lot 4 (agenda du groupe). Même préfixe, donc même règle : 404 `groupe.introuvable` pour un groupe étranger.
+Les routes *(organisateur)* ajoutent `peutModifierEvenement` — auteur, co-organisateur ou administrateur du groupe —
+et répondent **403** `droit.organisateur_requis`. L'existence est toujours résolue **avant** le droit : un événement
+d'un autre groupe donne **404** `evenement.introuvable`, jamais 403.
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| GET | `/api/groupes/:groupId/evenements?du=&au=` | Fenêtre d'agenda (mois, semaine, liste). `du` est **obligatoire** (`AAAA-MM-JJ`, inclusif) ; `au` optionnel, 400 jours au plus. Les annulés sont inclus. |
+| POST | `/api/groupes/:groupId/evenements` | `{title, starts_at, time_zone, ends_at?, all_day?, description?, location_*?, arrival_note?, host_membership_id?, currency_code?, capacity?}` → 201, **avec son fil de discussion** dans la même transaction. |
+| GET | `/api/groupes/:groupId/evenements/:evenementId` | Détail : `thread_id`, `auteur`, `organisateurs`, `peut_modifier`, `ma_presence`. |
+| PATCH | `/api/groupes/:groupId/evenements/:evenementId` | Modifier *(organisateur)*. Schéma strict : `status`, `group_id`, `created_by_membership_id`, `source_date_poll_id` et les champs de récurrence (réservés V2) sont **refusés** en 400. |
+| DELETE | `/api/groupes/:groupId/evenements/:evenementId` | **Annule** *(organisateur)* : `status = 'cancelled'`, idempotent, renvoie le détail. Aucune suppression physique. |
+| PUT | `/api/groupes/:groupId/evenements/:evenementId/ma-presence` | `{status: 'yes'\|'maybe'\|'no', guests_count?, comment?}`. Le membre vient du scope (un `membership_id` dans le corps est refusé). 409 `evenement.annule`. `responded_at` garde la première réponse. |
+| GET | `/api/groupes/:groupId/evenements/:evenementId/presences` | Réponses, compteurs (`yes`, `maybe`, `no`, `attendus` = les oui + leurs invités) et la liste des membres actifs sans réponse. Calculé en SQL dans la portée du groupe. |
+| POST / DELETE | `/api/groupes/:groupId/evenements/:evenementId/organisateurs/:membreId` | Ajouter, retirer un co-organisateur *(organisateur)*, idempotent. 404 `membre.introuvable`, 409 `membre.inactif`. |
+
+`capacity` est **informative** en V1 : un « oui » au-delà n'est pas bloqué.
+
 Registre de cloisonnement : `app/tests/cloisonnement/registre.ts` recense chaque route et son exigence ; le test de
 complétude échoue si une route montée n'y figure pas (les routeurs se montent avec `monter()`, `http/montage.ts`).
 
@@ -167,8 +185,9 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
 
 ## 8. Dette technique, TODOs & points d'attention
 
-- Modèle de données et architecture : **écrits** (`03` et `04` du dossier de conception) ;
-  l'implémentation n'a pas commencé. Le découpage en 13 lots est au §10 de `04`.
+- Modèle de données et architecture : **écrits** (`03` et `04` du dossier de conception). Le découpage
+  est au §10 de `04` : **lots 0 à 4 livrés** (squelette, base et cloisonnement, comptes, groupes et
+  membres, agenda du groupe), le prochain est le lot 5 (flux iCal).
 - `ADR-0008` est **Acceptée** (lot 1). À revoir quand `node:sqlite` passera en « Stable ».
 - Lot 1 livré, puis corrigé après revue : `app/server/db/` (`base` : connexion opaque, `connection`,
   `migrate`, `moteur`, `scope` : GroupScope, `portee-utilisateur`, `sql` : garde du SQL brut,
@@ -190,6 +209,18 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
   (401/403) ne consomme pas les essais. Une session ne s'ouvre que sur un `CompteProuve`
   (`prouverParMotDePasse`). Ouvert : avatar, inscription sur invitation (lot 3, avec le rattachement
   conditionné à `email_verified_at`), pages du client.
+- Lot 4 livré (agenda du groupe) : `domain/evenements.ts` (règles de date), `db/queries/evenements.ts`,
+  `services/evenements.ts`, `http/{schemas,routes}/evenements.ts`, et côté client `agenda/dates.ts`,
+  `pages/{Agenda,Evenement}.tsx`, `components/FormulaireEvenement.tsx`. Le registre de cloisonnement
+  connaît une exigence `organisateur` de plus, et la suite générique une étape 4 ter : une
+  co-organisatrice simple membre ne doit pas recevoir 403, et quelqu'un sans droit qui forge une
+  ressource d'un autre groupe doit recevoir 404 — c'est ce qui prouve l'ordre « trouver puis
+  autoriser ». Sans cette étape, une route déclarée `organisateur` mais réservée à l'admin passait la
+  suite sans un bruit (démontré par mutation). **Ouvert** : l'interface n'a jamais été ouverte dans un
+  navigateur et il n'existe aucun test de composant React (pas d'outillage client) ; le fuseau horaire
+  se saisit en texte libre dans le formulaire, sans liste déroulante ; `PATCH` reste permis sur un
+  événement annulé (sans danger : aucun champ `status` au schéma) ; aucun test ne force le retour
+  arrière de la transaction de création.
 - Le cloisonnement entre groupes est le risque numéro un du projet : il se traite par des
   tests dédiés, route par route (voir `ADR-0002`).
 - L'ajout d'un membre par son nom d'utilisateur ou son e-mail est une surface d'abus : l'ajout

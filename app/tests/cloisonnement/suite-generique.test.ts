@@ -14,7 +14,8 @@ import { cle, INTROUVABLE, REGISTRE, type EntreeRoute } from './registre.js';
 //   3. IDENTIFIANT forgé : son groupe A, la ressource de B  → 404 de la ressource, et rien n'est écrit. Forgé là où la route le
 //      LIT : dans l'URL, dans le CORPS (`ressourcesCorps`) et dans la chaîne de REQUÊTE (`ressourcesRequete`). Deux attaquantes :
 //      Alice (étrangère à B) et Manon (membre de A ET de B : un contrôle « a-t-elle accès au groupe de la ressource ? » la laisserait passer)
-//   4. DROIT manquant (routes admin) : une simple membre de A → 403, et rien n'est écrit — jamais confondu avec le 404.
+//   4. DROIT manquant (routes admin : `droit.admin_requis` ; routes `organisateur` : `droit.organisateur_requis`) : une simple membre
+//      de A, ni auteure ni co-organisatrice de l'événement → 403, et rien n'est écrit — jamais confondu avec le 404.
 //      Et à l'inverse, une route déclarée `appartenance` ne doit pas refuser (403) une simple membre : sinon elle est SOUS-DÉCLARÉE
 //      (elle exige en réalité l'admin) et le registre mentirait sur ce qu'elle protège
 //   5. sa propre route, ses propres identifiants           → ni 401, ni 403, ni 404, ni 5xx, et AUCUNE trace de B dans la réponse
@@ -49,7 +50,7 @@ const ENDROITS: ReadonlyArray<readonly [Endroit, 'ressources' | 'ressourcesCorps
 /** Chemin concret : `:groupId` et chaque paramètre déclaré sont remplacés (jamais deviné), puis la chaîne de requête. */
 function url(e: EntreeRoute, ids: Identifiants): string {
   const chemin = e.chemin.replace(/:(\w+)/g, (_motif, nom: string) => encodeURIComponent(nom === 'groupId' ? ids.groupId : (ids.ressources[nom] ?? `:${nom}`)));
-  return avecRequete(chemin, ids.requete);
+  return avecRequete(chemin, { ...e.requete, ...ids.requete });
 }
 
 function corpsDe(e: EntreeRoute, ids: Identifiants): unknown {
@@ -105,7 +106,7 @@ describe('suite générique de cloisonnement : une attaque par route du registre
       expect(instantane(w), `${cle(e)} — ${nom} : la base a changé`).toBe(avant);
     };
 
-    const estGroupe = e.exige === 'appartenance' || e.exige === 'admin';
+    const estGroupe = e.exige === 'appartenance' || e.exige === 'admin' || e.exige === 'organisateur';
     if (estGroupe) {
       // 2. Groupe forgé : même réponse qu'un groupe qui n'existe pas, sans rien confirmer.
       await attaquer('groupe forgé', w.alice.client, idsB, 404, 'groupe.introuvable');
@@ -127,9 +128,25 @@ describe('suite générique de cloisonnement : une attaque par route du registre
       }
     }
 
+    // 3 bis. Erin (simple membre, SANS aucun droit sur l'événement) forge l'événement de B : 404, jamais 403. C'est ce qui prouve l'ordre
+    // « trouver puis autoriser » avec quelqu'un à qui le 403 s'appliquerait ; les administratrices ci-dessus n'y sont jamais exposées.
+    // (Seul l'événement : un membre forgé est jugé APRÈS le droit, donc Erin recevrait légitimement un 403 avant.)
+    if (e.exige === 'organisateur') {
+      for (const [endroit, declaration, libelle] of ENDROITS) {
+        for (const [cleForgee, nature] of Object.entries(e[declaration] ?? {})) {
+          if (nature !== 'evenement') continue;
+          const forges: Identifiants = { ...idsA, [endroit]: { ...idsA[endroit], [cleForgee]: w.ressources.b[nature] } };
+          await attaquer(`${libelle} (${cleForgee}), par Erin (sans droit)`, w.erin.client, forges, 404, INTROUVABLE[nature]);
+        }
+      }
+    }
+
     // 4. Droit manquant : une simple membre de A (pas de 404 : le groupe est le sien).
     if (e.exige === 'admin') {
       await attaquer('droit manquant', w.erin.client, idsA, 403, 'droit.admin_requis');
+    }
+    if (e.exige === 'organisateur') {
+      await attaquer('droit manquant', w.erin.client, idsA, 403, 'droit.organisateur_requis');
     }
 
     // 4 bis. Sous-déclaration : une route déclarée `appartenance` doit rester ouverte à une simple membre. Un 403 révèle qu'elle exige
@@ -137,6 +154,18 @@ describe('suite générique de cloisonnement : une attaque par route du registre
     if (e.exige === 'appartenance') {
       const membre = await appeler(w.erin.client, e, idsA);
       expect(membre.statut, `${cle(e)} est déclarée « appartenance » mais refuse une simple membre : sous-déclarée (admin ?) — ${JSON.stringify(membre.corps)}`).not.toBe(403);
+    }
+
+    // 4 ter. Une route `organisateur` doit s'ouvrir à un CO-ORGANISATEUR simple membre (Carole, inscrite dans event_organizers de
+    // l'événement de A). Un 403 révèle que la route exige en réalité l'admin (ou l'auteur) : le registre mentirait.
+    if (e.exige === 'organisateur') {
+      const coOrganisatrice = await appeler(w.carole.client, e, idsA);
+      expect(
+        coOrganisatrice.statut,
+        `${cle(e)} est déclarée « organisateur » mais refuse une co-organisatrice simple membre : sous-déclarée (admin ?) — ${JSON.stringify(coOrganisatrice.corps)}`,
+      ).not.toBe(403);
+      expect([401, 404], `${cle(e)} avec les identifiants de Carole`).not.toContain(coOrganisatrice.statut);
+      expect(coOrganisatrice.statut).toBeLessThan(500);
     }
 
     // 5. Sa propre route : elle fonctionne (donc les 404 ci-dessus ne viennent pas d'un chemin faux), et ne montre rien de B.

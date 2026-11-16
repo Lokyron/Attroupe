@@ -12,6 +12,7 @@ import { monter } from '../montage.js';
 import { parametre } from '../parametres.js';
 import { schemaChangementRole, schemaCreationGroupe, schemaInvitation, schemaModificationGroupe } from '../schemas/groupes.js';
 import { analyser } from '../schemas/valider.js';
+import { routesEvenements } from './evenements.js';
 
 // /api/groupes. Deux étages :
 //  - `/` (le sélecteur) relève du COMPTE : session seule, portée utilisateur ;
@@ -86,6 +87,9 @@ function routesDuGroupe(contexte: Contexte): Router {
     revoquerInvitation(contexte, scopeDe(req), parametre(req, 'invitationId'));
     res.json({ ok: true });
   });
+
+  // L'agenda du groupe (lot 4) : monté par `monter`, pour que le registre de cloisonnement en voie les routes.
+  monter(routeur, '/evenements', routesEvenements(contexte));
 
   return routeur;
 }

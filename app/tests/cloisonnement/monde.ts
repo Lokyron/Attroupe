@@ -81,11 +81,24 @@ export async function monde(): Promise<Monde> {
     if (premiere === undefined) throw new Error(`${p.username} n'a reçu aucune invitation.`);
     return { invitationRecue: premiere.id, jeton: await d.jetonMail(p.email, 'invitation_groupe') };
   };
+  // Un événement dans chaque monde (agenda, lot 4) : Alice est l'auteure de celui de A, Bob de celui de B. Erin (simple membre de A,
+  // ni auteure ni co-organisatrice) n'a donc aucun droit de modification dessus.
+  const evenement = async (auteur: Personne, g: GroupeAmorce, title: string): Promise<string> => {
+    const r = await auteur.client.post(`/api/groupes/${g.groupId}/evenements`, { title, starts_at: '2027-03-20T18:00:00Z', time_zone: 'Europe/Paris' });
+    if (r.statut !== 201) throw new Error(`Événement refusé : ${JSON.stringify(r.corps)}`);
+    return r.corps['id'] as string;
+  };
+  const evenementA = await evenement(alice, a, 'Soirée du groupe A');
+  const evenementB = await evenement(bob, b, 'Soirée du groupe B secret');
+  // Carole (simple membre de A, ni administratrice ni auteure) est co-organisatrice de l'événement de A : c'est elle qui prouve
+  // qu'une route `organisateur` s'ouvre vraiment à un co-organisateur et pas seulement à un administrateur.
+  const coOrganisatrice = await alice.client.post(`/api/groupes/${a.groupId}/evenements/${evenementA}/organisateurs/${membreDe(a, carole)}`);
+  if (coOrganisatrice.statut !== 200) throw new Error(`Co-organisatrice refusée : ${JSON.stringify(coOrganisatrice.corps)}`);
   const recueA = await recue(alice);
   const recueB = await recue(bob);
   const ressources = {
-    a: { membre: membreDe(a, carole), invitation: invitationA, session: await idSession(alice), ...recueA },
-    b: { membre: membreDe(b, dave), invitation: invitationB, session: await idSession(bob), ...recueB },
+    a: { membre: membreDe(a, carole), evenement: evenementA, invitation: invitationA, session: await idSession(alice), ...recueA },
+    b: { membre: membreDe(b, dave), evenement: evenementB, invitation: invitationB, session: await idSession(bob), ...recueB },
   };
   const marquesDeB = [
     b.groupId,
@@ -97,6 +110,7 @@ export async function monde(): Promise<Monde> {
     bob.username,
     dave.username,
     'invite-b@exemple.test',
+    'Soirée du groupe B secret',
     ...Object.values(ressources.b),
   ];
   return { d, alice, bob, carole, dave, erin, manon, frank, a, b, ressources, marquesDeB };

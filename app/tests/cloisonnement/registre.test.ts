@@ -49,8 +49,14 @@ describe('registre de cloisonnement : complétude', () => {
   it('le registre est cohérent avec le chemin : une route de groupe exige l’appartenance, et seulement elle', () => {
     for (const e of REGISTRE) {
       const dansGroupe = e.chemin === PREFIXE_GROUPE || e.chemin.startsWith(`${PREFIXE_GROUPE}/`);
-      const exigeAppartenance = e.exige === 'appartenance' || e.exige === 'admin';
+      const exigeAppartenance = e.exige === 'appartenance' || e.exige === 'admin' || e.exige === 'organisateur';
       expect(exigeAppartenance, `${cle(e)} : exigence « ${e.exige} » incohérente avec son chemin`).toBe(dansGroupe);
+    }
+  });
+
+  it('une entrée `organisateur` déclare l’événement dans `ressources` (sinon l’ordre « trouver puis autoriser » n’est jamais attaqué)', () => {
+    for (const e of REGISTRE.filter((x) => x.exige === 'organisateur')) {
+      expect(Object.values(e.ressources ?? {}), cle(e)).toContain('evenement');
     }
   });
 
