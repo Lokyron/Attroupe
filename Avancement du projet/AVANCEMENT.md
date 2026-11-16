@@ -3,6 +3,31 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-16 — Mise en service de la bêta et première validation réelle
+
+Conteneurs **112** (`attroupe`, `10.1.20.112`) et **113** (`attroupe-beta`, `10.1.20.113`) créés sur `PVE-TXLHOME`
+aux conventions du homelab, Docker vérifié par exécution dans les deux. La bêta tourne sur le 113 derrière
+`https://beta.attroupe.fr` (certificat `*.attroupe.fr` par défi DNS OVH). Détails dans `DOCUMENTATION.md` §3 bis.
+
+**Les deux critères de la vision qui n'avaient jamais été éprouvés hors des tests le sont enfin**, sur l'instance
+réelle, à travers le proxy, avec un compte créé pour l'occasion :
+
+- **Temps réel (critère n° 3)** : flux SSE ouvert à travers Nginx, `Content-Type: text/event-stream`,
+  `Transfer-Encoding: chunked`, aucun tamponnage. Un article coché depuis une autre requête arrive dans le flux en
+  **69 ms**. `article.pris` et `article.ajoute` arrivent de même. Le `X-Accel-Buffering: no` posé au lot 6 fait son
+  travail, alors même que `proxy_buffering off` n'est pas encore coché côté proxy.
+- **iCal (critère n° 2)** : `text/calendar; charset=utf-8`, `Cache-Control: private, max-age=300`, `ETag` et **304**
+  sur `If-None-Match`. Le `VCALENDAR` est conforme à la lecture : **CRLF partout, aucune ligne de plus de 75 octets**,
+  pliage par espace de continuation, accents préservés, `SUMMARY` préfixé du nom du groupe, `DTSTART` en UTC,
+  `ORGANIZER` sur une adresse `.invalid`. Le jeton n'est rendu **qu'à la création** et n'apparaît pas dans la liste
+  des abonnements. Révoqué, le flux répond **404**, comme un jeton inconnu.
+
+**Reste à valider à la main** : un vrai client iOS ou Android. C'est lui qui décide si notre `VCALENDAR` lui plaît, et
+aucun test ne peut le remplacer. L'interface n'a toujours pas été ouverte dans un navigateur.
+
+**Relevé en déployant** : `GET /api/version` est à la surface d'API (§6) mais n'a jamais été écrite — elle répond
+`route.introuvable`. À faire au lot 12.
+
 ## 2026-11-16 — Lot 6 : listes de courses, tâches et flux temps réel
 
 `/listes` (articles, preneur, case cochée, réordonnancement), `/taches` (assignation, « qui apporte quoi » rattaché à un événement)
