@@ -72,6 +72,20 @@ rien et coûterait un écart à §7.1. Elle est écartée.
   été démontré par mutation.
 - Le jeton n'apparaît **jamais** dans le contenu du flux : un `.ics` finit dans les sauvegardes d'un téléphone.
 
+## Éprouvé le 2026-11-16 sur un vrai iPhone — une prémisse corrigée
+
+- **`webcal://` est une exigence de l'interface, pas du transport.** Un lien `https` vers un `.ics` fait importer une
+  copie figée ; seul le schéma `webcal://` fait créer un abonnement. L'application ne donnait que l'`https` : la
+  fonctionnalité était morte alors que le serveur répondait parfaitement. Corrigé.
+- **`STATUS:CANCELLED` ne fait pas disparaître l'événement : il le barre.** §7.1 affirmait le contraire. Sur un
+  abonnement iOS réel, un événement annulé reste affiché, barré. Ce qui le ferait disparaître, c'est de l'**omettre**
+  du flux, un abonnement iCal étant un remplacement complet. Décision : on garde `STATUS:CANCELLED`, mais désormais
+  **par choix** — pour un groupe d'amis, une soirée barrée est plus informative qu'une soirée évaporée. Si l'on
+  changeait d'avis, il suffirait d'omettre les `cancelled` dont la date est passée, et de garder les autres barrés.
+- **Les cadences de rafraîchissement n'appartiennent pas au serveur.** iOS respecte l'intervalle choisi et se force à
+  la main ; Google Agenda décide seul (première récupération souvent après des heures, puis 8 à 24 h), et son
+  application mobile ne sait **pas** ajouter un calendrier par URL — il faut un ordinateur, une fois.
+
 ## Alternatives écartées
 
 - **Identifiant public dans l'URL** (`/ical/<id>.<secret>.ics`) : écart à §7.1 et, vérifié par sonde, la lecture

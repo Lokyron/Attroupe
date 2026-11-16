@@ -575,6 +575,16 @@ Conventions : préfixe `/api`, JSON, cookie de session obligatoire sauf mention 
 - **Mise en cache** : `ETag` = empreinte de `(jeton, max(updated_at), nombre d'événements)` et
   réponse `304` si `If-None-Match` correspond. Les clients iOS et Android interrogent souvent
   et à heure fixe : un `304` coûte une requête d'agrégat, pas une génération.
+> **Amendement du 2026-11-16 (n° 2, éprouvé sur un vrai iPhone).** La phrase ci-dessus « en `STATUS:CANCELLED`,
+> pour que l'annulation **disparaisse** du calendrier du téléphone au lieu d'y rester » est **fausse**, et le texte
+> est conservé tel quel pour que l'erreur reste visible. Vérifié sur un abonnement iOS réel (agent
+> `dataaccessd`) : un événement servi en `STATUS:CANCELLED` **reste affiché**, barré. C'est l'omission d'un
+> événement du fichier qui le fait disparaître, un abonnement iCal étant un remplacement complet par le contenu du
+> flux. Le comportement actuel est donc **conservé par choix et non par hypothèse** : pour un groupe d'amis, « la
+> soirée est annulée, barrée » vaut mieux qu'une soirée qui s'évapore sans explication. Les clients ne se
+> comportent pas tous pareil (Google Agenda a tendance à masquer les annulés) : c'est une limite à documenter, pas
+> à corriger.
+
 > **Amendement du 2026-11-16 ([`ADR-0010`](../docs/decisions/ADR-0010-flux-ical.md), lot 5).** Deux points de
 > cette section ont été tranchés autrement à l'implémentation, et le texte ci-dessus est conservé tel quel pour que
 > l'écart reste visible :
