@@ -3,6 +3,46 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-16 — Trois défauts d'interface, et une prémisse du cahier des charges invalidée
+
+Suite de l'essai sur un vrai iPhone. Le lien `webcal://` du matin avait rendu l'abonnement **possible** (agent
+`dataaccessd` dans les journaux du proxy, premier abonnement iOS réellement vivant) ; l'essai complet a montré qu'il
+n'était pas encore **utilisable**, et a invalidé une affirmation de l'architecture.
+
+**Trois défauts, tous d'interface, aucun visible par un test.**
+1. L'adresse `webcal://` n'était affichée nulle part. On configure depuis un ordinateur, on copie la seule adresse
+   visible — l'`https` — on l'ouvre sur le téléphone, et on obtient un **import figé**. C'est exactement le chemin
+   emprunté par l'utilisateur, malgré le paragraphe d'explication déjà présent. Elle est désormais affichée en texte
+   copiable, sous le titre « Adresse à envoyer sur votre téléphone ».
+2. Rien ne disait que **Google Agenda ne sait pas s'abonner depuis son application mobile** : l'option n'y existe
+   pas, il faut `calendar.google.com` depuis un ordinateur, une fois, et l'abonnement redescend ensuite par le compte
+   Google. Un bouton explicitement étiqueté « depuis un ordinateur » ouvre maintenant la boîte de dialogue.
+3. Le champ de nom proposait « Mon téléphone » en gris : un texte d'exemple qui ressemblait à une valeur saisie, si
+   bien que les abonnements finissaient sans nom. Le chemin du `label` était correct de bout en bout (le `dev` l'a
+   vérifié, des tests le couvraient déjà) : c'était un piège d'interface, pas un défaut de code. Le texte d'exemple
+   est préfixé.
+
+**La prémisse invalidée.** §7.1 affirmait depuis le lot 5 qu'un événement servi en `STATUS:CANCELLED` **disparaît**
+du calendrier du téléphone. C'est faux : il **reste affiché, barré**. Ce qui le ferait disparaître, c'est de
+l'omettre du flux, un abonnement iCal étant un remplacement complet par son contenu. Le texte d'origine est
+conservé avec un amendement daté pour que l'erreur reste visible, et le comportement est gardé **par choix** : une
+soirée barrée informe (« elle est annulée, ne te déplace pas »), une soirée évaporée laisse perplexe. L'utilisateur
+l'a formulé ainsi, et c'est son argument qui a tranché.
+
+**Une proposition retirée.** Je voulais faire disparaître du flux les annulés dont la date est passée, pour éviter
+l'accumulation de fantômes barrés. Vérification faite dans les deux requêtes de fenêtrage : c'est inutile. Un
+événement annulé est servi par l'ensemble « modifiés depuis », donc barré environ **trois mois**, puis il sort du
+flux de lui-même. L'accumulation était déjà bornée ; je proposais un correctif pour un problème que le code
+résolvait. Consigné dans l'ADR-0010 pour que le débat ne soit pas rouvert.
+
+**Vérifié par exécution de ma part** : 1 124 tests, lint, typecheck et build verts, et le paquet JavaScript
+**réellement servi** par `https://beta.attroupe.fr` contient les cinq nouveaux textes et le lien
+`calendar.google.com/calendar/r?cid=`. `POST /api/moi/flux-ical` rend `url` et `url_webcal` sur le même jeton, et le
+libellé revient correctement. Mes jetons de contrôle sont révoqués ; le seul abonnement actif est celui de l'iPhone.
+
+**Non éprouvé** : le comportement réel du lien Google chez Google (seule sa construction est testée), et le rendu du
+panneau à l'écran — il empile maintenant beaucoup de blocs, avec des `h4` sans style dédié.
+
 ## 2026-11-16 — Le défaut qu'aucun test ne pouvait trouver : le lien `webcal://`
 
 En éprouvant la bêta sur un vrai iPhone, l'abonnement iCal s'est révélé **inutilisable**, alors que le serveur était
