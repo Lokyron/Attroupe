@@ -86,6 +86,15 @@ Pour lever la restriction le temps d'un essai direct depuis le réseau local :
 > Le **112 (production) n'est pas déployé** : il attend le nom de domaine définitif et la bascule du
 > lot 12.
 
+**L'instance est inutilisable en HTTP nu, et c'est voulu.** `ATTROUPE_BASE_URL` détermine deux choses :
+le cookie de session est marqué `Secure` dès que l'URL est en `https:` (`http/app.ts`, `cookieSecurise`),
+et la protection CSRF n'admet **que** l'origine exacte de cette URL (`middleware/csrf.ts`). Avec
+`ATTROUPE_BASE_URL=https://beta.attroupe.fr` servi en clair sur le port 80, la page se charge mais toute
+requête qui modifie est refusée en **403 `csrf.origine_refusee`** — vérifié : un `POST /api/auth/inscription`
+avec `Origin: http://beta.attroupe.fr` donne 403, le même avec `Origin: https://beta.attroupe.fr` passe la
+barrière et tombe sur la validation (400). Autrement dit : pas de certificat, pas d'inscription ni de
+connexion possibles. Le certificat n'est donc pas un confort, c'est une condition de fonctionnement.
+
 Homelab personnel (pas Cazalia). Accès par Internet derrière le Nginx Proxy Manager, sur un
 sous-domaine à définir. Immich tourne **à part**, sur sa ou ses propres instances, et n'est
 jamais embarqué dans la pile du projet.
