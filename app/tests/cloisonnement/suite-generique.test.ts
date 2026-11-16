@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Client, Reponse } from '../fixtures/comptes.js';
+import { attaquerFlux } from './flux.js';
 import { avecRequete, poserDansCorps } from './forge.js';
 import { monde, type Monde } from './monde.js';
 import { cle, INTROUVABLE, REGISTRE, type EntreeRoute } from './registre.js';
@@ -19,6 +20,7 @@ import { cle, INTROUVABLE, REGISTRE, type EntreeRoute } from './registre.js';
 //      Et à l'inverse, une route déclarée `appartenance` ne doit pas refuser (403) une simple membre : sinon elle est SOUS-DÉCLARÉE
 //      (elle exige en réalité l'admin) et le registre mentirait sur ce qu'elle protège
 //   5. sa propre route, ses propres identifiants           → ni 401, ni 403, ni 404, ni 5xx, et AUCUNE trace de B dans la réponse
+//   (flux de calendrier, exigence `jetonFlux` : jeton inconnu, révoqué, membre retiré, jeton restreint — voir flux.ts)
 //   6. ANCIEN membre : Alice retirée de A, ses propres identifiants → 404, alors que son historique est intact
 // Un 404 n'est accepté que s'il porte la clé attendue : une route mal écrite répondrait `route.introuvable` et ne prouverait rien.
 
@@ -91,6 +93,12 @@ describe('suite générique de cloisonnement : une attaque par route du registre
       const r = await appeler(anonyme, e, idsA);
       expect(r.statut, `${cle(e)} déclarée publique`).not.toBe(401);
       expect(r.statut).toBeLessThan(500);
+      return;
+    }
+
+    // Flux de calendrier : pas de cookie, donc pas de « 401 » ni de groupe dans l'URL — ses attaques sont les siennes (flux.ts).
+    if (e.exige === 'jetonFlux') {
+      await attaquerFlux(w, e);
       return;
     }
 

@@ -20,6 +20,7 @@ const ROUTES = chemin('server', 'http', 'routes.ts');
 const INDEX = chemin('server', 'index.ts');
 const APPARTENANCE = chemin('server', 'http', 'middleware', 'appartenance.ts');
 const SESSION = chemin('server', 'http', 'middleware', 'session.ts');
+const JETON_FLUX = chemin('server', 'http', 'middleware', 'jeton-flux.ts');
 const QUERIES = chemin('server', 'db', 'queries', 'articles.ts');
 const TRANSVERSE = chemin('server', 'db', 'queries', 'transverse.ts');
 const SQL = chemin('server', 'db', 'sql.ts');
@@ -62,6 +63,23 @@ const BLOQUE: ReadonlyArray<[string, string, string]> = [
   ['creerScope depuis l’intergiciel de session (il ne fabrique que des portées de compte)', "import { creerScope } from '../../db/scope.js';\nexport default creerScope;", SESSION],
   ['import() de creerPorteeUtilisateur depuis l’intergiciel de session', "export const f = async () => await import('../../db/portee-utilisateur.js');", SESSION],
   ['preparer depuis l’intergiciel de session', "import { preparer } from '../../db/sql.js';\nexport default preparer;", SESSION],
+  // Lot 5 : l'intergiciel de jeton de flux est le TROISIÈME point d'entrée autorisé, et aucun quatrième ne l'est (ni la route, ni le service).
+  ['creerScope depuis la route du flux', "import { creerScope } from '../../db/scope.js';\nexport default creerScope;", chemin('server', 'http', 'routes', 'ical.ts')],
+  ['creerPorteeUtilisateur depuis la route du flux', "import { creerPorteeUtilisateur } from '../../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", chemin('server', 'http', 'routes', 'ical.ts')],
+  ['creerScope depuis le service du flux', "import { creerScope } from '../db/scope.js';\nexport default creerScope;", chemin('server', 'services', 'flux-ical.ts')],
+  ['creerPorteeUtilisateur depuis le service du flux', "import { creerPorteeUtilisateur } from '../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", chemin('server', 'services', 'flux-ical.ts')],
+  ['creerScope depuis les routes de /api/moi', "import { creerScope } from '../../db/scope.js';\nexport default creerScope;", chemin('server', 'http', 'routes', 'moi.ts')],
+  ['creerScope depuis un intergiciel voisin (cadence.ts)', "import { creerScope } from '../../db/scope.js';\nexport default creerScope;", chemin('server', 'http', 'middleware', 'cadence.ts')],
+  ['creerPorteeUtilisateur depuis un intergiciel voisin (csrf.ts)', "import { creerPorteeUtilisateur } from '../../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", chemin('server', 'http', 'middleware', 'csrf.ts')],
+  ['import() de creerScope depuis un faux jeton-flux.ts ailleurs', "export const f = async () => await import('../../db/scope.js');", chemin('server', 'http', 'routes', 'jeton-flux.ts')],
+  ['preparer depuis l’intergiciel de jeton de flux (il ne fabrique que des portées)', "import { preparer } from '../../db/sql.js';\nexport default preparer;", JETON_FLUX],
+  ['baseDeScope depuis l’intergiciel de jeton de flux', "import { baseDeScope } from '../../db/scope.js';\nexport default baseDeScope;", JETON_FLUX],
+  ['db/connection depuis l’intergiciel de jeton de flux', "import { connexionBrute } from '../../db/connection.js';\nexport default connexionBrute;", JETON_FLUX],
+  // Chemins non normalisés (revue du lot 5) : le texte du spécificateur ne doit pas décider. Le filet réel est verrou-db.test.ts (chemin résolu).
+  ['creerScope par db/queries/../scope.js', "import { creerScope } from '../../db/queries/../scope.js';\nexport default creerScope;", ROUTES],
+  ['creerScope par db/.//scope.js', "import { creerScope } from '../../db/.//scope.js';\nexport default creerScope;", ROUTES],
+  ['preparer par db/queries/../sql.js', "import { preparer } from '../../db/queries/../sql.js';\nexport default preparer;", ROUTES],
+  ['creerPorteeUtilisateur par db/queries/../portee-utilisateur.js', "import { creerPorteeUtilisateur } from '../../db/queries/../portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", ROUTES],
   ['creerPorteeUtilisateur depuis index.ts', "import { creerPorteeUtilisateur } from './db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", INDEX],
   // Canal transverse et connexion brute, dans db/
   ['preparerTransverse hors de transverse.ts', "import { preparerTransverse } from '../sql.js';\nexport default preparerTransverse;", QUERIES],
@@ -90,6 +108,8 @@ describe('règles ESLint des verrous n° 2 et 5 (lot 1 corrigé)', () => {
     ['db/migrate depuis index.ts', "import { fermer, ouvrirEtMigrer } from './db/migrate.js';\nexport default [fermer, ouvrirEtMigrer];", INDEX],
     ['creerScope depuis l’intergiciel d’appartenance', "import { creerScope } from '../../db/scope.js';\nexport default creerScope;", APPARTENANCE],
     ['creerPorteeUtilisateur depuis l’intergiciel de session', "import { creerPorteeUtilisateur } from '../../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", SESSION],
+    ['creerScope depuis l’intergiciel de jeton de flux', "import { creerScope } from '../../db/scope.js';\nexport default creerScope;", JETON_FLUX],
+    ['creerPorteeUtilisateur depuis l’intergiciel de jeton de flux', "import { creerPorteeUtilisateur } from '../../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", JETON_FLUX],
     ['creerPorteeUtilisateur depuis l’intergiciel d’appartenance', "import { creerPorteeUtilisateur } from '../../db/portee-utilisateur.js';\nexport default creerPorteeUtilisateur;", APPARTENANCE],
     ['le type GroupScope depuis une route', "import type { GroupScope } from '../db/scope.js';\nexport type T = GroupScope;", ROUTES],
     ['le type Base (opaque) depuis une route', "import type { Base } from '../db/base.js';\nexport type T = Base;", ROUTES],

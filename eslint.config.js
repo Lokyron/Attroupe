@@ -17,9 +17,9 @@ const MESSAGE_SQL =
 const MESSAGE_MIGRATE =
   "Interdit : « db/migrate » n'est importable que depuis app/server/index.ts (ouverture, migrations, fermeture).";
 const MESSAGE_FABRIQUE =
-  'Interdit : creerScope n’est appelable que depuis app/server/http/middleware/appartenance.ts, et ' +
-  'creerPorteeUtilisateur que depuis appartenance.ts (appartenance au groupe prouvée, verrou n° 3) et ' +
-  "session.ts (session valide prouvée, verrou d'identité) : ce sont les intergiciels qui prouvent.";
+  'Interdit : creerScope n’est appelable que depuis les intergiciels http/middleware/appartenance.ts (appartenance au groupe prouvée, ' +
+  'verrou n° 3) et jeton-flux.ts (jeton de flux prouvé, sans cookie) ; creerPorteeUtilisateur que depuis ces deux-là et session.ts ' +
+  "(session valide prouvée, verrou d'identité) : ce sont les intergiciels qui prouvent.";
 const MESSAGE_APPEL_BRUT =
   'Interdit : .prepare, .exec et .pragma ne s’appellent que dans db/ (connection, sql, migrate). ' +
   'Une requête passe par le GroupScope ou la PorteeUtilisateur (verrous n° 2 et 5).';
@@ -37,7 +37,9 @@ const MESSAGE_BASE_DE_SCOPE = 'Interdit : baseDeScope rend la base d’un scope 
 const MESSAGE_TESTS =
   'Interdit : le code serveur n’importe rien de app/tests/ (fixtures/brut.ts rend la vraie connexion : verrous n° 2 et 5).';
 
-const DB = '(^|/)db/+(\\./)*';
+// Chemins détournés couverts : `db/./x`, `db//x`, `db/.//x`, `db/queries/../x`. Le filet RÉEL est tests/cloisonnement/verrou-db.test.ts, qui
+// compare le chemin résolu ; cette regex n'est que le message immédiat à l'édition.
+const DB = '(^|/)db/+(?:\\.?/+|[^/]+/+\\.\\./+)*';
 const MODULE_CONNECTION = `${DB}connection`;
 const MODULE_SQL = `${DB}sql`;
 const MODULE_MIGRATE = `${DB}migrate`;
@@ -170,6 +172,15 @@ export default tseslint.config(
     rules: regles(
       IMPORTS_HORS_DB.filter((p) => p !== PATTERN_FABRIQUE_PORTEE),
       SYNTAXES_HORS_DB,
+    ),
+  },
+  // L'intergiciel de jeton de flux (lot 5) : troisième chemin d'entrée, sans cookie ni groupe dans l'URL. Il fabrique la portée du compte que
+  // désigne le jeton ET un GroupScope par appartenance active. Aucun autre fichier n'y a droit (tests/cloisonnement/verrou-eslint-db.test.ts).
+  {
+    files: ['app/server/http/middleware/jeton-flux.ts'],
+    rules: regles(
+      IMPORTS_HORS_DB.filter((p) => p !== PATTERN_FABRIQUE_SCOPE && p !== PATTERN_FABRIQUE_PORTEE),
+      SYNTAXES_HORS_DB.filter((s) => s.message !== MESSAGE_FABRIQUE),
     ),
   },
   // Dans db/ : la bibliothèque est interdite, les appels bruts aussi, sauf dans trois fichiers ;

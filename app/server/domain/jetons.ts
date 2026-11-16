@@ -23,3 +23,33 @@ export function egalTempsConstant(a: string, b: string): boolean {
   const y = Buffer.from(b, 'utf8');
   return x.length === y.length && timingSafeEqual(x, y);
 }
+
+// Jeton de flux iCal (architecture §7.1) : 32 octets aléatoires en base32 (alphabet RFC 4648, minuscules, sans `=`), soit 52
+// caractères, sûrs dans une URL et insensibles aux majuscules mal copiées côté affichage. Même stockage que les sessions : seule
+// l'empreinte SHA-256 est écrite en base (`empreinteJeton`).
+const ALPHABET_BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
+
+/** Jeton de flux : 52 caractères `a-z2-7`. */
+export const FORME_JETON_FLUX = /^[a-z2-7]{52}$/;
+
+/** Encode des octets en base32 sans remplissage. */
+export function base32(octets: Uint8Array): string {
+  let sortie = '';
+  let tampon = 0;
+  let bits = 0;
+  for (const octet of octets) {
+    tampon = (tampon << 8) | octet;
+    bits += 8;
+    while (bits >= 5) {
+      sortie += ALPHABET_BASE32.charAt((tampon >>> (bits - 5)) & 31);
+      bits -= 5;
+    }
+    tampon &= (1 << bits) - 1;
+  }
+  if (bits > 0) sortie += ALPHABET_BASE32.charAt((tampon << (5 - bits)) & 31);
+  return sortie;
+}
+
+export function nouveauJetonFlux(): string {
+  return base32(randomBytes(32));
+}

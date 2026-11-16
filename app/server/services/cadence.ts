@@ -33,7 +33,7 @@ export type VerdictCadence =
   | { readonly autorise: true; readonly rembourser: () => void }
   | { readonly autorise: false; readonly retryApresSecondes: number };
 
-export type NomCadence = 'connexion' | 'inscription' | 'oubli' | 'jeton' | 'changement' | 'renvoi' | 'invitation' | 'groupe';
+export type NomCadence = 'connexion' | 'inscription' | 'oubli' | 'jeton' | 'changement' | 'renvoi' | 'invitation' | 'groupe' | 'flux' | 'abonnement';
 
 export interface CleCadence {
   readonly cle: string;
@@ -169,6 +169,7 @@ function refus(attenteMs: number): VerdictCadence {
  *  - `ip`      : l'adresse IP (IPv6 ramenée à son /64), toutes cibles confondues ;
  *  - `reseau`  : le préfixe /48 des IPv6 (un abonné y choisit 2^16 préfixes /64 : sans cette clé, la limite par /64 se contourne) ;
  *  - `compte`  : le compte de la session (routes authentifiées) ;
+ *  - `jeton`   : le jeton d'un flux iCal (authentifié par ce jeton seul, sans compte de session) ;
  *  - `cibleGroupe` : (adresse e-mail OU nom d'utilisateur visé, groupe de l'URL) — le « couple » d'une invitation : un administrateur
  *    qui martèle une cible depuis SON groupe n'épuise que cette clé, jamais celle d'un autre groupe ;
  *  - `cible`   : la cible seule, tous groupes confondus — beaucoup plus large, elle ne retient que l'inondation d'une boîte (ou d'un
@@ -181,6 +182,7 @@ export interface ReglesRoute {
   readonly couple?: RegleCadence;
   readonly email?: RegleCadence;
   readonly compte?: RegleCadence;
+  readonly jeton?: RegleCadence;
   readonly cibleGroupe?: RegleCadence;
   readonly cible?: RegleCadence;
 }
@@ -189,6 +191,7 @@ export type ReglesCadence = Readonly<Record<NomCadence, ReglesRoute>>;
 
 const FENETRE_MS = 15 * MINUTE_MS;
 const parFenetre = (max: number): RegleCadence => ({ max, fenetreMs: FENETRE_MS });
+const parHeure = (max: number): RegleCadence => ({ max, fenetreMs: HEURE_MS });
 
 export const REGLES_PAR_DEFAUT: ReglesCadence = Object.freeze({
   // Connexion : 10 mots de passe essayés par couple (e-mail, IP) ; ~100 toutes IP confondues sur un même compte.
@@ -211,4 +214,12 @@ export const REGLES_PAR_DEFAUT: ReglesCadence = Object.freeze({
   invitation: { compte: parFenetre(10), cibleGroupe: parFenetre(3), cible: parFenetre(20), ip: parFenetre(30), reseau: parFenetre(90) },
   /** Création de groupe : rien n'est envoyé à un tiers, mais chaque groupe est une ligne et un administrateur de plus qui peut inviter. */
   groupe: { compte: parFenetre(10), ip: parFenetre(30), reseau: parFenetre(90) },
+  /** Création d'un abonnement calendrier (lot 5) : une ligne et un jeton de plus par appel. */
+  abonnement: { compte: parFenetre(10), ip: parFenetre(30), reseau: parFenetre(90) },
+  /**
+   * Flux iCal (lot 5, architecture §7.1) : 60 requêtes par heure PAR JETON. Les clients de calendrier interrogent à heure fixe, trois ou quatre
+   * fois par heure au plus : 60 laisse de la marge à plusieurs appareils partageant un jeton. L'IP, très large, ne sert qu'à borner le balayage
+   * de jetons inconnus (un jeton de 256 bits ne se devine pas) sans gêner un foyer dont tous les téléphones passent par la même adresse.
+   */
+  flux: { jeton: parHeure(60), ip: parHeure(600), reseau: parHeure(1800) },
 });

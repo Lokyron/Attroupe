@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ErreurApi } from './api/client';
 import { deconnecter, lireMoi, type Moi } from './api/groupes';
 import { t } from './i18n';
+import { Compte } from './pages/Compte';
 import { Connexion } from './pages/Connexion';
 import { Agenda } from './pages/Agenda';
 import { Evenement, NouvelEvenement } from './pages/Evenement';
@@ -10,7 +11,7 @@ import { InvitationLien } from './pages/InvitationLien';
 import { Invitations } from './pages/Invitations';
 import { NouveauGroupe } from './pages/NouveauGroupe';
 
-type Route = { type: 'accueil' } | { type: 'nouveau' } | { type: 'invitations' } | { type: 'groupe'; id: string }
+type Route = { type: 'accueil' } | { type: 'nouveau' } | { type: 'invitations' } | { type: 'compte' } | { type: 'groupe'; id: string }
   | { type: 'agenda'; id: string }
   | { type: 'evenement'; id: string; evenementId: string }
   | { type: 'evenement-nouveau'; id: string };
@@ -20,6 +21,7 @@ function lireRoute(): Route {
   const [, premier, second, troisieme, quatrieme] = window.location.hash.split('/');
   if (premier === 'nouveau') return { type: 'nouveau' };
   if (premier === 'invitations') return { type: 'invitations' };
+  if (premier === 'compte') return { type: 'compte' };
   if (premier === 'groupe' && second !== undefined && second !== '') {
     const id = decodeURIComponent(second);
     if (troisieme === 'agenda') return { type: 'agenda', id };
@@ -87,6 +89,7 @@ export function App() {
           {t('nav.invitations')}
           {moi.invitations_en_attente > 0 && ` (${String(moi.invitations_en_attente)})`}
         </a>
+        <a href="#/compte">{t('nav.compte')}</a>
         <button type="button" onClick={() => void deconnecter().then(() => setEtat({ type: 'anonyme' }))}>
           {t('nav.deconnexion')}
         </button>
@@ -102,6 +105,7 @@ export function App() {
         />
       )}
       {!lien && route.type === 'invitations' && <Invitations onChange={recharger} />}
+      {!lien && route.type === 'compte' && <Compte groupes={moi.groupes} />}
       {!lien && route.type === 'groupe' && (
         <Groupe
           key={route.id}

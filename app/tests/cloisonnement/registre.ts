@@ -22,11 +22,15 @@ export type Methode = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
  *  - `admin`        : idem, et exige d'être administrateur du groupe (403 `droit.admin_requis` sinon) ;
  *  - `organisateur` : idem, et exige de pouvoir modifier l'événement visé (auteur, co-organisateur ou administrateur du groupe :
  *                     403 `droit.organisateur_requis` sinon). La ressource `evenement` est donc déclarée dans `ressources`.
+ *  - `jetonFlux`    : HORS `/api`, sans cookie : le jeton de l'URL est l'unique authentification, et la route lit les événements de
+ *                     PLUSIEURS groupes sans groupe dans l'URL. Ce n'est PAS `aucune` : `aucune` ne lancerait aucune attaque sur la seule
+ *                     route du projet qui agrège plusieurs groupes. Ses attaques sont dans `flux.ts` (jeton inconnu / révoqué, membre
+ *                     retiré, jeton restreint à un groupe), menées par des simples membres — jamais par une administratrice.
  */
-export type Exigence = 'aucune' | 'session' | 'appartenance' | 'admin' | 'organisateur';
+export type Exigence = 'aucune' | 'session' | 'appartenance' | 'admin' | 'organisateur' | 'jetonFlux';
 
 /** Ressource désignée par un paramètre d'URL. Chacune existe en un exemplaire dans chaque monde (A et B) : voir monde.ts. */
-export type Ressource = 'membre' | 'evenement' | 'invitation' | 'invitationRecue' | 'jeton' | 'session';
+export type Ressource = 'membre' | 'evenement' | 'invitation' | 'invitationRecue' | 'jeton' | 'session' | 'abonnement' | 'jetonFlux';
 
 export interface EntreeRoute {
   readonly methode: Methode;
@@ -52,6 +56,8 @@ export const INTROUVABLE: Readonly<Record<Ressource, string>> = {
   invitationRecue: 'invitation.introuvable',
   jeton: 'invitation.introuvable',
   session: 'session.introuvable',
+  abonnement: 'flux.introuvable',
+  jetonFlux: 'flux.introuvable',
 };
 
 export const PREFIXE_GROUPE = '/api/groupes/:groupId';
@@ -74,6 +80,12 @@ export const REGISTRE: readonly EntreeRoute[] = [
   { methode: 'GET', chemin: '/api/moi/sessions', exige: 'session' },
   { methode: 'DELETE', chemin: '/api/moi/sessions', exige: 'session' },
   { methode: 'DELETE', chemin: '/api/moi/sessions/:id', exige: 'session', ressources: { id: 'session' } },
+  // Abonnements calendrier (lot 5) : relèvent du COMPTE. Le jeton en clair ne sort qu'à la création. `group_id` (restriction à un groupe) est le
+  // seul identifiant de groupe lu dans un corps de /api/moi : il n'est PAS forgé par la suite générique, parce que Manon est légitimement
+  // membre de B (créer un jeton restreint à B est alors permis). Il est attaqué à part : tests/integration/flux-ical-jetons.test.ts.
+  { methode: 'GET', chemin: '/api/moi/flux-ical', exige: 'session' },
+  { methode: 'POST', chemin: '/api/moi/flux-ical', exige: 'session', corps: { label: 'Mon téléphone', include_declined: false } },
+  { methode: 'DELETE', chemin: '/api/moi/flux-ical/:fluxId', exige: 'session', ressources: { fluxId: 'abonnement' } },
   { methode: 'GET', chemin: '/api/groupes', exige: 'session' },
   { methode: 'POST', chemin: '/api/groupes', exige: 'session', corps: { name: 'Un autre groupe' } },
   // Invitations reçues : relèvent du COMPTE destinataire (pas encore de groupe), jamais d'un identifiant de groupe.
@@ -108,6 +120,9 @@ export const REGISTRE: readonly EntreeRoute[] = [
   // Deux identifiants lus : l'événement ET le membre. Promouvoir un membre de B sur un événement de A (ou l'inverse) est un 404 du membre.
   { methode: 'POST', chemin: '/api/groupes/:groupId/evenements/:evenementId/organisateurs/:membreId', exige: 'organisateur', ressources: { evenementId: 'evenement', membreId: 'membre' } },
   { methode: 'DELETE', chemin: '/api/groupes/:groupId/evenements/:evenementId/organisateurs/:membreId', exige: 'organisateur', ressources: { evenementId: 'evenement', membreId: 'membre' } },
+
+  // --- Le flux de calendrier (lot 5) : hors /api, sans cookie, le jeton est le seul secret ----------------------------------------------
+  { methode: 'GET', chemin: '/ical/:jeton.ics', exige: 'jetonFlux', ressources: { jeton: 'jetonFlux' } },
 ];
 
 export const cle = (e: Pick<EntreeRoute, 'methode' | 'chemin'>): string => `${e.methode} ${e.chemin}`;

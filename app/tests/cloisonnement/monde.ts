@@ -13,6 +13,26 @@ import type { Ressource } from './registre.js';
 // demande « l'utilisateur a-t-il accès au groupe de la ressource ? » au lieu de « la ressource est-elle du groupe de l'URL ? »
 // l'enverrait chez B sans broncher — Alice, non membre de B, n'attraperait jamais ce défaut.
 
+/** Un abonnement calendrier créé par l'API : son identifiant et le jeton en clair (rendu une seule fois, ici). */
+export interface JetonCree {
+  readonly id: string;
+  readonly jeton: string;
+}
+
+/**
+ * Les jetons du flux iCal (lot 5). Les attaquantes sont de SIMPLES MEMBRES (Erin, Dave) ou Manon (membre de A et B) : au lot 4, une exigence
+ * dont toutes les attaquantes étaient administratrices ne protégeait rien. Alice (administratrice) n'a qu'un jeton « propre » pour la route
+ * de révocation.
+ */
+export interface JetonsFlux {
+  readonly erin: JetonCree;
+  readonly erinRestreintA: JetonCree;
+  readonly dave: JetonCree;
+  readonly manonTous: JetonCree;
+  readonly manonRestreintA: JetonCree;
+  readonly manonRestreintB: JetonCree;
+}
+
 export interface Monde {
   readonly d: Decor;
   readonly alice: Personne;
@@ -29,6 +49,14 @@ export interface Monde {
   readonly ressources: Readonly<Record<'a' | 'b', Readonly<Record<Ressource, string>>>>;
   /** Tout ce qui identifie B : aucun de ces textes ne doit apparaître dans une réponse faite à Alice. */
   readonly marquesDeB: readonly string[];
+  /** Les jetons de flux iCal du décor. */
+  readonly flux: JetonsFlux;
+}
+
+async function creerFlux(p: Personne, corps: Record<string, unknown>): Promise<JetonCree> {
+  const r = await p.client.post('/api/moi/flux-ical', corps);
+  if (r.statut !== 201) throw new Error(`Abonnement refusé : ${JSON.stringify(r.corps)}`);
+  return { id: r.corps['id'] as string, jeton: r.corps['token'] as string };
 }
 
 async function idSession(p: Personne): Promise<string> {
@@ -96,9 +124,20 @@ export async function monde(): Promise<Monde> {
   if (coOrganisatrice.statut !== 200) throw new Error(`Co-organisatrice refusée : ${JSON.stringify(coOrganisatrice.corps)}`);
   const recueA = await recue(alice);
   const recueB = await recue(bob);
+  // Flux iCal : un abonnement d'Alice et un de Bob (route de révocation), puis les jetons des simples membres.
+  const abonnementAlice = await creerFlux(alice, {});
+  const abonnementBob = await creerFlux(bob, {});
+  const flux: JetonsFlux = {
+    erin: await creerFlux(erin, {}),
+    erinRestreintA: await creerFlux(erin, { group_id: a.groupId }),
+    dave: await creerFlux(dave, {}),
+    manonTous: await creerFlux(manon, {}),
+    manonRestreintA: await creerFlux(manon, { group_id: a.groupId }),
+    manonRestreintB: await creerFlux(manon, { group_id: b.groupId }),
+  };
   const ressources = {
-    a: { membre: membreDe(a, carole), evenement: evenementA, invitation: invitationA, session: await idSession(alice), ...recueA },
-    b: { membre: membreDe(b, dave), evenement: evenementB, invitation: invitationB, session: await idSession(bob), ...recueB },
+    a: { membre: membreDe(a, carole), evenement: evenementA, invitation: invitationA, session: await idSession(alice), abonnement: abonnementAlice.id, jetonFlux: flux.erin.jeton, ...recueA },
+    b: { membre: membreDe(b, dave), evenement: evenementB, invitation: invitationB, session: await idSession(bob), abonnement: abonnementBob.id, jetonFlux: flux.dave.jeton, ...recueB },
   };
   const marquesDeB = [
     b.groupId,
@@ -113,5 +152,5 @@ export async function monde(): Promise<Monde> {
     'Soirée du groupe B secret',
     ...Object.values(ressources.b),
   ];
-  return { d, alice, bob, carole, dave, erin, manon, frank, a, b, ressources, marquesDeB };
+  return { d, alice, bob, carole, dave, erin, manon, frank, a, b, ressources, marquesDeB, flux };
 }

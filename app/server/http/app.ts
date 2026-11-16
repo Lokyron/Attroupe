@@ -13,6 +13,7 @@ import { intergicielSession } from './middleware/session.js';
 import { declarerIntergiciel, monter } from './montage.js';
 import { routesAuth } from './routes/auth.js';
 import { routesGroupes } from './routes/groupes.js';
+import { routesIcal } from './routes/ical.js';
 import { routesInvitations } from './routes/invitations.js';
 import { routesMoi } from './routes/moi.js';
 
@@ -106,6 +107,8 @@ export function creerApp(options: OptionsApp): Express {
     monter(app, '/api/moi', routesMoi(contexte));
     monter(app, '/api/groupes', routesGroupes(contexte));
     monter(app, '/api/invitations', routesInvitations(contexte));
+    // Le flux iCal est HORS /api : ni cookie, ni CSRF, ni corps JSON, ni session — le jeton de l'URL est l'unique authentification.
+    monter(app, '/ical', routesIcal(contexte));
   }
 
   // Toute autre URL d'API est inconnue : JSON, jamais la page du client.

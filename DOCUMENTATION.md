@@ -57,6 +57,8 @@ Homelab personnel (pas Cazalia). Accès par Internet derrière le Nginx Proxy Ma
 sous-domaine à définir. Immich tourne **à part**, sur sa ou ses propres instances, et n'est
 jamais embarqué dans la pile du projet.
 
+**Flux iCal et journaux du proxy.** Le jeton d'un flux de calendrier est dans l'URL (`/ical/<jeton>.ics`) : il apparaît donc dans les journaux d'accès du Nginx Proxy Manager (le journal applicatif, lui, ne couvre que `/api`). Quiconque lit ces journaux peut s'abonner aux calendriers concernés ; à protéger ou à purger en conséquence, et à révoquer en cas de fuite.
+
 Image publiée sur GHCR, **paquet public** et **`linux/amd64`** uniquement.
 
 Mise à jour, sur le conteneur concerné :
@@ -172,6 +174,26 @@ d'un autre groupe donne **404** `evenement.introuvable`, jamais 403.
 
 `capacity` est **informative** en V1 : un « oui » au-delà n'est pas bloqué.
 
+Lot 5 (flux iCal, [`ADR-0010`](docs/decisions/ADR-0010-flux-ical.md)). `GET /ical/:jeton.ics` est la seule route
+métier **hors `/api`** : ni cookie, ni CSRF, ni groupe dans l'URL. Le jeton établit l'identité, puis le flux crée
+**un `GroupScope` par appartenance active** et lit les événements groupe par groupe — l'appartenance est relue à
+chaque requête, donc le jeton d'un membre retiré ne rend plus rien de son ancien groupe.
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| GET | `/api/moi/flux-ical` | Mes abonnements : `label`, groupe éventuel, drapeaux, `last_used_at`, `last_user_agent`. **Jamais le jeton** (stocké haché). |
+| POST | `/api/moi/flux-ical` | `{label?, group_id?, include_personal?, include_declined?}` → 201 **avec le jeton en clair, une seule fois**. 404 `groupe.introuvable` si l'appartenance n'est pas active. Plafond de 20 abonnements non révoqués (409 `flux.plafond`) + cadence `abonnement`. |
+| DELETE | `/api/moi/flux-ical/:fluxId` | Révoque (`revoked_at`, jamais de suppression). 404 si ce n'est pas le mien. |
+| GET | `/ical/:jeton.ics` | **Hors `/api`, sans cookie.** 404 identique pour un jeton inconnu, mal formé ou révoqué. Cadence 60/h par jeton (+ IP et réseau). `Cache-Control: private, max-age=300`, `ETag` et `304`. |
+
+Jeton : 32 octets en base32 minuscule (`^[a-z2-7]{52}$`, forme vérifiée **avant** la base), stocké haché en SHA-256.
+`ETag` = empreinte **exacte** du flux (`id|updated_at|nom de l'auteur` de chaque événement servi, trié puis haché),
+et non `(max, count)` : deux réponses de présence échangées changent le contenu sans changer le nombre ni le
+`max(updated_at)`, et donneraient sinon un `304` qui laisse un agenda faux sur le téléphone. Un `304` ne coûte que
+les agrégats, sans lecture d'événement. `DTSTART` en UTC pour les événements horodatés, `VALUE=DATE` pour les
+journées entières (écart à §7.1 acté par l'ADR-0010) ; `include_personal` est stocké mais **sans effet** jusqu'au
+lot 8.
+
 Registre de cloisonnement : `app/tests/cloisonnement/registre.ts` recense chaque route et son exigence ; le test de
 complétude échoue si une route montée n'y figure pas (les routeurs se montent avec `monter()`, `http/montage.ts`).
 
@@ -186,8 +208,8 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
 ## 8. Dette technique, TODOs & points d'attention
 
 - Modèle de données et architecture : **écrits** (`03` et `04` du dossier de conception). Le découpage
-  est au §10 de `04` : **lots 0 à 4 livrés** (squelette, base et cloisonnement, comptes, groupes et
-  membres, agenda du groupe), le prochain est le lot 5 (flux iCal).
+  est au §10 de `04` : **lots 0 à 5 livrés** (squelette, base et cloisonnement, comptes, groupes et
+  membres, agenda du groupe, flux iCal), le prochain est le lot 6 (listes de courses et tâches).
 - `ADR-0008` est **Acceptée** (lot 1). À revoir quand `node:sqlite` passera en « Stable ».
 - Lot 1 livré, puis corrigé après revue : `app/server/db/` (`base` : connexion opaque, `connection`,
   `migrate`, `moteur`, `scope` : GroupScope, `portee-utilisateur`, `sql` : garde du SQL brut,
@@ -221,6 +243,23 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
   se saisit en texte libre dans le formulaire, sans liste déroulante ; `PATCH` reste permis sur un
   événement annulé (sans danger : aucun champ `status` au schéma) ; aucun test ne force le retour
   arrière de la transaction de création.
+- Lot 5 livré (flux iCal) : `domain/{ical,jetons}.ts`, `db/queries/flux.ts`, `services/flux-ical.ts`,
+  `http/middleware/jeton-flux.ts` (**troisième chemin d'entrée** autorisé à fabriquer une portée, après
+  `appartenance.ts` et `session.ts`), `http/routes/ical.ts`, et côté client `pages/Compte.tsx`. La garde du SQL brut
+  porte une **cinquième exception nommée** (`calendar_feed_tokens` par `token_hash = ?`), plus étroite que celle des
+  invitations : `SELECT` seul, une table, aucune jointure, `token_hash` jamais en `SET` — bornes et raisons dans
+  l'ADR-0010.
+- **Le verrou n° 3 était contournable depuis le lot 1**, et c'est corrigé ici : la règle ESLint comparait le *texte*
+  de l'import, si bien que `../../db/queries/../scope.js` et `../../db/.//scope.js` passaient alors que
+  `../../db/scope.js` était bloqué. La barrière réelle est désormais le test par **chemin résolu**
+  (`app/tests/fixtures/verrou-db.ts`), étendu à `scope`, `portee-utilisateur`, `sql` et `migrate` avec la liste
+  nominative des fichiers autorisés ; la règle ESLint est conservée pour le retour immédiat à l'édition. Ré-exports,
+  import dynamique, `require` et import d'espace de noms sont refusés.
+- **Ouvert sur le lot 5** : aucun test sur un vrai iPhone ou Android — le critère n° 2 de la vision (« une URL collée
+  dans le calendrier d'un téléphone fait apparaître les soirées ») reste à valider à la main ; un événement horodaté
+  sans `ends_at` n'a pas de `DTEND` et s'affiche comme un point ; troncature silencieuse à 1000 événements par groupe
+  et par ensemble ; un événement commencé avant la fenêtre et fini dedans n'est pas servi s'il n'a pas été modifié ;
+  les abonnés passant par iCloud ou Google partagent le plafond de cadence par IP.
 - Le cloisonnement entre groupes est le risque numéro un du projet : il se traite par des
   tests dédiés, route par route (voir `ADR-0002`).
 - L'ajout d'un membre par son nom d'utilisateur ou son e-mail est une surface d'abus : l'ajout

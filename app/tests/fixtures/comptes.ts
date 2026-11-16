@@ -97,6 +97,8 @@ export interface Reponse {
   readonly corps: Record<string, unknown>;
   readonly entetes: Record<string, string | string[] | undefined>;
   readonly cookies: string[];
+  /** Corps textuel brut (flux iCal : `text/calendar` n'est pas du JSON, `corps` est alors vide). */
+  readonly texte: string;
 }
 
 /** Client HTTP minimal : cookie conservé, `Origin` de l'instance par défaut, adresse simulée par X-Forwarded-For. */
@@ -112,13 +114,14 @@ export class Client {
     methode: 'get' | 'post' | 'put' | 'patch' | 'delete',
     chemin: string,
     corps?: unknown,
-    options: { origine?: string | null; cookie?: string | null } = {},
+    options: { origine?: string | null; cookie?: string | null; entetes?: Readonly<Record<string, string>> } = {},
   ): Promise<Reponse> {
     let r = request(this.app)[methode](chemin).set('X-Forwarded-For', this.adresse).set('User-Agent', 'Test/1.0 (Appareil A)');
     const origine = options.origine === undefined ? ORIGINE : options.origine;
     if (origine !== null) r = r.set('Origin', origine);
     const cookie = options.cookie === undefined ? this.cookie : (options.cookie ?? undefined);
     if (cookie !== undefined) r = r.set('Cookie', cookie);
+    for (const [nom, valeur] of Object.entries(options.entetes ?? {})) r = r.set(nom, valeur);
     if (corps !== undefined) r = r.send(corps as object);
     const reponse = await r;
     const posts = (reponse.headers['set-cookie'] ?? []) as unknown as string[];
@@ -126,7 +129,7 @@ export class Client {
       const [paire = ''] = c.split(';');
       if (paire.startsWith('attroupe_session=')) this.cookie = paire.endsWith('=') ? undefined : paire;
     }
-    return { statut: reponse.status, corps: reponse.body as Record<string, unknown>, entetes: reponse.headers, cookies: posts };
+    return { statut: reponse.status, corps: reponse.body as Record<string, unknown>, entetes: reponse.headers, cookies: posts, texte: reponse.text };
   }
 
   get = (chemin: string, options?: Parameters<Client['envoyer']>[3]): Promise<Reponse> => this.envoyer('get', chemin, undefined, options);

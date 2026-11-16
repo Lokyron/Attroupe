@@ -575,6 +575,17 @@ Conventions : préfixe `/api`, JSON, cookie de session obligatoire sauf mention 
 - **Mise en cache** : `ETag` = empreinte de `(jeton, max(updated_at), nombre d'événements)` et
   réponse `304` si `If-None-Match` correspond. Les clients iOS et Android interrogent souvent
   et à heure fixe : un `304` coûte une requête d'agrégat, pas une génération.
+> **Amendement du 2026-11-16 ([`ADR-0010`](../docs/decisions/ADR-0010-flux-ical.md), lot 5).** Deux points de
+> cette section ont été tranchés autrement à l'implémentation, et le texte ci-dessus est conservé tel quel pour que
+> l'écart reste visible :
+> 1. les `DTSTART` des événements horodatés sont émis **en UTC** (`…Z`) et non `TZID=` + `VTIMEZONE` : la base stocke
+>    déjà un instant, et écrire à la main les règles de changement d'heure serait une source de défauts pour un gain
+>    nul. `TZID` redeviendra nécessaire avec la récurrence (V2) ;
+> 2. la résolution du jeton exige une **exception nommée** de la garde du SQL brut
+>    (`calendar_feed_tokens` filtrée par `token_hash = ?`), parce qu'un flux établit l'identité par son jeton et ne
+>    peut donc pas fournir le `user_id` que la garde réclame. L'ADR en fixe les quatre bornes. La règle de fond est
+>    intacte : le flux crée **un `GroupScope` par appartenance active** et lit les événements groupe par groupe.
+
 - **Pas de CalDAV en V1.** L'abonnement iCal est en lecture seule et couvre le besoin (« les
   soirées apparaissent dans l'agenda »). CalDAV supposerait d'implémenter un serveur
   d'écriture : hors périmètre, et non demandé.

@@ -17,5 +17,12 @@
       "sujet": "Invitation à rejoindre « {groupe} »",
       "texte": "Bonjour,\n\n{invitant} vous invite à rejoindre le groupe « {groupe} » sur {application}.{mot}\n\nPour répondre à l'invitation, ouvrez le lien suivant (valable 14 jours, utilisable une seule fois) :\n\n{lien}\n\nSi vous ne connaissez pas cette personne, ignorez simplement ce message : rien ne se passera tant que vous n'acceptez pas."
     }
+  },
+  "flux_ical": {
+    "nom_calendrier": "Attroupe",
+    "lieu": "Lieu",
+    "consignes": "Consignes",
+    "fuseau": "Fuseau d'origine",
+    "lien": "Lien"
   }
 }

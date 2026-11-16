@@ -3,6 +3,62 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-16 — Lot 5 : les flux iCal
+
+Jetons d'abonnement par compte (`GET`/`POST`/`DELETE /api/moi/flux-ical`, 32 octets en base32, stockés hachés, le
+jeton en clair affiché **une seule fois**) et `GET /ical/:jeton.ics`, la seule route métier **hors `/api`** : ni
+cookie, ni CSRF, ni groupe dans l'URL. Génération du `VCALENDAR` sans dépendance (pliage à 75 **octets** UTF-8,
+CRLF, échappement RFC 5545), `ETag` et `304`, cadence par jeton. Page du compte côté client. Aucune migration.
+
+**La décision d'architecture du lot, et comment elle a été prise.** Le `dev` s'est arrêté **avant d'écrire une
+ligne** : la requête qui résout le jeton est refusée par la garde du SQL brut, parce que `calendar_feed_tokens` est
+classée `user_id` et qu'on ne connaît justement pas encore le `user_id`. J'ai vérifié sa sonde, puis vérifié que son
+option de repli (un identifiant public dans l'URL) était refusée **pour la même raison** — donc sans gain. Décision
+prise et enregistrée dans [`ADR-0010`](../docs/decisions/ADR-0010-flux-ical.md) : une cinquième exception nommée
+(`token_hash = ?`), plus étroite que celle des invitations — `SELECT` seul, une table, **aucune jointure**,
+`token_hash` jamais en `SET` — et la règle de fond intacte : le flux crée **un `GroupScope` par appartenance
+active** et lit groupe par groupe. §7.1 de l'architecture porte un **amendement daté qui pointe vers l'ADR**, le
+texte d'origine conservé : c'est ainsi qu'on modifie une spécification, pas en la réécrivant pour coller au code
+(ce qui était arrivé au lot 2).
+
+**Vérifié par exécution de ma part** : `lint`, `typecheck`, `build` verts, **1 022 tests** passés (1 ignoré,
+antérieur au lot). **17 sondes que j'ai écrites contre la garde** : sont refusées la jointure
+`calendar_feed_tokens → events` par `group_id = group_id`, la sous-requête `WHERE group_id = (SELECT … WHERE
+token_hash = ?)`, la même en `IN`, la virgule-jointure, le `UNION`, le `LEFT JOIN`, `WHERE id = ?` seul, l'`UPDATE`
+et le `DELETE` sous `token_hash`, la réécriture du `token_hash`, le littéral, un `UPDATE memberships SET role`
+greffé sur une sous-requête de jeton, et le témoin exact du lot 3 ; seules la résolution d'une table sans jointure et
+`UPDATE … WHERE id = ? AND user_id = ?` sont admises. Mutation : retirer `AND status = 'active'` de `creerScope`
+fait échouer `GET /ical/:jeton.ics` nommément.
+
+**Le défaut le plus grave trouvé en revue était antérieur au lot : le verrou n° 3 se contournait depuis le lot 1.**
+La règle ESLint comparait le **texte** de l'import. J'ai reproduit les trois formes moi-même :
+`../../db/scope.js` bloqué, mais `../../db/queries/../scope.js` et `../../db/.//scope.js` passaient — Node et
+TypeScript les résolvent identiquement. Une route pouvait donc importer `preparer` par un chemin détourné et lire
+n'importe quel groupe, la garde vérifiant la *forme* de la requête et non quelle valeur est liée. Corrigé : la
+barrière réelle est maintenant le test par **chemin résolu**, étendu à `scope`, `portee-utilisateur`, `sql` et
+`migrate`, avec la liste nominative des fichiers autorisés ; ré-exports, import dynamique, `require` et import
+d'espace de noms refusés. Les quatre sondes sont bloquées, vérifié par moi après correction.
+
+**Le second défaut : l'`ETag` pouvait mentir.** Il se réduisait à `(MAX(updated_at), COUNT(*))` par groupe, et
+répondre à une invitation ne touche jamais `events.updated_at` (vérifié dans le code). Donc, avec
+`include_declined = 0` : je refuse A, j'accepte B, le nombre et le maximum ne bougent pas, le téléphone reçoit un
+`304` et ne voit **jamais** B. Ce n'était pas une fuite — tout restait dans mon groupe — mais c'était un agenda
+faux, ce qui est la fonction même du lot. L'empreinte est devenue exacte (`id|updated_at|nom de l'auteur` trié puis
+haché, dans le même agrégat), et un `304` ne coûte toujours aucune lecture d'événement. **Rejoué par moi** :
+remettre `(max, count)` fait échouer exactement les deux tests visés — celui des réponses échangées et celui du nom
+d'organisateur. Les nouveaux tests ne sont donc pas creux.
+
+**Autres corrections après revue** : le nom de l'organisateur entre dans l'empreinte (un compte anonymisé laissait
+son ancien nom dans `ORGANIZER;CN=` sur tous les téléphones, indéfiniment, puisque chaque interrogation recevait un
+`304`) ; `POST /api/moi/flux-ical` reçoit un plafond de 20 abonnements actifs **et** une cadence ; le panneau qui
+affiche l'URL se ferme quand le jeton qu'il montre est révoqué.
+
+**Non vérifié** : aucun test sur un vrai iPhone ni Android — le critère n° 2 de la vision reste à valider à la main,
+et c'est maintenant le plus gros manque du projet. L'interface n'a toujours jamais été ouverte dans un navigateur.
+Assumé : un événement horodaté sans `ends_at` n'a pas de `DTEND` (la RFC en fait un point, nous n'inventons pas une
+durée) ; troncature à 1000 événements par groupe et par ensemble ; le jeton apparaît dans les journaux d'accès du
+proxy inverse, ce qui est désormais écrit dans `DOCUMENTATION.md`.
+
 ## 2026-11-16 — Lot 4 : l'agenda du groupe
 
 Neuf routes sous `/api/groupes/:groupId/evenements` : fenêtre d'agenda, création, détail, modification, annulation

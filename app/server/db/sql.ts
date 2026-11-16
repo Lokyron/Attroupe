@@ -74,8 +74,20 @@ export const PORTEE_TABLES: Readonly<Record<string, ColonnePortee>> = {
  *     (l'inviteur affiché au destinataire) ; la ligne ainsi couverte ne propage rien à son tour.
  * Et la colonne de preuve ne se modifie pas : `target_user_id` jamais en `SET` ; `token_hash` seulement sous un vrai
  * `group_id = ?` lié (l'armement du jeton à l'envoi, `armerInvitationEnvoi`), jamais sous un filtre par `token_hash` / `target_user_id`.
+ *
+ *  5. (lot 5) `calendar_feed_tokens` filtrée par `token_hash = ?` : le flux iCal n'a ni cookie ni groupe, la preuve d'accès est le
+ *     jeton (empreinte SHA-256) et il sert à retrouver le compte. Exception PLUS ÉTROITE que celle des invitations :
+ *     - `SELECT` uniquement, UNE seule table, AUCUNE jointure (pas même celle de l'inviteur) : la requête ne rend que les
+ *       colonnes du jeton, les événements se lisent ensuite par `creerScope`, groupe par groupe ;
+ *     - `token_hash` n'est JAMAIS en `SET` (ni `UPDATE`, ni `DELETE` sous ce filtre) ;
+ *     - la couverture ne vaut que pour la table elle-même et ne se propage jamais ; l'écriture qui suit (`last_used_at`) passe par
+ *       `WHERE id = ? AND user_id = ?` (garde ordinaire) : n'élargissez pas cette exception pour écrire.
+ *     `calendar_feed_tokens` par `id = ?` seul reste refusée.
  */
-const ACCES_ALTERNATIFS: Readonly<Record<string, readonly string[]>> = { invitations: ['target_user_id', 'token_hash'] };
+const ACCES_ALTERNATIFS: Readonly<Record<string, readonly string[]>> = {
+  invitations: ['target_user_id', 'token_hash'],
+  calendar_feed_tokens: ['token_hash'],
+};
 
 /** Requête refusée par la garde. */
 export class ErreurRequeteSansGroupe extends Error {
@@ -550,9 +562,18 @@ export function diagnostiquer(texte: string): string | undefined {
   // La colonne de preuve ne se réécrit pas (une invitation ne se réattribue pas) ; le jeton ne s'arme que sous un vrai group_id.
   const niInvitations = references.findIndex((r) => r.table === 'invitations');
   for (const mp of misesPreuve) {
+    // Jeton de flux : la colonne de preuve ne se modifie jamais, sous aucun filtre.
+    if (mp.colonne === 'token_hash' && references.some((r) => r.table === 'calendar_feed_tokens')) return "« token_hash » d'un jeton de flux ne se modifie jamais";
     if (niInvitations < 0) continue;
     if (mp.colonne === 'target_user_id') return "« target_user_id » ne se modifie pas : une invitation ne se réattribue pas";
     if (!propageables.has(niInvitations)) return "« token_hash » ne se modifie que sous « group_id = ? » (armement du jeton), jamais sous un filtre de preuve";
+  }
+  // Jeton de flux couvert par sa seule preuve (token_hash, sans user_id) : SELECT, une seule table, aucune jointure.
+  for (const [n, ref] of references.entries()) {
+    if (ref.table !== 'calendar_feed_tokens' || propageables.has(n) || !couvertes.has(n)) continue;
+    if (mot(0) !== 'select' || references.length !== 1 || jetons.some((_j, i) => mot(i) === 'join')) {
+      return "« calendar_feed_tokens » filtrée par token_hash : SELECT d'une seule table, sans jointure";
+    }
   }
   for (const [n, ref] of references.entries()) {
     if (!couvertes.has(n)) {

@@ -54,6 +54,20 @@ describe('registre de cloisonnement : complétude', () => {
     }
   });
 
+  it('une entrée `jetonFlux` est hors /api, sans paramètre de groupe, et déclare son jeton (sinon aucune attaque ne le présenterait)', () => {
+    const flux = REGISTRE.filter((x) => x.exige === 'jetonFlux');
+    expect(flux.length, 'la route du flux doit être au registre avec son exigence propre, pas `aucune`').toBeGreaterThan(0);
+    for (const e of flux) {
+      expect(e.chemin.startsWith('/ical/'), cle(e)).toBe(true);
+      expect(e.chemin.includes(':groupId'), cle(e)).toBe(false);
+      expect(Object.values(e.ressources ?? {}), cle(e)).toContain('jetonFlux');
+    }
+  });
+
+  it('la route du flux n’est pas déclarée `aucune` (ce serait vert et faux : aucune attaque ne serait lancée)', () => {
+    for (const e of REGISTRE.filter((x) => x.chemin.startsWith('/ical/'))) expect(e.exige, cle(e)).toBe('jetonFlux');
+  });
+
   it('une entrée `organisateur` déclare l’événement dans `ressources` (sinon l’ordre « trouver puis autoriser » n’est jamais attaqué)', () => {
     for (const e of REGISTRE.filter((x) => x.exige === 'organisateur')) {
       expect(Object.values(e.ressources ?? {}), cle(e)).toContain('evenement');
