@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { creerAbonnement, listerAbonnements, revoquerAbonnement, type Abonnement, type AbonnementCree } from '../api/flux';
+import { lienGoogleAgenda } from '../api/lien-google';
 import type { GroupeResume } from '../api/groupes';
 import { Erreur, messageDe } from '../components/Erreur';
 import { t } from '../i18n';
@@ -16,7 +17,7 @@ function NouvelAbonnement({ groupes, abonnements, onCree }: { groupes: GroupeRes
   const [groupeId, setGroupeId] = useState('');
   const [refuses, setRefuses] = useState(true);
   const [cree, setCree] = useState<AbonnementCree | null>(null);
-  const [copie, setCopie] = useState<'oui' | 'non' | null>(null);
+  const [copie, setCopie] = useState<{ cible: 'webcal' | 'https'; ok: boolean } | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
 
   // Le jeton qu'on vient de créer est révoqué depuis la liste : son adresse ne vaut plus rien, le panneau ne la garde pas affichée.
@@ -38,10 +39,10 @@ function NouvelAbonnement({ groupes, abonnements, onCree }: { groupes: GroupeRes
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  const copier = (url: string): void => {
-    navigator.clipboard.writeText(url).then(
-      () => setCopie('oui'),
-      () => setCopie('non'),
+  const copier = (cible: 'webcal' | 'https', adresse: string): void => {
+    navigator.clipboard.writeText(adresse).then(
+      () => setCopie({ cible, ok: true }),
+      () => setCopie({ cible, ok: false }),
     );
   };
 
@@ -55,15 +56,28 @@ function NouvelAbonnement({ groupes, abonnements, onCree }: { groupes: GroupeRes
             {t('flux.ajouter_calendrier')}
           </a>
         </p>
-        <p>{t('flux.difference')}</p>
-        <p>{t('flux.rafraichissement')}</p>
-        <p>{t('flux.url_https_aide')}</p>
-        <input type="text" readOnly value={cree.url} aria-label={t('flux.url_https_titre')} onFocus={(e) => e.target.select()} />
-        <button type="button" onClick={() => copier(cree.url)}>
+        <p>{t('flux.ajouter_calendrier_aide')}</p>
+        <h4>{t('flux.webcal_titre')}</h4>
+        <p>{t('flux.webcal_aide')}</p>
+        <input type="text" readOnly value={cree.url_webcal} aria-label={t('flux.webcal_titre')} onFocus={(e) => e.target.select()} />
+        <button type="button" onClick={() => copier('webcal', cree.url_webcal)}>
           {t('flux.copier')}
         </button>
-        {copie === 'oui' && <p>{t('flux.copie')}</p>}
-        {copie === 'non' && <p role="alert">{t('flux.copie_impossible')}</p>}
+        {copie?.cible === 'webcal' && (copie.ok ? <p>{t('flux.copie')}</p> : <p role="alert">{t('flux.copie_impossible')}</p>)}
+        <h4>{t('flux.url_https_titre')}</h4>
+        <p>{t('flux.url_https_aide')}</p>
+        <input type="text" readOnly value={cree.url} aria-label={t('flux.url_https_titre')} onFocus={(e) => e.target.select()} />
+        <button type="button" onClick={() => copier('https', cree.url)}>
+          {t('flux.copier')}
+        </button>
+        {copie?.cible === 'https' && (copie.ok ? <p>{t('flux.copie')}</p> : <p role="alert">{t('flux.copie_impossible')}</p>)}
+        <p>
+          <a href={lienGoogleAgenda(cree.url)} className="bouton" target="_blank" rel="noopener noreferrer">
+            {t('flux.google_lien')}
+          </a>
+        </p>
+        <p>{t('flux.google_aide')}</p>
+        <p>{t('flux.rafraichissement')}</p>
         <button type="button" onClick={() => setCree(null)}>
           {t('flux.fermer')}
         </button>

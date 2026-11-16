@@ -85,6 +85,9 @@ rien et coûterait un écart à §7.1. Elle est écartée.
 - **Les cadences de rafraîchissement n'appartiennent pas au serveur.** iOS respecte l'intervalle choisi et se force à
   la main ; Google Agenda décide seul (première récupération souvent après des heures, puis 8 à 24 h), et son
   application mobile ne sait **pas** ajouter un calendrier par URL — il faut un ordinateur, une fois.
+- **L'accumulation des annulés est bornée par le fenêtrage : aucun ménage particulier n'est nécessaire.** Un événement
+  annulé est servi barré environ trois mois, par l'ensemble « modifiés depuis », puis sort du flux. Décision du
+  2026-11-16, à ne pas rouvrir.
 
 ## Alternatives écartées
 
