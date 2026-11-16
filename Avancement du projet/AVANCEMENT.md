@@ -22,8 +22,22 @@ réelle, à travers le proxy, avec un compte créé pour l'occasion :
   `ORGANIZER` sur une adresse `.invalid`. Le jeton n'est rendu **qu'à la création** et n'apparaît pas dans la liste
   des abonnements. Révoqué, le flux répond **404**, comme un jeton inconnu.
 
-**Reste à valider à la main** : un vrai client iOS ou Android. C'est lui qui décide si notre `VCALENDAR` lui plaît, et
-aucun test ne peut le remplacer. L'interface n'a toujours pas été ouverte dans un navigateur.
+**Joignable depuis Internet : prouvé le 2026-11-16, et pas par moi.** Toutes mes vérifications partaient de la machine
+de développement, donc de l'intérieur du réseau, et revenaient par l'IP publique en épingle : elles ne prouvaient
+rien de l'extérieur. C'est l'iPhone de l'utilisateur qui l'a établi, en récupérant le flux deux fois en 200 avec le
+fichier complet — une fois depuis le Wi-Fi (`10.1.30.131`), une fois en **données mobiles** depuis une adresse
+publique (`37.167.2.185`). Ce second appel valide du même coup la chaîne `X-Forwarded-For` avec un vrai client
+extérieur : c'est bien son adresse qui remonte, pas celle du proxy, ce dont dépend la limitation de cadence.
+
+**Leçon à retenir pour la suite** : « joignable » vérifié depuis le réseau local ne veut pas dire joignable. Toute
+mise en service ultérieure (le 112 en production) doit être éprouvée depuis l'extérieur, par un client qui ne passe
+pas par l'épingle du routeur.
+
+**Reste à valider à la main** : l'abonnement iCal vu par le **récupérateur de calendrier** lui-même. Le fichier a été
+téléchargé par Safari sur l'iPhone, pas par l'agent d'abonnement : au 2026-11-16, aucun agent de calendrier (ni
+l'iPhone, ni les serveurs d'Apple pour un abonnement iCloud) n'apparaît dans les journaux du proxy. Le critère n° 2
+de la vision n'est donc pas encore tenu de bout en bout. L'interface, elle, a été ouverte dans Chrome sur macOS par
+l'utilisateur (un événement y a été créé), mais jamais par moi.
 
 **Relevé en déployant** : `GET /api/version` est à la surface d'API (§6) mais n'a jamais été écrite — elle répond
 `route.introuvable`. À faire au lot 12.
