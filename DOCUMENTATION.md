@@ -86,6 +86,21 @@ Pour lever la restriction le temps d'un essai direct depuis le réseau local :
 > Le **112 (production) n'est pas déployé** : il attend le nom de domaine définitif et la bascule du
 > lot 12.
 
+**`https://beta.attroupe.fr` est en service depuis le 2026-11-16.** Certificat Let's Encrypt
+`*.attroupe.fr` + `attroupe.fr`, obtenu par **défi DNS avec le greffon OVH** (`dns_ovh_endpoint = ovh-eu`,
+propagation 120 s) — le défi HTTP-01 ne convenait plus, *Force SSL* renvoyant un 301 sur
+`/.well-known/acme-challenge/`. Le même certificat couvrira la production.
+
+Vérifié de bout en bout : certificat valide pour ce nom, `http` → `https` en 301, `/api/sante` à 200 en
+HTTPS, interface servie. NPM transmet `X-Forwarded-For` (`$proxy_add_x_forwarded_for`) et `X-Real-IP` ;
+comme il est le seul saut en amont, `ATTROUPE_TRUST_PROXY=1` (Express `trust proxy = 1`, qui lit la
+dernière entrée) attribue bien l'adresse réelle du client, ce dont dépend la limitation de cadence.
+
+*Restent à cocher dans NPM* : **HTTP/2** (l'hôte est encore en `http2 off`, donc HTTP/1.1) et les deux
+lignes de l'onglet *Advanced*, `proxy_buffering off;` et `client_max_body_size 50m;`. Le flux temps réel
+fonctionne malgré l'absence de la première, l'application envoyant `X-Accel-Buffering: no` que Nginx
+respecte ; la seconde servira au dépôt de photos du lot 11.
+
 **L'instance est inutilisable en HTTP nu, et c'est voulu.** `ATTROUPE_BASE_URL` détermine deux choses :
 le cookie de session est marqué `Secure` dès que l'URL est en `https:` (`http/app.ts`, `cookieSecurise`),
 et la protection CSRF n'admet **que** l'origine exacte de cette URL (`middleware/csrf.ts`). Avec
