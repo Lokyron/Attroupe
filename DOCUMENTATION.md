@@ -62,8 +62,29 @@ Docker CE et le greffon Compose y sont installés et actifs, et l'exécution est
 deux (`docker run --rm hello-world`). Accès `root` par la clé `~/.ssh/id_ed25519_pve` ; **aucun mot de
 passe root n'est posé**, l'accès se fait par clé.
 
-> L'application n'y est pas encore déployée : il manque le sous-domaine, l'entrée dans le Nginx Proxy
-> Manager et le fichier `.env` (dont `ATTROUPE_SESSION_SECRET`). Voir §5 pour la marche à suivre.
+**Déployé sur le 113 le 2026-11-16.** `/opt/attroupe/` contient le `docker-compose.yml` du dépôt et un
+`.env` en `chmod 600` dont les **trois secrets ont été générés sur le serveur** (`openssl rand -base64 32`,
+un par usage) et n'en sont jamais sortis. `ATTROUPE_TAG=beta`, `ATTROUPE_BASE_URL=https://beta.attroupe.fr`,
+`ATTROUPE_IMMICH_ALLOW_PRIVATE=true` (Immich est sur le même réseau privé), pas de `BREVO_API_KEY` : les
+e-mails restent en file et le journal le dit au démarrage (`email.non_configure`).
+
+**Le proxy n'est pas sur la même machine que l'application** (NPM est le CT 100, `10.1.20.100`), donc
+`ATTROUPE_BIND=0.0.0.0` et non `127.0.0.1`. Pour que cela ne vide pas la limitation de cadence — avec
+`ATTROUPE_TRUST_PROXY=1`, un client direct du réseau local forgerait son `X-Forwarded-For` — le port 3000
+n'est joignable **que depuis `10.1.20.100`** : deux règles dans la chaîne `DOCKER-USER` (le trafic vers un
+conteneur est DNAT-é et ne traverse pas `INPUT`), posées par
+`/usr/local/sbin/attroupe-pare-feu.sh` et réappliquées à chaque démarrage par l'unité systemd
+`attroupe-pare-feu.service` (`After=docker.service`).
+
+Vérifié par exécution : `/api/sante` à 200 depuis le conteneur **et** depuis le CT 100, refusé depuis une
+autre machine du réseau, l'interface se charge, et **tout survit à un `pct reboot`** (démarrage
+automatique du conteneur applicatif, règles réappliquées, état `healthy`).
+
+Pour lever la restriction le temps d'un essai direct depuis le réseau local :
+`iptables -D DOCKER-USER -p tcp --dport 3000 -j DROP` dans le CT 113 (elle revient au prochain démarrage).
+
+> Le **112 (production) n'est pas déployé** : il attend le nom de domaine définitif et la bascule du
+> lot 12.
 
 Homelab personnel (pas Cazalia). Accès par Internet derrière le Nginx Proxy Manager, sur un
 sous-domaine à définir. Immich tourne **à part**, sur sa ou ses propres instances, et n'est
@@ -299,6 +320,9 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
   sans `ends_at` n'a pas de `DTEND` et s'affiche comme un point ; troncature silencieuse à 1000 événements par groupe
   et par ensemble ; un événement commencé avant la fenêtre et fini dedans n'est pas servi s'il n'a pas été modifié ;
   les abonnés passant par iCloud ou Google partagent le plafond de cadence par IP.
+- **`GET /api/version` est à la surface d'API (§6 de l'architecture) mais n'existe pas** : constaté sur le
+  déploiement du 113, elle répond `route.introuvable`. Elle doit afficher l'étiquette d'image et le numéro
+  de migration en pied de page — à écrire au lot 12 avec la page d'exploitation.
 - Le cloisonnement entre groupes est le risque numéro un du projet : il se traite par des
   tests dédiés, route par route (voir `ADR-0002`).
 - L'ajout d'un membre par son nom d'utilisateur ou son e-mail est une surface d'abus : l'ajout
