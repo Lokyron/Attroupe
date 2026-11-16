@@ -347,6 +347,17 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
 - **`GET /api/version` est à la surface d'API (§6 de l'architecture) mais n'existe pas** : constaté sur le
   déploiement du 113, elle répond `route.introuvable`. Elle doit afficher l'étiquette d'image et le numéro
   de migration en pied de page — à écrire au lot 12 avec la page d'exploitation.
+- **Les abonnements iCal se rafraîchissent à la cadence du client, pas à la nôtre, et Google est lent.**
+  Constaté le 2026-11-16 sur la bêta : un abonnement créé dans Google Agenda n'avait toujours provoqué
+  **aucune** requête sur `/ical/…` côté serveur (aucun agent Google dans les journaux du proxy), alors que
+  le même fichier était servi en 200 à Safari sur iPhone. Google décide seul du moment de sa première
+  récupération — souvent plusieurs heures — puis rafraîchit toutes les 8 à 24 h, sans aucun moyen de
+  forcer. Conséquence sur le **critère de réussite n° 2** de la vision (« une modification se propage, une
+  annulation disparaît ») : sur Google Agenda, la propagation se compte en heures, et ce n'est pas un
+  défaut de notre code. Sur iOS, un abonnement enregistré « Sur mon iPhone » se rafraîchit à l'intervalle
+  choisi (jusqu'à 5 min) et se force en tirant la liste des calendriers vers le bas — c'est donc le seul
+  chemin qui permette d'éprouver la propagation à la main. À dire dans la documentation utilisateur, pour
+  que personne ne prenne la lenteur de Google pour une panne de l'application.
 - Le cloisonnement entre groupes est le risque numéro un du projet : il se traite par des
   tests dédiés, route par route (voir `ADR-0002`).
 - L'ajout d'un membre par son nom d'utilisateur ou son e-mail est une surface d'abus : l'ajout
