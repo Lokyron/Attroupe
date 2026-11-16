@@ -358,6 +358,19 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
   choisi (jusqu'à 5 min) et se force en tirant la liste des calendriers vers le bas — c'est donc le seul
   chemin qui permette d'éprouver la propagation à la main. À dire dans la documentation utilisateur, pour
   que personne ne prenne la lenteur de Google pour une panne de l'application.
+- **DÉFAUT : l'application ne propose aucun lien `webcal://`, donc l'abonnement iCal échoue en pratique.**
+  Trouvé le 2026-11-16 en éprouvant la bêta sur un vrai iPhone. `POST /api/moi/flux-ical` ne renvoie
+  qu'une URL `https://…/ical/<jeton>.ics` (`http/routes/moi.ts:129`), et le mot `webcal` n'existe nulle
+  part dans le dépôt. Or sur iOS, ouvrir un lien `https` vers un `.ics` fait **télécharger** le fichier et
+  proposer « ajouter les événements » : c'est une **copie unique**, jamais rafraîchie. Seul le schéma
+  `webcal://` fait créer un **abonnement** par le Calendrier. Constaté : les événements apparaissaient sur
+  le téléphone, mais aucun agent de calendrier n'avait jamais requis le flux (journaux du proxy), et un
+  événement ajouté ensuite n'apparaissait pas. Le **critère de réussite n° 2** de la vision n'est donc pas
+  tenu, alors que le serveur est irréprochable (`HEAD`, `OPTIONS` et `GET` en 200, `webcal://` → `http` →
+  301 → `https` → `200 text/calendar`, vérifié).
+  À corriger : exposer les deux formes (`url` et `url_webcal`), faire du lien `webcal://` l'action
+  principale de l'interface (« Ajouter à mon calendrier »), et garder l'`https` pour le copier-coller dans
+  Google Agenda. Leçon : aucun test automatique n'aurait trouvé ça — il fallait un vrai téléphone.
 - Le cloisonnement entre groupes est le risque numéro un du projet : il se traite par des
   tests dédiés, route par route (voir `ADR-0002`).
 - L'ajout d'un membre par son nom d'utilisateur ou son e-mail est une surface d'abus : l'ajout
