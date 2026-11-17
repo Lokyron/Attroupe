@@ -28,7 +28,10 @@ remontés depuis la V2, parce qu'ils portent une grande part de la valeur réell
 - **B4 Agenda personnel** — ses propres événements, partagés soit en détail, soit en simple
   « occupé ».
 - **B5 Sondage de dates** — plusieurs créneaux proposés, chacun coche, le gagnant devient un
-  événement.
+  événement. Seuls son auteur et un administrateur du groupe le modifient, l'annulent ou le
+  convertissent ; tout membre vote.
+- **B6 Détection des disponibilités** à partir des agendas personnels, remontée depuis la V2
+  pendant l'implémentation (voir [`ADR-0012`](../docs/decisions/ADR-0012-push-navigateur.md)).
 
 ### Les soirées et sorties
 - **C1 Événement riche** — lieu, hôte, horaires, consignes.
@@ -43,6 +46,8 @@ remontés depuis la V2, parce qu'ils portent une grande part de la valeur réell
 
 ### Les photos
 - **D1 Albums par événement** et albums libres.
+- **D8 Vidéos** — portées par Immich comme les photos, sans transcodage de notre côté. Elles
+  figuraient à tort en « écarté » alors que le même document les réintégrait deux lignes plus bas.
 - **D4 Dépôt direct** — glisser-déposer et sélection multiple depuis le téléphone.
 - **D5 Vignettes et visionneuse**.
 - **D11 Intégration Immich** — Immich tourne **à part** ; chaque groupe branche une instance
@@ -52,7 +57,8 @@ remontés depuis la V2, parce qu'ils portent une grande part de la valeur réell
 
 ### Technique
 - **F1 PWA** installable, mobile d'abord.
-- **F2 Notifications par e-mail** (le push navigateur suit en V2).
+- **F2 Notifications par e-mail**, et **push navigateur** remonté depuis la V2 pendant
+  l'implémentation (voir [`ADR-0012`](../docs/decisions/ADR-0012-push-navigateur.md)).
 - **F3 Installation en une commande Docker**.
 - **F5 Sauvegarde et restauration** — base + photos.
 - **F6 Authentification** — inscription et mot de passe, invitations par e-mail (Brevo),
@@ -62,16 +68,13 @@ remontés depuis la V2, parce qu'ils portent une grande part de la valeur réell
 ## V2 — juste après
 
 - **A4 Mur du groupe** — fil général, réactions.
-- **B6 Détection des disponibilités** à partir des agendas personnels (le « petit miracle » ;
-  il a besoin que B4 soit réellement utilisé pour avoir du sens).
 - **B7 Événements récurrents**, **B8 anniversaires**.
 - **C3 Modèles de listes**, **C4 regroupement par rayon**.
 - **C6 Covoiturage**, **C8 idées de sorties**, **C10 météo du jour J**.
 - **D3 Rangement automatique par date**, **D6 réactions et commentaires**,
   **D7 liens de partage** révocables, **D9 « il y a un an »**.
 - **E1 Statistiques du groupe**, **E2 sondages libres**, **E4 compte à rebours**.
-- **F2 Notifications push** navigateur, **F7 journal d'audit**, **F8 export et suppression de
-  ses données**.
+- **F7 journal d'audit**, **F8 export et suppression de ses données**.
 - **Connexion Google** (si elle n'est pas prête en V1).
 
 ## Plus tard
@@ -82,8 +85,6 @@ remontés depuis la V2, parce qu'ils portent une grande part de la valeur réell
 ## Écarté pour l'instant
 
 - **Tout flux bancaire** — ni paiement, ni IBAN, ni cagnotte. Définitif.
-- **D8 Vidéos** — plus de raison de les refuser : c'est Immich qui les porte. Elles suivent
-  donc les photos, sans travail de transcodage de notre côté.
 
 ## Points encore ouverts
 

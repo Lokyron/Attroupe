@@ -3,6 +3,74 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-17 — Relecture de la livraison : une SSRF, une addition de devises, une lecture inter-groupes
+
+Les lots 7 à 12 avaient été écrits par un autre assistant, dans une copie de travail, et n'avaient jamais été
+relus. La relecture a trouvé **trois défauts dont aucun test ne parlait**, et sept défauts mineurs. Les deux
+règles non négociables, elles, tenaient : aucune fuite inter-groupes sur le contenu métier, aucun flux bancaire.
+
+**Ce qui était cassé.**
+1. **SSRF exploitable par n'importe quel compte.** `POST /api/moi/push/abonnement` ne validait l'`endpoint` que
+   comme une URL `http(s)` ; `POST /api/moi/push/test`, sans cadence, postait dessus et **renvoyait le résultat**.
+   Sur une instance exposée sur Internet avec inscription ouverte, c'était un scanner du réseau local avec oracle
+   de réponse. Corrigé : `https` et port 443 seuls, hôte résolvant uniquement vers des adresses publiques, DNS
+   épinglé entre la vérification et la connexion, revérification avant chaque envoi, redirections non suivies,
+   plafond de 10 appareils, cadence `push`, et accusé **neutre** en 202. `ATTROUPE_IMMICH_ALLOW_PRIVATE` ne
+   s'applique pas au push. Le classifieur d'adresses partagé avec Immich refuse en plus NAT64 à préfixe local,
+   SIIT et Teredo, et extrait l'IPv4 embarquée du 6to4.
+2. **La clôture d'un événement additionnait deux devises.** `cloturerEvenementService` sommait
+   `amount_target_minor` sans regarder `target_currency_code` : 50 € puis 30 $ donnaient 8000 étiquetés « USD »,
+   exactement l'addition implicite que l'ADR-0004 interdit. Le total est désormais calculé dans la seule devise de
+   la clôture, les autres gardant leur ardoise, et un dépassement d'entier donne 422 au lieu de 500.
+3. **La photo de profil de n'importe quel compte était lisible sans groupe commun.** Un ancien membre du
+   groupe B gardait les identifiants vus pendant son passage. `lireAvatarUtilisateur` prend maintenant la portée
+   appelante et exige un groupe **actif** commun — 404, jamais 403. Le test de cloisonnement passait à vide sur
+   cette ressource : seule Alice avait un avatar dans le monde de test, donc le 404 venait de l'absence de photo
+   et non de la cloison. Bob en a un désormais, et l'attaque est réellement jouée.
+
+**Autres corrections.** Les sondages n'avaient aucun contrôle de droit (tout membre modifiait, annulait ou
+convertissait le sondage d'un autre) : réservé à l'auteur ou à un administrateur, le vote restant ouvert. `db/`
+n'appelle plus le réseau et l'envoi push part après le commit, au lieu de partir depuis l'intérieur de la
+transaction avec l'erreur avalée. La clé privée VAPID est chiffrée comme la clé Immich, au lieu d'être en clair à
+côté d'elle. Un flux Immich de plus de 4 s n'arrive plus tronqué. Un endpoint push est réattribué au compte qui
+l'enregistre, ce qui débloque le navigateur partagé.
+
+**Deux leçons.**
+- **Un test vert ne prouve rien s'il ne joue pas l'attaque.** Le registre de cloisonnement déclarait bien la
+  ressource `utilisateur` ; c'est le monde de test qui rendait l'attaque impossible à échouer. Un test de
+  cloisonnement doit échouer quand on retire la garde — à vérifier en la retirant.
+- **Une URL fournie par le client est une primitive de requête sortante.** Le projet avait déjà tout le
+  dispositif anti-SSRF, écrit pour Immich. Il n'a pas été réutilisé pour le push parce que rien ne rappelait de le
+  faire. Désormais le classifieur est partagé.
+
+**Écarts au périmètre, consignés plutôt que laissés en contradiction.** Le push navigateur et la détection des
+disponibilités (B6) étaient en V2 et ont été livrés ; le journal ne mentionnait même pas le push. Plutôt que de
+jeter du code qui marche ou de laisser le document mentir, ils passent en V1 par
+[`ADR-0012`](../docs/decisions/ADR-0012-push-navigateur.md). Les trois variables `ATTROUPE_VAPID_*`, lues par
+`env.ts` mais absentes de `.env.example`, y sont ajoutées, et les routes push sont enfin dans `DOCUMENTATION.md`.
+
+**Vérifié** : `lint`, `typecheck`, `build`, et la suite complète à **1387 tests verts** sur 68 fichiers (1 ignoré).
+Les 7 tests qui échouaient étaient des assertions périmées, pas des régressions : la migration `0003` ajoute deux
+tables et un index, et la liste des membres porte un champ de plus.
+
+> Au passage, sur cette machine : lancer les 68 fichiers de test en parallèle épuise les ports éphémères de macOS
+> et produit des dizaines de faux `EADDRNOTAVAIL`. `npm test -- --maxWorkers=4` donne un résultat fiable.
+
+## 2026-11-17 — Lots 7 à 12 livrés : finition (version, PWA, sauvegarde, exploitation)
+
+Les lots 7 à 11 (sondages de dates, agenda personnel et partages, notifications, dépenses et clôtures,
+fils de discussion et photos Immich) ainsi que le **lot 12 (finition)** sont implémentés :
+- **Version et exploitation** : `GET /api/version` (nom, version, `ATTROUPE_TAG`, dernière migration
+  `schema_migrations`), déclarée au registre de cloisonnement ; côté client `api/version.ts`, pied de page
+  discret dans `App.tsx` et page `#/exploitation` (`Exploitation.tsx`) affichant version, tag, migration,
+  `/api/sante` et `service_email`.
+- **PWA installable** : `app/client/public/manifest.webmanifest`, icônes SVG et PNG (`192x192`, `512x512`)
+  dans `app/client/public/icons/`, service worker `app/client/public/sw.js` (coquille en cache, réseau direct
+  sans cache pour `/api/*`, `/ical/*`, `/media/*`), balises dans `index.html` et enregistrement dans `main.tsx`.
+- **Option `include_personal` iCal** : exposée dans `api/flux.ts` et dans le formulaire d'abonnement de `Compte.tsx`.
+- **Sauvegarde et restauration** : `scripts/sauvegarde.sh` (`VACUUM INTO` cohérent sous WAL + dossier `fichiers/`
+  en `.tar.gz` horodaté) et `scripts/restauration.sh` (`PRAGMA integrity_check`, garde `--force`, nettoyage `-wal`/`-shm`).
+
 ## 2026-11-16 — Trois défauts d'interface, et une prémisse du cahier des charges invalidée
 
 Suite de l'essai sur un vrai iPhone. Le lien `webcal://` du matin avait rendu l'abonnement **possible** (agent

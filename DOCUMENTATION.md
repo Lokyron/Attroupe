@@ -1,7 +1,7 @@
 # Attroupe
 
-> **Fiche de reprise — à remplir au fur et à mesure du cadrage.**
-> Statut : 🔵 Cadrage terminé — **modèle de données et architecture écrits**, rien d'implémenté.
+> **Fiche de suivi du projet.**
+> Statut : 🟢 **Lots 0 à 12 livrés** (socle, comptes, groupes, agenda, iCal, listes/tâches/SSE, sondages, agenda personnel, notifications, dépenses, discussions, photos Immich, finition PWA/sauvegarde/exploitation).
 > Nom de code interne : **ACB**.
 
 ## 1. Vue d'ensemble
@@ -138,6 +138,20 @@ distincts), différents entre eux et sans mot d'exemple (`remplacer`, `exemple`,
 Déjà connues : envoi d'e-mails par **Brevo** (compte personnel dédié), et par groupe une URL
 d'instance **Immich** avec sa clé d'API.
 
+**Push navigateur** (facultatif, [`ADR-0012`](docs/decisions/ADR-0012-push-navigateur.md)) :
+`ATTROUPE_VAPID_PUBLIC_KEY`, `ATTROUPE_VAPID_PRIVATE_KEY` et `ATTROUPE_VAPID_SUBJECT` (`mailto:` ou
+`https:`). Les deux clés vont **ensemble** : une moitié seule fait échouer le démarrage, parce qu'elle
+était auparavant ignorée au profit d'une clé générée en base — les navigateurs s'abonnaient alors avec
+une clé et les envois étaient signés avec l'autre, donc rejetés en silence. Sans ces variables, une
+paire est générée et conservée en base, chiffrée avec `ATTROUPE_ENCRYPTION_KEY` comme la clé Immich ;
+si cette clé maîtresse change, la configuration push devient illisible et **n'est pas régénérée
+automatiquement**, ce qui désabonnerait tous les appareils sans prévenir. Dans ce cas `GET
+/api/moi/push/cle` répond 500 pour tout le monde, et la reprise est manuelle : supprimer la ligne de
+`push_config`, redémarrer, puis faire réactiver les notifications sur chaque appareil (une nouvelle
+paire est générée au premier usage).
+`ATTROUPE_IMMICH_ALLOW_PRIVATE` ne s'applique **pas** au push : la tolérance accordée à Immich en
+homelab ne vaut pas pour une URL choisie par le client.
+
 Licence du dépôt : **AGPL-3.0**. Dépôt public : <https://github.com/Lokyron/Attroupe>.
 
 ## 5. Guide d'installation & démarrage local
@@ -179,6 +193,7 @@ Surface d'API de la V1 par domaine :
 | Méthode | Chemin | Rôle |
 |---|---|---|
 | GET | `/api/sante` | État et version (sans session). |
+| GET | `/api/version` | Nom, version, étiquette (`ATTROUPE_TAG`) et dernière migration SQL appliquée (sans session). |
 | POST | `/api/auth/inscription` | `{email, username, password, display_name?}` → 202, toujours la même réponse. 409 `nom_utilisateur.pris` si le nom est pris. |
 | POST | `/api/auth/email/verification` | `{token}` : consomme le jeton de vérification (usage unique, 24 h à partir de l'envoi). |
 | POST | `/api/auth/connexion` | `{email, password}` → pose le cookie de session. 401 uniforme. |
@@ -241,6 +256,10 @@ chaque requête, donc le jeton d'un membre retiré ne rend plus rien de son anci
 | GET | `/api/moi/flux-ical` | Mes abonnements : `label`, groupe éventuel, drapeaux, `last_used_at`, `last_user_agent`. **Jamais le jeton ni aucune adresse** (stocké haché : le lien ne se reconstitue pas, un lien perdu se révoque et se recrée). |
 | POST | `/api/moi/flux-ical` | `{label?, group_id?, include_personal?, include_declined?}` → 201 **avec le jeton en clair, une seule fois**, et ses deux adresses : `url` (`https://…/ical/<jeton>.ics`, pour Google Agenda et les clients de bureau) et `url_webcal` (même adresse en `webcal://`, celle qui fait créer un abonnement sur iOS ; base en `http://` en développement local). 404 `groupe.introuvable` si l'appartenance n'est pas active. Plafond de 20 abonnements non révoqués (409 `flux.plafond`) + cadence `abonnement`. |
 | DELETE | `/api/moi/flux-ical/:fluxId` | Révoque (`revoked_at`, jamais de suppression). 404 si ce n'est pas le mien. |
+| GET | `/api/moi/push/cle` | Clé publique VAPID et nombre d'appareils enregistrés. |
+| POST | `/api/moi/push/abonnement` | `{endpoint, keys:{p256dh, auth}}` → 201. L'`endpoint` est **contraint** : `https` seul, port 443, sans identifiants, hôte résolvant uniquement vers des adresses publiques (400 `push.endpoint_invalide`, réponse identique quelle que soit la cause). Plafond de 10 appareils par compte : au-delà, le plus ancien est remplacé. Cadence `push`. |
+| DELETE | `/api/moi/push/abonnement` | `{endpoint?}` ; sans corps, retire tous mes appareils. |
+| POST | `/api/moi/push/test` | **202 `{ok, appareils}`**, jamais le résultat de l'appel sortant : l'envoi part en arrière-plan et un accusé précis serait un oracle de balayage du réseau interne. Cadence `push`. |
 | GET | `/ical/:jeton.ics` | **Hors `/api`, sans cookie.** 404 identique pour un jeton inconnu, mal formé ou révoqué. Cadence 60/h par jeton (+ IP et réseau). `Cache-Control: private, max-age=300`, `ETag` et `304`. |
 
 Jeton : 32 octets en base32 minuscule (`^[a-z2-7]{52}$`, forme vérifiée **avant** la base), stocké haché en SHA-256.
@@ -292,8 +311,11 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
 ## 8. Dette technique, TODOs & points d'attention
 
 - Modèle de données et architecture : **écrits** (`03` et `04` du dossier de conception). Le découpage
-  est au §10 de `04` : **lots 0 à 6 livrés** (squelette, base et cloisonnement, comptes, groupes et
-  membres, agenda du groupe, flux iCal, listes de courses / tâches / temps réel), le prochain est le lot 7 (sondages de dates).
+  est au §10 de `04` : **lots 0 à 12 livrés** (socle, base et cloisonnement, comptes, groupes et
+  membres, agenda du groupe, flux iCal, listes de courses / tâches / temps réel, sondages de dates,
+  agenda personnel, notifications, dépenses, discussions, albums photos Immich, finition :
+  `/api/version`, page `#/exploitation`, PWA installable, option `include_personal` dans l'UI iCal,
+  scripts `scripts/sauvegarde.sh` et `scripts/restauration.sh`).
 - `ADR-0008` est **Acceptée** (lot 1). À revoir quand `node:sqlite` passera en « Stable ».
 - Lot 1 livré, puis corrigé après revue : `app/server/db/` (`base` : connexion opaque, `connection`,
   `migrate`, `moteur`, `scope` : GroupScope, `portee-utilisateur`, `sql` : garde du SQL brut,
@@ -344,9 +366,8 @@ jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les lien
   sans `ends_at` n'a pas de `DTEND` et s'affiche comme un point ; troncature silencieuse à 1000 événements par groupe
   et par ensemble ; un événement commencé avant la fenêtre et fini dedans n'est pas servi s'il n'a pas été modifié ;
   les abonnés passant par iCloud ou Google partagent le plafond de cadence par IP.
-- **`GET /api/version` est à la surface d'API (§6 de l'architecture) mais n'existe pas** : constaté sur le
-  déploiement du 113, elle répond `route.introuvable`. Elle doit afficher l'étiquette d'image et le numéro
-  de migration en pied de page — à écrire au lot 12 avec la page d'exploitation.
+- **`GET /api/version` livrée au lot 12** : montée dans `app/server/http/app.ts` via `routesVersion`,
+  lit la dernière migration dans `schema_migrations`, et alimente le pied de page ainsi que `#/exploitation`.
 - **Les abonnements iCal se rafraîchissent à la cadence du client, pas à la nôtre, et Google est lent.**
   Constaté le 2026-11-16 sur la bêta : un abonnement créé dans Google Agenda n'avait toujours provoqué
   **aucune** requête sur `/ical/…` côté serveur (aucun agent Google dans les journaux du proxy), alors que
