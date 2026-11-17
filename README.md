@@ -3,13 +3,15 @@
 > *Attrouper les potes.* Organisateur auto-hébergé pour groupes d'amis : planning commun,
 > soirées et sorties, listes de courses, dépenses partagées, albums photos.
 >
-> Nom de code interne : **ACB**. Cadrage terminé, implémentation à venir — voir [`DOCUMENTATION.md`](DOCUMENTATION.md) et le
+> Nom de code interne : **ACB**. V1 implémentée et en pré-production sur `beta.attroupe.fr` —
+> voir [`DOCUMENTATION.md`](DOCUMENTATION.md) et le
 > [dossier de conception](Dossier%20de%20conception/).
 
 ## Repères
 
 | Je veux… | Aller à |
 |---|---|
+| Travailler sur ce dépôt avec un assistant de code | [`AGENTS.md`](AGENTS.md) |
 | Comprendre comment Claude travaille ici | [`CLAUDE.md`](CLAUDE.md) |
 | Comprendre le routage des agents et des modèles | [`docs/AGENTS.md`](docs/AGENTS.md) |
 | Reprendre le projet techniquement | [`DOCUMENTATION.md`](DOCUMENTATION.md) |
@@ -20,6 +22,7 @@
 
 | Dossier / fichier | Contenu |
 |---|---|
+| `AGENTS.md` | Consignes pour tout assistant de code (Antigravity, Gemini, Codex…) |
 | `app/` | Le code de l'application |
 | `.claude/agents/` | Définition des six sous-agents |
 | `docs/` | Documentation technique transverse et ADR |
