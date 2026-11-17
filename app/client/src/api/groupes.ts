@@ -140,6 +140,21 @@ export async function inscrire(email: string, username: string, password: string
   await appeler('POST', '/api/auth/inscription', { email, username, password });
 }
 
+/** Confirme l'adresse e-mail avec le jeton reçu par lien. Le jeton part dans le CORPS, jamais dans l'URL. */
+export async function verifierEmail(token: string): Promise<void> {
+  await appeler('POST', '/api/auth/email/verification', { token });
+}
+
+/** Demande un lien de réinitialisation. La réponse est identique que l'adresse existe ou non. */
+export async function demanderReinitialisation(email: string): Promise<void> {
+  await appeler('POST', '/api/auth/mot-de-passe/oubli', { email });
+}
+
+/** Pose un nouveau mot de passe à partir du jeton reçu par lien (usage unique). */
+export async function reinitialiserMotDePasse(token: string, password: string): Promise<void> {
+  await appeler('POST', '/api/auth/mot-de-passe/reinitialisation', { token, password });
+}
+
 export async function deconnecter(): Promise<void> {
   await appeler('POST', '/api/auth/deconnexion', {});
 }

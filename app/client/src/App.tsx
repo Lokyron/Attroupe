@@ -19,6 +19,7 @@ import {
   IconeUtilisateur,
 } from './components/Icones';
 import { t } from './i18n';
+import { pageDuLien } from './lien';
 import { Compte } from './pages/Compte';
 import { Connexion } from './pages/Connexion';
 import { Agenda } from './pages/Agenda';
@@ -30,6 +31,8 @@ import { Fil } from './pages/Fil';
 import { Fils } from './pages/Fils';
 import { Groupe } from './pages/Groupe';
 import { InvitationLien } from './pages/InvitationLien';
+import { Reinitialisation } from './pages/Reinitialisation';
+import { VerificationEmail } from './pages/VerificationEmail';
 import { Liste } from './pages/Liste';
 import { Listes } from './pages/Listes';
 import { Invitations } from './pages/Invitations';
@@ -112,7 +115,8 @@ export function App() {
   const [route, setRoute] = useState<Route>(lireRoute);
   const [nonLues, setNonLues] = useState(0);
   const [infoVersion, setInfoVersion] = useState<InfoVersion | null>(null);
-  const lien = window.location.pathname === '/invitation';
+  // Les pages à jeton se reconnaissent au CHEMIN, pas au fragment : le routeur, lui, route sur le hash.
+  const lien = pageDuLien(window.location.pathname);
 
   const rafraichirNotifications = useCallback((): void => {
     listerNotifications()
@@ -144,11 +148,16 @@ export function App() {
     lireVersion().then(setInfoVersion).catch(() => undefined);
   }, []);
 
+  // Confirmation d'adresse et réinitialisation ne dépendent pas de la session : elles s'affichent seules,
+  // sans attendre `lireMoi` et sans la coquille de l'application.
+  if (lien === 'verification-email') return <VerificationEmail />;
+  if (lien === 'reinitialisation') return <Reinitialisation />;
+
   if (etat.type === 'chargement') return <p className="accueil">{t('commun.chargement')}</p>;
   if (etat.type === 'anonyme') {
     return (
       <>
-        {lien && <InvitationLien connecte={false} onAcceptee={recharger} />}
+        {lien === 'invitation' && <InvitationLien connecte={false} onAcceptee={recharger} />}
         <Connexion onConnecte={recharger} />
       </>
     );
@@ -390,7 +399,7 @@ export function App() {
         </header>
 
         <div className="accueil">
-          {lien && <InvitationLien connecte onAcceptee={recharger} />}
+          {lien === 'invitation' && <InvitationLien connecte onAcceptee={recharger} />}
           {!lien && route.type === 'accueil' && <TableauDeBord moi={moi} />}
           {!lien && route.type === 'nouveau' && (
             <NouveauGroupe

@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { accepterLien, apercuLien, type Apercu } from '../api/groupes';
 import { Erreur, messageDe } from '../components/Erreur';
 import { t } from '../i18n';
+import { jetonDuFragment } from '../lien';
 
 /** Lien d'invitation reçu par e-mail : `/invitation#jeton=…` (le jeton est dans le fragment, que le navigateur n'envoie pas ; il part ensuite dans le CORPS des requêtes, jamais dans leur URL). */
 export function InvitationLien({ connecte, onAcceptee }: { connecte: boolean; onAcceptee: () => void }) {
-  const jeton = new URLSearchParams(window.location.hash.slice(1)).get('jeton');
+  const jeton = jetonDuFragment(window.location.hash);
   const [apercu, setApercu] = useState<Apercu | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [acceptee, setAcceptee] = useState(false);

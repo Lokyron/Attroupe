@@ -315,7 +315,11 @@ seul (large), par IP (/64 en IPv6) et par réseau /48 IPv6 : connexion 10 / 100 
 mot de passe 5 par compte ; renvoi de vérification 3 par compte. Un tiers ne bloque donc pas le
 propriétaire depuis une autre IP. Une requête refusée en 429 ne crée aucune clé, une clé bloquée n'est
 jamais évincée, un 503 ne débite rien. Réponse 429 + `Retry-After`. Les liens des e-mails portent le jeton dans le **fragment**
-(`/verification-email#jeton=…`, `/reinitialisation#jeton=…`) : les pages du client restent à écrire.
+(`/verification-email#jeton=…`, `/reinitialisation#jeton=…`, `/invitation#jeton=…`), que le navigateur n'envoie
+jamais au serveur. Ces trois pages se reconnaissent au **chemin** (`app/client/src/lien.ts`), parce que le routeur
+ordinaire du client route sur le fragment, déjà occupé par le jeton ; le serveur sert n'importe quel chemin hors
+`/api` avec `index.html`. Les tables des deux côtés sont confrontées par `app/tests/unite/liens-email.test.ts` :
+ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
 
 ## 8. Dette technique, TODOs & points d'attention
 
