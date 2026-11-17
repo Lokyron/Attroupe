@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { baseDeScope, type GroupScope } from '../scope.js';
 import { preparer } from '../sql.js';
+import { urlAvatar } from './avatar.js';
 
 // Membres d'un groupe (lot 3). Une appartenance n'est JAMAIS supprimée (modèle §3.3, règle 6) : l'historique du
 // groupe (dépenses, présences, messages) pend à cette ligne. Retirer ou partir, c'est passer `status` à `removed` /
@@ -29,9 +30,21 @@ const ligneMembre = z.object({
   joined_at: z.string(),
   ended_at: z.string().nullable(),
   display_name: z.string(),
+  compte_id: z.string(),
+  avatar_updated_at: z.string().nullable(),
+  compte_actif: z.number(),
 });
 
-export type Membre = z.infer<typeof ligneMembre>;
+export interface Membre {
+  readonly id: string;
+  readonly role: 'admin' | 'member';
+  readonly status: 'active' | 'removed' | 'left';
+  readonly nickname: string | null;
+  readonly joined_at: string;
+  readonly ended_at: string | null;
+  readonly display_name: string;
+  readonly avatar_url: string | null;
+}
 
 /**
  * Membres actifs d'abord, puis anciens membres (retirés ou partis), du groupe du scope. Le nom affiché vient du
@@ -41,13 +54,29 @@ export function listerMembres(scope: GroupScope): Membre[] {
   return preparer(
     baseDeScope(scope),
     `SELECT m.id AS id, m.role AS role, m.status AS status, m.nickname AS nickname, m.joined_at AS joined_at,
-       m.ended_at AS ended_at, u.display_name AS display_name
+       m.ended_at AS ended_at, u.display_name AS display_name, u.id AS compte_id, u.avatar_updated_at AS avatar_updated_at,
+       (u.disabled_at IS NULL AND u.anonymized_at IS NULL) AS compte_actif
      FROM memberships AS m JOIN users AS u ON u.id = m.user_id
      WHERE m.group_id = ?
      ORDER BY CASE WHEN m.status = 'active' THEN 0 ELSE 1 END, u.display_name, m.id`,
   )
     .all(scope.groupId)
-    .map((ligne) => ligneMembre.parse(ligne));
+    .map((ligne) => {
+      const parsed = ligneMembre.parse(ligne);
+      return {
+        id: parsed.id,
+        role: parsed.role,
+        status: parsed.status,
+        nickname: parsed.nickname,
+        joined_at: parsed.joined_at,
+        ended_at: parsed.ended_at,
+        display_name: parsed.display_name,
+        // La photo n'est servie (404 sinon) qu'aux appartenances actives et aux comptes ni désactivés ni anonymisés :
+        // pour les autres, pas d'URL, sinon le client afficherait une image cassée.
+        avatar_url:
+          parsed.status === 'active' && parsed.compte_actif === 1 ? urlAvatar(parsed.compte_id, parsed.avatar_updated_at) : null,
+      };
+    });
 }
 
 function administrateursActifs(scope: GroupScope): number {

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { cloturerEvenementService, reouvrirEvenementService } from '../../services/depenses.js';
 import type { Contexte } from '../contexte.js';
 import { scopeDe } from '../middleware/appartenance.js';
 import { parametre } from '../parametres.js';
@@ -62,6 +63,14 @@ export function routesEvenements(contexte: Contexte): Router {
 
   routeur.delete('/:evenementId/organisateurs/:membreId', (req, res) => {
     res.json(retirerOrganisateur(scopeDe(req), parametre(req, 'evenementId'), parametre(req, 'membreId')));
+  });
+
+  routeur.post('/:evenementId/cloture', (req, res) => {
+    res.status(201).json(cloturerEvenementService(contexte, scopeDe(req), parametre(req, 'evenementId')));
+  });
+
+  routeur.delete('/:evenementId/cloture', (req, res) => {
+    res.json(reouvrirEvenementService(contexte, scopeDe(req), parametre(req, 'evenementId')));
   });
 
   return routeur;

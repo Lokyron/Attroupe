@@ -50,6 +50,7 @@ export const PORTEE_TABLES: Readonly<Record<string, ColonnePortee>> = {
   notifications: 'user_id',
   personal_event_shares: 'group_id',
   personal_events: 'user_id',
+  push_subscriptions: 'user_id',
   settlements: 'group_id',
   shopping_items: 'group_id',
   shopping_lists: 'group_id',
@@ -617,6 +618,18 @@ export const TEXTES_TRANSVERSES: readonly string[] = Object.freeze([
   `UPDATE email_outbox SET status = ?, attempts = attempts + ?, next_attempt_at = ?, last_error = ?,
    payload_json = CASE WHEN ? = 'pending' THEN payload_json ELSE '{}' END
    WHERE id = ? AND status = 'pending'`,
+  // Résumé quotidien des notifications (lot 10) : tâche de fond qui regroupe les notifications non lues par compte et groupe.
+  `SELECT n.id AS notification_id, n.user_id AS user_id, n.group_id AS group_id,
+          g.name AS group_name, g.time_zone AS time_zone,
+          u.email AS email, u.display_name AS display_name
+   FROM notifications AS n
+   JOIN groups AS g ON g.id = n.group_id
+   JOIN memberships AS m ON m.user_id = n.user_id AND m.group_id = n.group_id
+   JOIN users AS u ON u.id = n.user_id
+   WHERE n.read_at IS NULL AND n.email_queued_at IS NULL AND n.email_sent_at IS NULL
+     AND g.deleted_at IS NULL AND m.status = 'active'
+     AND u.email_verified_at IS NOT NULL AND u.disabled_at IS NULL AND u.anonymized_at IS NULL
+   ORDER BY n.user_id, n.group_id, n.created_at`,
 ]);
 
 /** Prépare un texte de `TEXTES_TRANSVERSES`, et rien d'autre. */

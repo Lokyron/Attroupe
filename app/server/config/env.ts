@@ -99,6 +99,9 @@ const schemaEnv = z
     ATTROUPE_TRUST_PROXY: z.preprocess(videEnAbsent, z.coerce.number().int().min(0).default(1)),
     ATTROUPE_LOG_LEVEL: z.preprocess(videEnAbsent, z.enum(['debug', 'info', 'warn', 'error']).default('info')),
     ATTROUPE_SSE_MAX_CONNECTIONS: z.preprocess(videEnAbsent, z.coerce.number().int().min(1).max(100_000).default(200)),
+    ATTROUPE_VAPID_PUBLIC_KEY: z.preprocess(videEnAbsent, z.string().min(1).optional()),
+    ATTROUPE_VAPID_PRIVATE_KEY: z.preprocess(videEnAbsent, z.string().min(1).optional()),
+    ATTROUPE_VAPID_SUBJECT: z.preprocess(videEnAbsent, z.string().min(1).optional()),
     TZ: z.preprocess(videEnAbsent, z.string().min(1).default('Europe/Paris')),
   })
   .superRefine((env, ctx) => {
@@ -122,6 +125,24 @@ const schemaEnv = z
     // La clé d'API voyage dans chaque appel : en production, jamais en clair sur le réseau.
     if (env.NODE_ENV === 'production' && !env.BREVO_API_URL.startsWith('https:')) {
       ctx.addIssue({ code: 'custom', path: ['BREVO_API_URL'], message: 'doit être en https en production' });
+    }
+
+    // VAPID : la paire se donne en entier ou pas du tout. Une moitié seule serait ignorée en silence au profit d'une clé générée en
+    // base, et les navigateurs s'abonneraient avec une clé différente de celle qui signe les envois.
+    if ((env.ATTROUPE_VAPID_PUBLIC_KEY === undefined) !== (env.ATTROUPE_VAPID_PRIVATE_KEY === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [env.ATTROUPE_VAPID_PUBLIC_KEY === undefined ? 'ATTROUPE_VAPID_PUBLIC_KEY' : 'ATTROUPE_VAPID_PRIVATE_KEY'],
+        message: 'ATTROUPE_VAPID_PUBLIC_KEY et ATTROUPE_VAPID_PRIVATE_KEY vont ensemble : renseigner les deux, ou aucune',
+      });
+    }
+    // RFC 8292 §2.1 : le sujet est une URL `mailto:` ou `https:` que le service push peut utiliser pour joindre l'opérateur.
+    if (env.ATTROUPE_VAPID_SUBJECT !== undefined && !/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(env.ATTROUPE_VAPID_SUBJECT)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ATTROUPE_VAPID_SUBJECT'],
+        message: 'doit être une adresse « mailto:contact@exemple.fr » ou une URL https (RFC 8292)',
+      });
     }
 
     // Brevo est optionnel, mais une clé d'API sans expéditeur ne peut rien envoyer.

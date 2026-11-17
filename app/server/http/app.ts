@@ -4,6 +4,7 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import type { Env } from '../config/env.js';
 import type { Base } from '../db/base.js';
 import { LimiteurCadence, REGLES_PAR_DEFAUT, type Horloge, type ReglesCadence } from '../services/cadence.js';
+import type { DnsLookupImmich, FetchImmich } from '../services/immich-client.js';
 import { empreinteLeurre, PARAMETRES_PRODUCTION, type ParametresScrypt } from '../services/mot-de-passe.js';
 import { DiffuseurTempsReel } from '../services/temps-reel.js';
 import type { Contexte } from './contexte.js';
@@ -13,10 +14,14 @@ import { creerJournal, intergicielJournal, JOURNAL_SILENCIEUX, type Journal } fr
 import { intergicielSession } from './middleware/session.js';
 import { declarerIntergiciel, monter } from './montage.js';
 import { routesAuth } from './routes/auth.js';
+import { routesDevises } from './routes/devises.js';
 import { routesGroupes } from './routes/groupes.js';
 import { routesIcal } from './routes/ical.js';
 import { routesInvitations } from './routes/invitations.js';
+import { routesMedia } from './routes/media.js';
 import { routesMoi } from './routes/moi.js';
+import { routesUtilisateurs } from './routes/utilisateurs.js';
+import { routesVersion } from './routes/version.js';
 
 // Réexporté : le gestionnaire d'erreurs vit désormais dans middleware/erreurs.ts.
 export { gestionnaireErreurs };
@@ -37,6 +42,8 @@ export interface OptionsApp {
   /** La diffusion du temps réel : `index.ts` la fournit pour pouvoir fermer les flux à l'arrêt ; les tests l'injectent (battement court, plafond). */
   diffuseur?: DiffuseurTempsReel;
   delaiMinimalOubliMs?: number;
+  fetchImmich?: FetchImmich;
+  dnsLookupImmich?: DnsLookupImmich;
 }
 
 /** Durée minimale d'une réponse à « mot de passe oublié » : bien au-dessus de l'écart entre adresse connue et inconnue. */
@@ -79,6 +86,7 @@ export function creerApp(options: OptionsApp): Express {
   app.get('/api/sante', (_req, res) => {
     res.json({ status: 'ok', version });
   });
+  monter(app, '/api/version', routesVersion(version, options.base));
 
   if (options.base !== undefined) {
     const horloge = options.horloge ?? ((): Date => new Date());
@@ -94,6 +102,8 @@ export function creerApp(options: OptionsApp): Express {
       delaiMinimalOubliMs: options.delaiMinimalOubliMs ?? DELAI_MINIMAL_OUBLI_MS,
       cookieSecurise: env.ATTROUPE_BASE_URL.startsWith('https:'),
       diffuseur: options.diffuseur ?? new DiffuseurTempsReel({ horloge, journal, plafondGlobal: env.ATTROUPE_SSE_MAX_CONNECTIONS }),
+      ...(options.fetchImmich !== undefined ? { fetchImmich: options.fetchImmich } : {}),
+      ...(options.dnsLookupImmich !== undefined ? { dnsLookupImmich: options.dnsLookupImmich } : {}),
     };
     // Empreinte leurre chauffée au démarrage : la première connexion sur une adresse inconnue ne doit pas durer deux fois plus.
     empreinteLeurre(parametresScrypt).catch((erreur: unknown) => {
@@ -104,15 +114,30 @@ export function creerApp(options: OptionsApp): Express {
     // → corps JSON borné → session (facultative) → routes (cadence posée route par route : elle lit l'e-mail du corps)
     // → 404 → gestionnaire d'erreurs, en dernier.
     app.use('/api', declarerIntergiciel('transversal', csrf(env.ATTROUPE_BASE_URL)));
-    app.use('/api', declarerIntergiciel('transversal', express.json({ limit: '16kb', strict: true })));
+    const jsonStandard = express.json({ limit: '16kb', strict: true });
+    const jsonAvatar = express.json({ limit: '2mb', strict: true });
+    app.use(
+      '/api',
+      declarerIntergiciel('transversal', (req: Request, res: Response, next: NextFunction) => {
+        if (req.method === 'PUT' && req.path === '/moi/avatar') {
+          jsonAvatar(req, res, next);
+        } else {
+          jsonStandard(req, res, next);
+        }
+      }),
+    );
     app.use('/api', declarerIntergiciel('transversal', intergicielSession(contexte)));
     // Chaque sous-application est montée par `monter` : le registre de cloisonnement en reconstitue les chemins (tests/cloisonnement).
     monter(app, '/api/auth', routesAuth(contexte));
+    monter(app, '/api/devises', routesDevises(contexte));
     monter(app, '/api/moi', routesMoi(contexte));
+    monter(app, '/api/utilisateurs', routesUtilisateurs(contexte));
     monter(app, '/api/groupes', routesGroupes(contexte));
     monter(app, '/api/invitations', routesInvitations(contexte));
     // Le flux iCal est HORS /api : ni cookie, ni CSRF, ni corps JSON, ni session — le jeton de l'URL est l'unique authentification.
     monter(app, '/ical', routesIcal(contexte));
+    // Le relai média signé est HORS /api (binaires) mais exige une session valide (la signature HMAC inclut `userId`).
+    monter(app, '/media', routesMedia(contexte));
   }
 
   // Toute autre URL d'API est inconnue : JSON, jamais la page du client.

@@ -161,4 +161,23 @@ describe('config/env : validation de l’environnement', () => {
       expect(exemple, `clé ${cle} absente de .env.example`).toMatch(new RegExp(`^#? ?${cle}=`, 'm'));
     }
   });
+
+  describe('VAPID (notifications push)', () => {
+    it('refuse une moitié de paire : la clé ignorée serait remplacée en silence par une clé générée', () => {
+      expect(problemesDe(sourceEnvValide({ ATTROUPE_VAPID_PUBLIC_KEY: 'abc' })).join('\n')).toMatch(/ATTROUPE_VAPID_PRIVATE_KEY/);
+      expect(problemesDe(sourceEnvValide({ ATTROUPE_VAPID_PRIVATE_KEY: 'abc' })).join('\n')).toMatch(/ATTROUPE_VAPID_PUBLIC_KEY/);
+    });
+
+    it('accepte la paire complète ou aucune', () => {
+      expect(() => chargerEnv(sourceEnvValide())).not.toThrow();
+      expect(() => chargerEnv(sourceEnvValide({ ATTROUPE_VAPID_PUBLIC_KEY: 'a', ATTROUPE_VAPID_PRIVATE_KEY: 'b' }))).not.toThrow();
+    });
+
+    it('exige un sujet mailto: ou https: (RFC 8292)', () => {
+      expect(problemesDe(sourceEnvValide({ ATTROUPE_VAPID_SUBJECT: 'contact@exemple.fr' })).join('\n')).toMatch(/ATTROUPE_VAPID_SUBJECT/);
+      expect(problemesDe(sourceEnvValide({ ATTROUPE_VAPID_SUBJECT: 'http://exemple.fr' })).join('\n')).toMatch(/ATTROUPE_VAPID_SUBJECT/);
+      expect(() => chargerEnv(sourceEnvValide({ ATTROUPE_VAPID_SUBJECT: 'mailto:contact@exemple.fr' }))).not.toThrow();
+      expect(() => chargerEnv(sourceEnvValide({ ATTROUPE_VAPID_SUBJECT: 'https://exemple.fr/contact' }))).not.toThrow();
+    });
+  });
 });

@@ -3,6 +3,7 @@ import type { Env } from '../config/env.js';
 import type { Horloge, LimiteurCadence, ReglesCadence } from '../services/cadence.js';
 import type { DiffuseurTempsReel } from '../services/temps-reel.js';
 import type { ParametresScrypt } from '../services/mot-de-passe.js';
+import type { DnsLookupImmich, FetchImmich } from '../services/immich-client.js';
 import type { Journal } from './middleware/journal.js';
 
 /** Tout ce dont les routes et intergiciels ont besoin, assemblé une fois dans `creerApp` (rien n'est global : les tests injectent). */
@@ -20,4 +21,7 @@ export interface Contexte {
   readonly cookieSecurise: boolean;
   /** Diffusion en mémoire du flux temps réel, indexée par groupe (services/temps-reel.ts). */
   readonly diffuseur: DiffuseurTempsReel;
+  /** Doubles injectables en test pour les appels sortants vers Immich. */
+  readonly fetchImmich?: FetchImmich;
+  readonly dnsLookupImmich?: DnsLookupImmich;
 }

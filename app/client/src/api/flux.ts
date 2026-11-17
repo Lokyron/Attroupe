@@ -7,6 +7,7 @@ export interface Abonnement {
   label: string | null;
   group_id: string | null;
   group_name: string | null;
+  include_personal: boolean;
   include_declined: boolean;
   created_at: string;
   last_used_at: string | null;
@@ -27,6 +28,7 @@ function abonnement(a: unknown): Abonnement {
     label: texteOuNul(champ(a, 'label')),
     group_id: texteOuNul(champ(a, 'group_id')),
     group_name: texteOuNul(champ(a, 'group_name')),
+    include_personal: champ(a, 'include_personal') === 1,
     include_declined: champ(a, 'include_declined') === 1,
     created_at: texte(champ(a, 'created_at')),
     last_used_at: texteOuNul(champ(a, 'last_used_at')),
@@ -39,7 +41,12 @@ export async function listerAbonnements(): Promise<Abonnement[]> {
   return liste(champ(await appeler('GET', '/api/moi/flux-ical'), 'abonnements')).map(abonnement);
 }
 
-export async function creerAbonnement(corps: { label: string | null; group_id: string | null; include_declined: boolean }): Promise<AbonnementCree> {
+export async function creerAbonnement(corps: {
+  label: string | null;
+  group_id: string | null;
+  include_personal: boolean;
+  include_declined: boolean;
+}): Promise<AbonnementCree> {
   const r = await appeler('POST', '/api/moi/flux-ical', corps);
   return { ...abonnement(r), url: texte(champ(r, 'url')), url_webcal: texte(champ(r, 'url_webcal')) };
 }

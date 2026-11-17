@@ -79,8 +79,8 @@ export async function supprimerListe(groupId: string, id: string): Promise<void>
   await appeler('DELETE', uneListe(groupId, id));
 }
 
-export async function ajouterArticle(groupId: string, listeId: string, label: string): Promise<Article> {
-  return article(await appeler('POST', `${uneListe(groupId, listeId)}/articles`, { label, quantity: null }));
+export async function ajouterArticle(groupId: string, listeId: string, label: string, quantity: string | null = null): Promise<Article> {
+  return article(await appeler('POST', `${uneListe(groupId, listeId)}/articles`, { label, quantity }));
 }
 
 /** Place l'article après `apresId` (`null` : en tête). */

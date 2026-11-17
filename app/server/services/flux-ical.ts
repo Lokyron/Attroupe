@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import { empreinteFlux, evenementsFlux, type EvenementFlux, type FenetreFlux } from '../db/queries/flux.js';
+import { lireProfil } from '../db/queries/comptes.js';
+import {
+  empreinteFlux,
+  empreintePersonnelleFlux,
+  evenementsFlux,
+  evenementsPersonnelsFlux,
+  type EvenementFlux,
+  type EvenementPersonnelFlux,
+  type FenetreFlux,
+} from '../db/queries/flux.js';
 import type { GroupScope } from '../db/scope.js';
 import { versInstant } from '../domain/instant.js';
 import { genererCalendrier, type EvenementIcal, type LibellesIcal } from '../domain/ical.js';
@@ -40,7 +49,18 @@ export function calculerEtag(acces: AccesFlux): string {
   const parGroupe = acces.scopes.map((scope) => {
     return `${scope.groupId}|${nomDuGroupe(scope)}|${empreinteFlux(scope, fenetre)}`;
   });
-  const entree = JSON.stringify([acces.empreinte, versInstant(acces.maintenant).slice(0, 10), acces.jeton.include_declined, parGroupe]);
+  const perso =
+    acces.jeton.include_personal === 1
+      ? `${lireProfil(acces.portee).display_name}|${empreintePersonnelleFlux(acces.portee, fenetre)}`
+      : null;
+  const entree = JSON.stringify([
+    acces.empreinte,
+    versInstant(acces.maintenant).slice(0, 10),
+    acces.jeton.include_declined,
+    acces.jeton.include_personal,
+    parGroupe,
+    perso,
+  ]);
   return `"${createHash('sha256').update(entree, 'utf8').digest('hex').slice(0, 32)}"`;
 }
 
@@ -67,14 +87,36 @@ function versIcal(e: EvenementFlux, groupe: string, urlBase: string, groupId: st
   };
 }
 
-/** Le VCALENDAR du jeton : les événements de chaque groupe lisible, groupe par groupe. */
+function personnelVersIcal(e: EvenementPersonnelFlux, organisateur: string, urlBase: string): EvenementIcal {
+  return {
+    id: `perso-${e.id}`,
+    groupe: fr.flux_ical.groupe_personnel,
+    titre: e.title,
+    description: e.description,
+    lieuNom: e.location_name,
+    lieuAdresse: null,
+    consignes: null,
+    journeeEntiere: e.all_day === 1,
+    debut: e.starts_at,
+    fin: e.ends_at,
+    fuseau: e.time_zone,
+    annule: false,
+    modifieLe: e.updated_at,
+    organisateur,
+    lien: `${urlBase}/#/compte`,
+  };
+}
+
+/** Le VCALENDAR du jeton : les événements de chaque groupe lisible, groupe par groupe, et les créneaux personnels si demandés. */
 export function genererFlux(acces: AccesFlux, urlBase: string): string {
   const fenetre = fenetreDuJeton(acces);
-  // `include_personal` : le drapeau est stocké (acces.jeton.include_personal) mais `personal_events` est le lot 8 — la lecture de mes
-  // créneaux personnels viendra ICI, après les événements de groupe (créneaux de `PorteeUtilisateur`, jamais ceux d'un autre compte).
   const evenements = acces.scopes.flatMap((scope) => {
     const groupe = nomDuGroupe(scope);
     return evenementsFlux(scope, fenetre).map((e) => versIcal(e, groupe, urlBase, scope.groupId));
   });
+  if (acces.jeton.include_personal === 1) {
+    const organisateur = lireProfil(acces.portee).display_name;
+    evenements.push(...evenementsPersonnelsFlux(acces.portee, fenetre).map((e) => personnelVersIcal(e, organisateur, urlBase)));
+  }
   return genererCalendrier(fr.flux_ical.nom_calendrier, evenements, LIBELLES);
 }

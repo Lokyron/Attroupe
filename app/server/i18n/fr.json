@@ -16,10 +16,19 @@
     "invitation_groupe": {
       "sujet": "Invitation à rejoindre « {groupe} »",
       "texte": "Bonjour,\n\n{invitant} vous invite à rejoindre le groupe « {groupe} » sur {application}.{mot}\n\nPour répondre à l'invitation, ouvrez le lien suivant (valable 14 jours, utilisable une seule fois) :\n\n{lien}\n\nSi vous ne connaissez pas cette personne, ignorez simplement ce message : rien ne se passera tant que vous n'acceptez pas."
+    },
+    "notification_immediate": {
+      "sujet": "Du nouveau dans « {groupe} »",
+      "texte": "Bonjour {nom},\n\nIl y a du nouveau dans le groupe « {groupe} » sur {application}.\n\nOuvrir la discussion :\n\n{lien}"
+    },
+    "resume_quotidien": {
+      "sujet": "Résumé quotidien de « {groupe} »",
+      "texte": "Bonjour {nom},\n\nVous avez {nombre} nouvelle(s) notification(s) non lue(s) dans le groupe « {groupe} » sur {application}.\n\nConsulter :\n\n{lien}"
     }
   },
   "flux_ical": {
     "nom_calendrier": "Attroupe",
+    "groupe_personnel": "Personnel",
     "lieu": "Lieu",
     "consignes": "Consignes",
     "fuseau": "Fuseau d'origine",

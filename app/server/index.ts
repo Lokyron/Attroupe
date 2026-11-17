@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { verifierDossierDonnees } from './config/donnees.js';
 import { chargerEnv, ErreurConfiguration } from './config/env.js';
@@ -40,7 +41,7 @@ function demarrer(): void {
     base,
     journal,
     diffuseur,
-    ...(env.NODE_ENV === 'production' ? { dossierClient } : {}),
+    ...(env.NODE_ENV === 'production' || existsSync(join(dossierClient, 'index.html')) ? { dossierClient } : {}),
   });
 
   const serveur = app.listen(env.PORT, (erreur?: Error) => {

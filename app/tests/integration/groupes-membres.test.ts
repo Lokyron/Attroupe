@@ -56,9 +56,15 @@ describe('groupe et membres', () => {
       expect(membres.every((m) => m['status'] === 'active')).toBe(true);
       expect(JSON.stringify(r.corps)).not.toContain('exemple.test');
       // (le nom affiché vaut le nom d'utilisateur par défaut : on contrôle les CLÉS, pas la valeur)
+      // `avatar_url` ne porte que l'URL de la photo (identifiant de compte, lisible des seuls membres du
+      // groupe, et la photo n'est servie qu'à un compte partageant un groupe) : ni e-mail ni nom d'utilisateur.
       expect(membres.flatMap((m) => Object.keys(m)).sort()).toEqual(
-        [...Array<string[]>(3).fill(['display_name', 'ended_at', 'id', 'joined_at', 'nickname', 'role', 'status'])].flat().sort(),
+        [...Array<string[]>(3).fill(['avatar_url', 'display_name', 'ended_at', 'id', 'joined_at', 'nickname', 'role', 'status'])].flat().sort(),
       );
+      for (const m of membres) {
+        const url = m['avatar_url'];
+        if (url !== null) expect(url).toMatch(/^\/api\/utilisateurs\/[^/?]+\/avatar\?v=/);
+      }
     });
   });
 
@@ -174,6 +180,23 @@ describe('groupe et membres', () => {
   });
 
   describe('retrait et départ', () => {
+    it('un ancien membre ou un compte désactivé n’a plus d’avatar_url (la photo ne lui est plus servie)', async () => {
+      d.sql.prepare("UPDATE users SET avatar_updated_at = '2026-01-01T00:00:00.000Z' WHERE id IN (?, ?, ?)").run(alice.userId, bob.userId, carole.userId);
+      const avatars = async (): Promise<Map<string, unknown>> => {
+        const membres = (await alice.client.get(`/api/groupes/${g.groupId}/membres`)).corps['membres'] as Array<{ id: string; avatar_url: string | null }>;
+        return new Map(membres.map((m) => [m.id, m.avatar_url]));
+      };
+      const avant = await avatars();
+      expect(avant.get(membreDe(g, bob))).toMatch(/^\/api\/utilisateurs\/[^/?]+\/avatar\?v=/);
+
+      expect((await alice.client.delete(`/api/groupes/${g.groupId}/membres/${membreDe(g, bob)}`)).statut).toBe(200);
+      d.sql.prepare("UPDATE users SET disabled_at = '2026-02-01T00:00:00.000Z' WHERE id = ?").run(carole.userId);
+      const apres = await avatars();
+      expect(apres.get(membreDe(g, bob))).toBeNull(); // ancien membre
+      expect(apres.get(membreDe(g, carole))).toBeNull(); // compte désactivé
+      expect(apres.get(membreDe(g, alice))).toMatch(/^\/api\/utilisateurs\//); // membre actif : inchangé
+    });
+
     it('retirer marque l’appartenance (jamais supprimée) et la liste la garde comme ancien membre', async () => {
       expect((await alice.client.delete(`/api/groupes/${g.groupId}/membres/${membreDe(g, bob)}`)).statut).toBe(200);
       const ligne = statutMembre(bob);

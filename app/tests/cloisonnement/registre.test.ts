@@ -91,7 +91,9 @@ describe('registre de cloisonnement : complétude', () => {
 
   it('chaque paramètre d’URL du registre est déclaré (groupId, ou une ressource)', () => {
     for (const e of REGISTRE) {
-      const parametres = [...e.chemin.matchAll(/:(\w+)/g)].map((m) => m[1] ?? '').filter((p) => p !== 'groupId');
+      const parametres = [...e.chemin.matchAll(/:(\w+)/g)]
+        .map((m) => m[1] ?? '')
+        .filter((p) => p !== 'groupId' && !(e.exige === 'media' && p === 'taille'));
       expect(Object.keys(e.ressources ?? {}).sort(), cle(e)).toEqual(parametres.sort());
     }
   });

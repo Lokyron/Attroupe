@@ -4,7 +4,9 @@ import type { Contexte } from '../http/contexte.js';
 import { creerGroupe, lireGroupe, modifierGroupe as modifierGroupeEnBase, type Groupe } from '../db/queries/groupes.js';
 import { inviterParEmail, inviterParNomUtilisateur, revoquerInvitation as revoquerInvitationEnBase } from '../db/queries/invitations.js';
 import { changerRole as changerRoleEnBase, quitter as quitterEnBase, retirerMembre as retirerMembreEnBase } from '../db/queries/membres.js';
+import { lireMaVisibiliteDefaut, type VisibilitePartage } from '../db/queries/agenda-personnel.js';
 import { lireProfil } from '../db/queries/comptes.js';
+import { lireConfigImmich } from '../db/queries/immich.js';
 import type { GroupScope } from '../db/scope.js';
 import { plus, versInstant } from '../domain/instant.js';
 import { DUREE_INVITATION_MS, emailInvitation } from './emails.js';
@@ -18,13 +20,26 @@ export interface DetailGroupe extends Groupe {
   readonly id: string;
   readonly mon_role: 'admin' | 'member';
   readonly mon_appartenance_id: string;
+  readonly ma_visibilite_defaut: VisibilitePartage;
+  readonly fonctionnalites: {
+    readonly photos: boolean;
+  };
 }
 
 export function detailGroupe(scope: GroupScope): DetailGroupe {
   const groupe = lireGroupe(scope);
   // Le groupe a été vu par exigerAppartenance quelques instants plus tôt ; s'il disparaît entre-temps, il n'existe plus pour l'appelant.
   if (groupe === undefined) throw new ErreurHttp(404, 'groupe.introuvable');
-  return { id: scope.groupId, ...groupe, mon_role: scope.role, mon_appartenance_id: scope.membershipId };
+  return {
+    id: scope.groupId,
+    ...groupe,
+    mon_role: scope.role,
+    mon_appartenance_id: scope.membershipId,
+    ma_visibilite_defaut: lireMaVisibiliteDefaut(scope),
+    fonctionnalites: {
+      photos: lireConfigImmich(scope) !== undefined,
+    },
+  };
 }
 
 export function modifierGroupe(

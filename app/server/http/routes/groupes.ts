@@ -3,6 +3,7 @@ import { listerInvitationsEmises } from '../../db/queries/invitations.js';
 import { listerMembres } from '../../db/queries/membres.js';
 import { mesGroupes } from '../../db/queries/transverse.js';
 import { versInstant } from '../../domain/instant.js';
+import { changerMaVisibiliteDefaut, disponibilitesDuGroupe } from '../../services/agenda-personnel.js';
 import { changerRole, creerNouveauGroupe, detailGroupe, inviter, modifierGroupe, quitter, retirerMembre, revoquerInvitation } from '../../services/groupes.js';
 import type { Contexte } from '../contexte.js';
 import { exigerAdminGroupe, exigerAppartenance, scopeDe } from '../middleware/appartenance.js';
@@ -10,10 +11,16 @@ import { cadence } from '../middleware/cadence.js';
 import { exigerSession, gardeSession } from '../middleware/session.js';
 import { monter } from '../montage.js';
 import { parametre } from '../parametres.js';
+import { schemaVisibiliteDefaut } from '../schemas/agenda-personnel.js';
+import { schemaFenetre } from '../schemas/evenements.js';
 import { schemaChangementRole, schemaCreationGroupe, schemaInvitation, schemaModificationGroupe } from '../schemas/groupes.js';
 import { analyser } from '../schemas/valider.js';
+import { routesDepenses, routesRemboursements, routesSoldes } from './depenses.js';
 import { routesEvenements } from './evenements.js';
+import { routesFils } from './fils.js';
+import { routesAlbums, routesImmich } from './immich.js';
 import { routesListes } from './listes.js';
+import { routesSondages } from './sondages.js';
 import { routesTaches } from './taches.js';
 import { routesTempsReel } from './temps-reel.js';
 
@@ -91,6 +98,17 @@ function routesDuGroupe(contexte: Contexte): Router {
     res.json({ ok: true });
   });
 
+  // Visibilité par défaut et disponibilités partagées dans ce groupe (lot 8).
+  routeur.put('/ma-visibilite', (req, res) => {
+    const { visibility } = analyser(schemaVisibiliteDefaut, req.body);
+    res.json(changerMaVisibiliteDefaut(scopeDe(req), visibility));
+  });
+
+  routeur.get('/disponibilites', (req, res) => {
+    const fenetre = analyser(schemaFenetre, req.query);
+    res.json({ disponibilites: disponibilitesDuGroupe(scopeDe(req), fenetre) });
+  });
+
   // L'agenda du groupe (lot 4) : monté par `monter`, pour que le registre de cloisonnement en voie les routes.
   monter(routeur, '/evenements', routesEvenements(contexte));
 
@@ -98,6 +116,21 @@ function routesDuGroupe(contexte: Contexte): Router {
   monter(routeur, '/listes', routesListes(contexte));
   monter(routeur, '/taches', routesTaches(contexte));
   monter(routeur, '/temps-reel', routesTempsReel(contexte));
+
+  // Sondages de dates (lot 7).
+  monter(routeur, '/sondages', routesSondages(contexte));
+
+  // Dépenses partagées, remboursements et soldes (lot 9).
+  monter(routeur, '/depenses', routesDepenses(contexte));
+  monter(routeur, '/remboursements', routesRemboursements(contexte));
+  monter(routeur, '/soldes', routesSoldes());
+
+  // Fils de discussion libres et messages (lot 10).
+  monter(routeur, '/fils', routesFils(contexte));
+
+  // Photos / Immich (lot 11).
+  monter(routeur, '/immich', routesImmich(contexte));
+  monter(routeur, '/albums', routesAlbums(contexte));
 
   return routeur;
 }

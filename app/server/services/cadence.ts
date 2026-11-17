@@ -33,7 +33,7 @@ export type VerdictCadence =
   | { readonly autorise: true; readonly rembourser: () => void }
   | { readonly autorise: false; readonly retryApresSecondes: number };
 
-export type NomCadence = 'connexion' | 'inscription' | 'oubli' | 'jeton' | 'changement' | 'renvoi' | 'invitation' | 'groupe' | 'flux' | 'abonnement';
+export type NomCadence = 'connexion' | 'inscription' | 'oubli' | 'jeton' | 'changement' | 'renvoi' | 'invitation' | 'groupe' | 'flux' | 'abonnement' | 'push';
 
 export interface CleCadence {
   readonly cle: string;
@@ -216,6 +216,8 @@ export const REGLES_PAR_DEFAUT: ReglesCadence = Object.freeze({
   groupe: { compte: parFenetre(10), ip: parFenetre(30), reseau: parFenetre(90) },
   /** Création d'un abonnement calendrier (lot 5) : une ligne et un jeton de plus par appel. */
   abonnement: { compte: parFenetre(10), ip: parFenetre(30), reseau: parFenetre(90) },
+  /** Enregistrement d'un appareil push et notification de test : chaque test fait sortir jusqu'à dix requêtes du serveur vers des tiers. */
+  push: { compte: parFenetre(10), ip: parFenetre(30), reseau: parFenetre(90) },
   /**
    * Flux iCal (lot 5, architecture §7.1) : 60 requêtes par heure PAR JETON. Les clients de calendrier interrogent à heure fixe, trois ou quatre
    * fois par heure au plus : 60 laisse de la marge à plusieurs appareils partageant un jeton. L'IP, très large, ne sert qu'à borner le balayage

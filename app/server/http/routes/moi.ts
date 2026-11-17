@@ -1,22 +1,91 @@
 import { Router } from 'express';
+import { z } from 'zod';
+import {
+  decoderBase64Avatar,
+  enregistrerAvatarUtilisateur,
+  lireAvatarUtilisateur,
+  MIMES_AVATAR,
+  supprimerAvatarUtilisateur,
+  validerAvatar,
+} from '../../db/queries/avatar.js';
 import { creerAbonnement, listerAbonnements, revoquerAbonnement } from '../../db/queries/flux.js';
+import {
+  compterAbonnementsPush,
+  enregistrerAbonnementPush,
+  supprimerAbonnementsPush,
+} from '../../db/queries/push.js';
+import { lireTableauDeBord } from '../../db/queries/tableau-de-bord.js';
 import { mesGroupes } from '../../db/queries/transverse.js';
+import {
+  creerDansMonAgenda,
+  definirPartagesDansMonAgenda,
+  listerMonAgenda,
+  modifierDansMonAgenda,
+  supprimerDeMonAgenda,
+} from '../../services/agenda-personnel.js';
 import { accepter, mesInvitations, refuser } from '../../services/invitations.js';
 import { listerSessions, lireProfil, modifierProfil, revoquerAutresSessions, revoquerSession } from '../../db/queries/comptes.js';
+import { dateValide, fenetreValide } from '../../domain/evenements.js';
 import { versInstant } from '../../domain/instant.js';
 import { empreinteJeton, nouveauJetonFlux, urlFlux, urlWebcal } from '../../domain/jetons.js';
+import { decoderBase64Url, validerEndpointPush } from '../../domain/push.js';
 import { changerMotDePasse, renvoyerVerification } from '../../services/authentification.js';
+import {
+  definirMaPreferenceNotification,
+  marquerLues,
+  mesNotifications,
+  mesPreferencesNotifications,
+} from '../../services/notifications.js';
+import { envoyerNotificationPush, obtenirClePubliqueVapid } from '../../services/push.js';
 import type { Contexte } from '../contexte.js';
 import { ErreurHttp } from '../erreurs.js';
 import { cadence } from '../middleware/cadence.js';
 import { exigerSession, gardeSession, poserCookieSession } from '../middleware/session.js';
 import { parametre } from '../parametres.js';
+import {
+  schemaFenetreAgendaPersonnel,
+  schemaModificationCreneauPersonnel,
+  schemaNouveauCreneauPersonnel,
+  schemaPartagesCreneau,
+} from '../schemas/agenda-personnel.js';
 import { schemaChangementMotDePasse, schemaProfil } from '../schemas/auth.js';
 import { schemaCreationFlux } from '../schemas/flux.js';
+import { schemaLectureNotifications, schemaPreferenceNotification } from '../schemas/notifications.js';
 import { analyser } from '../schemas/valider.js';
 
 /** Abonnements calendrier non révoqués par compte. */
 const MAX_ABONNEMENTS_ACTIFS = 20;
+
+const jourOptionnel = z.string().refine(dateValide).optional();
+const schemaFenetreOptionnelle = z
+  .strictObject({ du: jourOptionnel, au: jourOptionnel })
+  .superRefine((fenetre, ctx) => {
+    if ((fenetre.du !== undefined) !== (fenetre.au !== undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['du'], message: 'du et au doivent être fournis ensemble' });
+      return;
+    }
+    if (fenetre.du !== undefined && fenetre.au !== undefined && !fenetreValide(fenetre.du, fenetre.au)) {
+      ctx.addIssue({ code: 'custom', path: ['au'], message: 'fenêtre invalide' });
+    }
+  });
+
+const schemaAvatar = z.strictObject({
+  mime: z.enum(MIMES_AVATAR),
+  data_base64: z.string().min(1),
+});
+
+const schemaAbonnementPush = z.strictObject({
+  // https seulement ; l'hôte public est vérifié par `validerEndpointPush` (anti-SSRF), pas par le schéma.
+  endpoint: z.url({ protocol: /^https$/ }).max(2048),
+  keys: z.strictObject({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+});
+
+const schemaSuppressionAbonnementPush = z.strictObject({
+  endpoint: z.url({ protocol: /^https?$/ }).optional(),
+});
 
 // /api/moi : le compte courant. Tout passe par la `PorteeUtilisateur` de la session : aucune route ici ne
 // reçoit un identifiant de compte, donc aucune ne peut viser un autre compte.
@@ -36,6 +105,18 @@ export function routesMoi(contexte: Contexte): Router {
       // Sans clé Brevo les e-mails restent en file : l'interface doit le dire (architecture §7.3).
       service_email: contexte.env.BREVO_API_KEY === undefined ? 'non_configure' : 'actif',
     });
+  });
+
+  routeur.get('/tableau-de-bord', (req, res) => {
+    const { portee } = exigerSession(req);
+    const fenetre = analyser(schemaFenetreOptionnelle, req.query);
+    res.json(
+      lireTableauDeBord(contexte.base, portee, {
+        maintenant: contexte.horloge(),
+        signedUrlSecret: contexte.env.ATTROUPE_SIGNED_URL_SECRET,
+        ...(fenetre.du !== undefined && fenetre.au !== undefined ? { du: fenetre.du, au: fenetre.au } : {}),
+      }),
+    );
   });
 
   routeur.patch('/', (req, res) => {
@@ -138,6 +219,146 @@ export function routesMoi(contexte: Contexte): Router {
     // 404 si l'abonnement n'est pas à moi : un identifiant forgé ne se distingue pas d'un identifiant inconnu.
     if (!revoquerAbonnement(portee, parametre(req, 'fluxId'), versInstant(contexte.horloge()))) throw new ErreurHttp(404, 'flux.introuvable');
     res.json({ ok: true });
+  });
+
+  // Agenda personnel (lot 8, modèle §3.6). Tout passe par la `PorteeUtilisateur` : le créneau d'un autre compte est introuvable (404).
+  routeur.get('/agenda', (req, res) => {
+    const { portee } = exigerSession(req);
+    const fenetre = analyser(schemaFenetreAgendaPersonnel, req.query);
+    res.json({ creneaux: listerMonAgenda(portee, fenetre) });
+  });
+
+  routeur.post('/agenda', (req, res) => {
+    const { portee } = exigerSession(req);
+    const corps = analyser(schemaNouveauCreneauPersonnel, req.body);
+    res.status(201).json(creerDansMonAgenda(portee, corps));
+  });
+
+  routeur.patch('/agenda/:id', (req, res) => {
+    const { portee } = exigerSession(req);
+    const champs = analyser(schemaModificationCreneauPersonnel, req.body);
+    res.json(modifierDansMonAgenda(portee, parametre(req, 'id'), champs));
+  });
+
+  routeur.delete('/agenda/:id', (req, res) => {
+    const { portee } = exigerSession(req);
+    supprimerDeMonAgenda(portee, parametre(req, 'id'));
+    res.json({ ok: true });
+  });
+
+  routeur.put('/agenda/:id/partages', (req, res) => {
+    const { portee } = exigerSession(req);
+    const corps = analyser(schemaPartagesCreneau, req.body);
+    const partages = 'partages' in corps ? corps.partages : [corps];
+    res.json(definirPartagesDansMonAgenda(portee, parametre(req, 'id'), partages));
+  });
+
+  // Notifications et préférences d'envoi par e-mail (lot 10).
+  routeur.get('/notifications', (req, res) => {
+    const { portee } = exigerSession(req);
+    res.json(mesNotifications(portee));
+  });
+
+  routeur.post('/notifications/lecture', (req, res) => {
+    const { portee } = exigerSession(req);
+    const { ids } = analyser(schemaLectureNotifications, req.body);
+    res.json({ lues: marquerLues(contexte, portee, ids) });
+  });
+
+  routeur.get('/preferences-notifications', (req, res) => {
+    const { portee } = exigerSession(req);
+    res.json({ preferences: mesPreferencesNotifications(portee) });
+  });
+
+  routeur.put('/preferences-notifications', (req, res) => {
+    const { portee } = exigerSession(req);
+    const { group_id, email_mode } = analyser(schemaPreferenceNotification, req.body);
+    res.json({ preferences: definirMaPreferenceNotification(portee, group_id, email_mode) });
+  });
+
+  // Photo de profil utilisateur.
+  routeur.get('/avatar', (req, res) => {
+    const { portee } = exigerSession(req);
+    const avatar = lireAvatarUtilisateur(portee, portee.userId);
+    if (avatar === null) throw new ErreurHttp(404, 'avatar.introuvable');
+    res.set('Content-Type', avatar.mime);
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(avatar.data);
+  });
+
+  routeur.put('/avatar', (req, res) => {
+    const { portee } = exigerSession(req);
+    const corps = analyser(schemaAvatar, req.body);
+    const data = decoderBase64Avatar(corps.data_base64);
+    if (data === null) throw new ErreurHttp(400, 'avatar.invalide');
+    const validation = validerAvatar(corps.mime, data);
+    if (validation === 'trop_volumineux') throw new ErreurHttp(400, 'avatar.trop_volumineux');
+    if (validation !== 'ok') throw new ErreurHttp(400, 'avatar.invalide');
+    const avatarUrl = enregistrerAvatarUtilisateur(portee, corps.mime, data, versInstant(contexte.horloge()));
+    res.json({ avatar_url: avatarUrl });
+  });
+
+  routeur.delete('/avatar', (req, res) => {
+    const { portee } = exigerSession(req);
+    supprimerAvatarUtilisateur(portee, versInstant(contexte.horloge()));
+    res.json({ ok: true });
+  });
+
+  // Notifications Push Web (VAPID + RFC 8291).
+  routeur.get('/push/cle', (req, res) => {
+    const { portee } = exigerSession(req);
+    res.json({
+      cle_publique: obtenirClePubliqueVapid(contexte.base, contexte.env),
+      nb_appareils: compterAbonnementsPush(portee),
+    });
+  });
+
+  routeur.post('/push/abonnement', cadence(contexte, 'push'), (req, res) => {
+    const { portee } = exigerSession(req);
+    const corps = analyser(schemaAbonnementPush, req.body);
+    // Anti-SSRF : le serveur POSTera vers cette URL. Hôte non public, port inhabituel, identifiants : refusés, sans dire pourquoi.
+    // (La résolution DNS est vérifiée, et la connexion épinglée, à chaque envoi : un nom peut changer d'adresse après coup.)
+    if (!validerEndpointPush(corps.endpoint).valide) throw new ErreurHttp(400, 'push.endpoint_invalide');
+    const p256dhBrut = decoderBase64Url(corps.keys.p256dh);
+    const authBrut = decoderBase64Url(corps.keys.auth);
+    if (p256dhBrut.length !== 65 || p256dhBrut[0] !== 0x04 || authBrut.length !== 16) {
+      throw new ErreurHttp(400, 'push.cles_invalides');
+    }
+    const id = enregistrerAbonnementPush(portee, {
+      endpoint: corps.endpoint,
+      p256dh: corps.keys.p256dh,
+      auth: corps.keys.auth,
+      userAgent: req.get('user-agent') ?? null,
+    });
+    res.status(201).json({ ok: true, id });
+  });
+
+  routeur.delete('/push/abonnement', (req, res) => {
+    const { portee } = exigerSession(req);
+    const corps = analyser(schemaSuppressionAbonnementPush, req.body ?? {});
+    const supprimes = supprimerAbonnementsPush(portee, corps.endpoint);
+    res.json({ supprimes });
+  });
+
+  // L'envoi part en arrière-plan et la réponse est un simple accusé : elle ne dépend ni du résultat ni de la durée de l'appel vers
+  // l'endpoint (sinon `{envoyes, echecs}` et le temps de réponse renseigneraient sur ce que joint le serveur : oracle SSRF).
+  routeur.post('/push/test', cadence(contexte, 'push'), (req, res) => {
+    const { portee } = exigerSession(req);
+    const appareils = compterAbonnementsPush(portee);
+    envoyerNotificationPush(
+      contexte.base,
+      portee.userId,
+      {
+        title: 'Attroupe',
+        body: 'Les notifications push sont bien activées sur cet appareil.',
+        url: '/',
+        tag: 'test',
+      },
+      { env: contexte.env, journal: contexte.journal, maintenant: contexte.horloge() },
+    ).catch((erreur: unknown) => {
+      contexte.journal.error('push.envoi_impossible', { erreur: erreur instanceof Error ? erreur.message : String(erreur) });
+    });
+    res.status(202).json({ ok: true, appareils });
   });
 
   return routeur;

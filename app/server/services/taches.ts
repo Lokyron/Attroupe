@@ -1,5 +1,6 @@
 import type { Base } from '../db/base.js';
 import { purgerAuthentification } from '../db/queries/comptes.js';
+import { envoyerResumesQuotidiens } from '../db/queries/notifications.js';
 import { JOUR_MS, MINUTE_MS, SECONDE_MS, versInstant } from '../domain/instant.js';
 import type { Journal } from '../http/middleware/journal.js';
 import { remettreFile, type Transporteur } from './brevo.js';
@@ -53,6 +54,8 @@ export function demarrerTaches(options: OptionsTaches): Taches {
       derniereCharge = maintenant.getTime();
       const purgees = purgerAuthentification(options.base, versInstant(new Date(maintenant.getTime() - CONSERVATION_MS)));
       if (purgees > 0) options.journal.info('auth.purge', { lignes: purgees });
+      const resumes = envoyerResumesQuotidiens(options.base, options.baseUrl, maintenant);
+      if (resumes > 0) options.journal.info('notifications.resumes_quotidiens', { emails: resumes });
     } catch (erreur) {
       options.journal.error('auth.purge_echec', { erreur: erreur instanceof Error ? erreur.message : String(erreur) });
     }

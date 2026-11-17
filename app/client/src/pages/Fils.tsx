@@ -1,0 +1,84 @@
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { creerFilLibre, listerFils, type Fil } from '../api/fils';
+import { EnteteGroupe } from '../components/EnteteGroupe';
+import { Erreur, messageDe } from '../components/Erreur';
+import { IconeMessage } from '../components/Icones';
+import { t } from '../i18n';
+
+/** Liste des fils de discussion du groupe (libres et d'événements) + création d'un fil libre. */
+export function Fils({ groupId }: { groupId: string }) {
+  const [fils, setFils] = useState<Fil[]>([]);
+  const [titre, setTitre] = useState('');
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  const charger = useCallback((): void => {
+    setErreur(null);
+    listerFils(groupId)
+      .then(setFils)
+      .catch((err: unknown) => setErreur(messageDe(err)));
+  }, [groupId]);
+
+  useEffect(charger, [charger]);
+
+  const soumettre = (e: FormEvent): void => {
+    e.preventDefault();
+    if (titre.trim() === '') return;
+    setErreur(null);
+    creerFilLibre(groupId, titre.trim())
+      .then((cree) => {
+        setTitre('');
+        window.location.hash = `#/groupe/${encodeURIComponent(groupId)}/fil/${encodeURIComponent(cree.id)}`;
+      })
+      .catch((err: unknown) => setErreur(messageDe(err)));
+  };
+
+  return (
+    <section className="page-groupe-pile">
+      <EnteteGroupe groupId={groupId} ongletActif="fils" titre={t('fils.titre')} />
+      <Erreur message={erreur} />
+
+      <form onSubmit={soumettre} className="carte barre-ajout-ligne">
+        <input
+          type="text"
+          value={titre}
+          aria-label={t('fils.champ_titre')}
+          placeholder={t('fils.placeholder_sujet')}
+          onChange={(e) => setTitre(e.target.value)}
+          required
+        />
+        <button type="submit" disabled={titre.trim() === ''}>
+          {t('fils.creer_court')}
+        </button>
+      </form>
+
+      <div className="carte">
+        {fils.length === 0 ? (
+          <p className="discret">{t('fils.aucun')}</p>
+        ) : (
+          <ul className="liste-elements">
+            {fils.map((f) => {
+              const libelle = f.kind === 'event' ? (f.event_title ?? t('fils.fil_evenement')) : (f.title ?? '');
+              const cible =
+                f.kind === 'event' && f.event_id !== null
+                  ? `#/groupe/${encodeURIComponent(groupId)}/evenement/${encodeURIComponent(f.event_id)}`
+                  : `#/groupe/${encodeURIComponent(groupId)}/fil/${encodeURIComponent(f.id)}`;
+              return (
+                <li key={f.id}>
+                  <a href={cible} className="ligne-interactive">
+                    <div className="ligne-membre-info">
+                      <span className="depense-icone-rond" aria-hidden="true">
+                        <IconeMessage className="icone-mini" />
+                      </span>
+                      <span className="ligne-titre">{libelle}</span>
+                    </div>
+                    {f.kind === 'event' && <span className="pilule pilule-agenda">{t('fils.type_evenement')}</span>}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}

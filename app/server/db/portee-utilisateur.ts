@@ -25,6 +25,8 @@ const TABLES = {
   notification_preferences: { avecId: false, supprimable: false, suppressionReelle: true, creeLe: true, majLe: true, auteur: null, auteurFacultatif: null, cle: ['group_id'], pkContientPortee: true, reserveAuMembre: null },
   // L'agenda personnel : propriétaire seul (§3.6). Le groupe n'y accède que par les partages.
   personal_events: { ...AVEC_ID, supprimable: true, suppressionReelle: false, creeLe: true, majLe: true },
+  // Abonnements Web Push (lot 12) : propres à un compte.
+  push_subscriptions: { ...AVEC_ID, supprimable: false, suppressionReelle: true, creeLe: true, majLe: false },
 } as const satisfies Record<string, DescriptionTable>;
 
 export type TableCompte = keyof typeof TABLES;

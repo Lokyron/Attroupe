@@ -76,7 +76,54 @@ async function idInvitation(admin: Personne, g: GroupeAmorce, email: string): Pr
 }
 
 export async function monde(): Promise<Monde> {
-  const d = decor();
+  let compteurImmich = 0;
+  const assetsParAlbum = new Map<string, string[]>();
+  const fetchImmich = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const methode = (init?.method ?? 'GET').toUpperCase();
+    const chemin = new URL(url).pathname.replace(/^\/api/, '');
+    if (methode === 'GET' && chemin === '/users/me') {
+      return new Response(JSON.stringify({ id: 'immich-user-1' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (methode === 'POST' && chemin === '/albums') {
+      compteurImmich += 1;
+      const id = `immich-album-${compteurImmich}`;
+      assetsParAlbum.set(id, []);
+      return new Response(JSON.stringify({ id }), { status: 201, headers: { 'content-type': 'application/json' } });
+    }
+    if (methode === 'GET' && chemin.startsWith('/albums/')) {
+      const albumId = chemin.slice('/albums/'.length);
+      const assets = (assetsParAlbum.get(albumId) ?? []).map((id) => ({
+        id,
+        type: 'IMAGE',
+        fileCreatedAt: '2027-03-20T18:00:00Z',
+        exifInfo: null,
+        duration: null,
+      }));
+      return new Response(JSON.stringify({ id: albumId, assets }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (methode === 'POST' && chemin === '/assets') {
+      compteurImmich += 1;
+      return new Response(JSON.stringify({ id: `immich-asset-${compteurImmich}` }), { status: 201, headers: { 'content-type': 'application/json' } });
+    }
+    if (methode === 'PUT' && chemin.startsWith('/albums/') && chemin.endsWith('/assets')) {
+      const albumId = chemin.slice('/albums/'.length, -'/assets'.length);
+      const corps = typeof init?.body === 'string' ? (JSON.parse(init.body) as { ids?: string[] }) : {};
+      const existants = assetsParAlbum.get(albumId) ?? [];
+      assetsParAlbum.set(albumId, [...existants, ...(corps.ids ?? [])]);
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (methode === 'DELETE' && chemin.endsWith('/assets')) {
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (methode === 'GET' && chemin.startsWith('/assets/')) {
+      return new Response(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+    }
+    return new Response(JSON.stringify({ error: 'non_trouve' }), { status: 404, headers: { 'content-type': 'application/json' } });
+  };
+  const dnsLookupImmich = async () => [{ address: '93.184.216.34', family: 4 }] as const;
+
+  const d = decor({ fetchImmich, dnsLookupImmich });
   const alice = await personne(d, 'alice_m');
   const bob = await personne(d, 'bob_m');
   const carole = await personne(d, 'carole_m');
@@ -141,8 +188,122 @@ export async function monde(): Promise<Monde> {
   };
   const coursesA = await courses(alice, a, evenementA, 'Courses du groupe A', 'Baguettes de A', 'Fromage de A', 'Apporter la glace de A');
   const coursesB = await courses(bob, b, evenementB, 'Courses de B secret', 'Pain de B', 'Vin de B', 'Tâche secrète de B');
+  const sondage = async (
+    auteur: Personne,
+    g: GroupeAmorce,
+    title: string,
+  ): Promise<Pick<Record<Ressource, string>, 'sondage' | 'optionSondage'> & { optionSecondaire: string }> => {
+    const r = await auteur.client.post(`/api/groupes/${g.groupId}/sondages`, {
+      title,
+      options: [{ starts_at: '2027-04-11T19:00:00Z' }, { starts_at: '2027-04-12T19:00:00Z' }],
+    });
+    if (r.statut !== 201) throw new Error(`Sondage refusé : ${JSON.stringify(r.corps)}`);
+    const options = r.corps['options'] as Array<{ id: string }>;
+    const premiere = options[0]?.id;
+    const seconde = options[1]?.id;
+    if (premiere === undefined || seconde === undefined) throw new Error('Options de sondage introuvables.');
+    return { sondage: r.corps['id'] as string, optionSondage: premiere, optionSecondaire: seconde };
+  };
+  const sondageA = await sondage(alice, a, 'Sondage du groupe A');
+  const sondageB = await sondage(bob, b, 'Sondage secret de B');
+  const creneauPerso = async (auteur: Personne, title: string): Promise<string> => {
+    const r = await auteur.client.post('/api/moi/agenda', {
+      title,
+      starts_at: '2027-03-15T14:00:00Z',
+      ends_at: '2027-03-15T15:00:00Z',
+      time_zone: 'Europe/Paris',
+    });
+    if (r.statut !== 201) throw new Error(`Créneau personnel refusé : ${JSON.stringify(r.corps)}`);
+    return r.corps['id'] as string;
+  };
+  const creneauPersoA = await creneauPerso(alice, 'Rendez-vous privé Alice');
+  const creneauPersoB = await creneauPerso(bob, 'Consultation secrète de Bob');
+  const depenseEtRemboursement = async (
+    auteur: Personne,
+    g: GroupeAmorce,
+    evenementId: string,
+    label: string,
+    payeur: Personne,
+    debiteur: Personne,
+  ): Promise<{ depense: string; remboursement: string }> => {
+    const dRes = await auteur.client.post(`/api/groupes/${g.groupId}/depenses`, {
+      event_id: evenementId,
+      label,
+      spent_on: '2027-03-20',
+      payer_membership_id: membreDe(g, payeur),
+      amount_minor: 2000,
+      currency_code: 'EUR',
+      split_mode: 'equal',
+      shares: [{ membership_id: membreDe(g, payeur) }, { membership_id: membreDe(g, debiteur) }],
+    });
+    if (dRes.statut !== 201) throw new Error(`Dépense refusée : ${JSON.stringify(dRes.corps)}`);
+    const rRes = await debiteur.client.post(`/api/groupes/${g.groupId}/remboursements`, {
+      event_id: evenementId,
+      from_membership_id: membreDe(g, debiteur),
+      to_membership_id: membreDe(g, auteur),
+      amount_minor: 1000,
+      currency_code: 'EUR',
+      settled_on: '2027-03-21',
+    });
+    if (rRes.statut !== 201) throw new Error(`Remboursement refusé : ${JSON.stringify(rRes.corps)}`);
+    return { depense: dRes.corps['id'] as string, remboursement: rRes.corps['id'] as string };
+  };
+  const financeA = await depenseEtRemboursement(alice, a, evenementA, 'Dépense secrète A', alice, carole);
+  const financeB = await depenseEtRemboursement(bob, b, evenementB, 'Dépense secrète de B', bob, dave);
+  const filEtMessage = async (
+    auteur: Personne,
+    g: GroupeAmorce,
+    titre: string,
+    texte: string,
+  ): Promise<{ fil: string; message: string }> => {
+    const fRes = await auteur.client.post(`/api/groupes/${g.groupId}/fils`, { title: titre });
+    if (fRes.statut !== 201) throw new Error(`Fil refusé : ${JSON.stringify(fRes.corps)}`);
+    const filId = fRes.corps['id'] as string;
+    const mRes = await auteur.client.post(`/api/groupes/${g.groupId}/fils/${filId}/messages`, { body: texte });
+    if (mRes.statut !== 201) throw new Error(`Message refusé : ${JSON.stringify(mRes.corps)}`);
+    return { fil: filId, message: mRes.corps['id'] as string };
+  };
+  const filA = await filEtMessage(alice, a, 'Fil libre de A', 'Message initial de A');
+  const filB = await filEtMessage(bob, b, 'Fil libre secret de B', 'Message secret de B');
+  const albumEtPhoto = async (
+    admin: Personne,
+    deposant: Personne,
+    g: GroupeAmorce,
+    titre: string,
+    apiKey: string,
+  ): Promise<{ album: string; photo: string }> => {
+    const cfg = await admin.client.put(`/api/groupes/${g.groupId}/immich`, {
+      base_url: 'https://immich.exemple.test/api',
+      api_key: apiKey,
+    });
+    if (cfg.statut !== 200) throw new Error(`Config Immich refusée : ${JSON.stringify(cfg.corps)}`);
+    const alb = await admin.client.post(`/api/groupes/${g.groupId}/albums`, { title: titre });
+    if (alb.statut !== 201) throw new Error(`Album refusé : ${JSON.stringify(alb.corps)}`);
+    const albumId = alb.corps['id'] as string;
+    const up = await deposant.client.post(`/api/groupes/${g.groupId}/albums/${albumId}/photos`, {
+      files: [{ filename: 'photo.jpg', mime_type: 'image/jpeg', content_base64: 'AQID' }],
+    });
+    if (up.statut !== 201) throw new Error(`Photo refusée : ${JSON.stringify(up.corps)}`);
+    const photos = up.corps['photos'] as Array<{ immich_asset_id: string }>;
+    const premiere = photos[0];
+    if (premiere === undefined) throw new Error('Photo manquante après téléversement.');
+    return { album: albumId, photo: premiere.immich_asset_id };
+  };
+  const photosA = await albumEtPhoto(alice, erin, a, 'Album de A', 'cle-immich-a');
+  const photosB = await albumEtPhoto(bob, bob, b, 'Album secret de B', 'cle-immich-b');
   const recueA = await recue(alice);
   const recueB = await recue(bob);
+  const avatarAlice = await alice.client.put('/api/moi/avatar', {
+    mime: 'image/png',
+    data_base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  });
+  if (avatarAlice.statut !== 200) throw new Error(`Avatar Alice refusé : ${JSON.stringify(avatarAlice.corps)}`);
+  // Bob aussi a une photo : sans elle, l'attaque d'Alice répondrait 404 par simple absence de photo.
+  const avatarBob = await bob.client.put('/api/moi/avatar', {
+    mime: 'image/png',
+    data_base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  });
+  if (avatarBob.statut !== 200) throw new Error(`Avatar Bob refusé : ${JSON.stringify(avatarBob.corps)}`);
   // Flux iCal : un abonnement d'Alice et un de Bob (route de révocation), puis les jetons des simples membres.
   const abonnementAlice = await creerFlux(alice, {});
   const abonnementBob = await creerFlux(bob, {});
@@ -155,8 +316,8 @@ export async function monde(): Promise<Monde> {
     manonRestreintB: await creerFlux(manon, { group_id: b.groupId }),
   };
   const ressources = {
-    a: { membre: membreDe(a, carole), evenement: evenementA, invitation: invitationA, session: await idSession(alice), abonnement: abonnementAlice.id, jetonFlux: flux.erin.jeton, ...coursesA, ...recueA },
-    b: { membre: membreDe(b, dave), evenement: evenementB, invitation: invitationB, session: await idSession(bob), abonnement: abonnementBob.id, jetonFlux: flux.dave.jeton, ...coursesB, ...recueB },
+    a: { membre: membreDe(a, carole), membreAutre: membreDe(a, erin), evenement: evenementA, invitation: invitationA, session: await idSession(alice), abonnement: abonnementAlice.id, jetonFlux: flux.erin.jeton, sondage: sondageA.sondage, optionSondage: sondageA.optionSondage, creneauPerso: creneauPersoA, ...coursesA, ...financeA, ...filA, ...photosA, ...recueA, utilisateur: alice.userId },
+    b: { membre: membreDe(b, dave), membreAutre: membreDe(b, manon), evenement: evenementB, invitation: invitationB, session: await idSession(bob), abonnement: abonnementBob.id, jetonFlux: flux.dave.jeton, sondage: sondageB.sondage, optionSondage: sondageB.optionSondage, creneauPerso: creneauPersoB, ...coursesB, ...financeB, ...filB, ...photosB, ...recueB, utilisateur: bob.userId },
   };
   const marquesDeB = [
     b.groupId,
@@ -173,6 +334,13 @@ export async function monde(): Promise<Monde> {
     'Pain de B',
     'Vin de B',
     'Tâche secrète de B',
+    'Sondage secret de B',
+    'Consultation secrète de Bob',
+    'Dépense secrète de B',
+    'Fil libre secret de B',
+    'Message secret de B',
+    'Album secret de B',
+    sondageB.optionSecondaire,
     ...Object.values(ressources.b),
   ];
   return { d, alice, bob, carole, dave, erin, manon, frank, a, b, ressources, marquesDeB, flux };

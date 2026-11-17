@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { baseDeScope, type GroupScope } from '../scope.js';
 import type { Base } from '../base.js';
-import type { PorteeUtilisateur } from '../portee-utilisateur.js';
+import { baseDe, type PorteeUtilisateur } from '../portee-utilisateur.js';
 import { preparer } from '../sql.js';
 
 // Flux iCal (lot 5). Trois familles de fonctions :
@@ -182,4 +182,58 @@ export function evenementsFlux(scope: GroupScope, fenetre: FenetreFlux): Eveneme
       .all(...valeurs, LIMITE_PAR_GROUPE)
       .map((ligne) => ligneEvenementFlux.parse(ligne));
   return [...lire(ENSEMBLE_MODIFIES, p.modifies), ...lire(ENSEMBLE_FENETRE, p.fenetre)];
+}
+
+// --- Lecture des créneaux personnels du compte (include_personal = 1, lot 8) -----------------------------------------
+
+const CORPS_ENSEMBLE_PERSONNEL = `FROM personal_events AS p WHERE p.user_id = ? AND p.deleted_at IS NULL`;
+const ENSEMBLE_PERSONNEL_MODIFIES = `${CORPS_ENSEMBLE_PERSONNEL} AND p.updated_at >= ?`;
+const ENSEMBLE_PERSONNEL_FENETRE = `${CORPS_ENSEMBLE_PERSONNEL} AND p.updated_at < ? AND p.starts_at >= ? AND p.starts_at <= ?`;
+
+function parametresPersonnels(portee: PorteeUtilisateur, fenetre: FenetreFlux): { modifies: Array<string | number>; fenetre: Array<string | number> } {
+  return {
+    modifies: [portee.userId, fenetre.depuis],
+    fenetre: [portee.userId, fenetre.depuis, fenetre.depuis.slice(0, 10), `${fenetre.jusqua.slice(0, 10)}T23:59:59Z`],
+  };
+}
+
+/** Empreinte exacte des créneaux personnels non supprimés du compte dans la fenêtre du flux. */
+export function empreintePersonnelleFlux(portee: PorteeUtilisateur, fenetre: FenetreFlux): string {
+  const base = baseDe(portee);
+  const p = parametresPersonnels(portee, fenetre);
+  const lire = (corps: string, valeurs: Array<string | number>): string[] => {
+    const { lignes } = ligneEmpreinte.parse(
+      preparer(base, `SELECT group_concat(p.id || '|' || p.updated_at || '|' || p.title, char(10)) AS lignes ${corps}`).get(...valeurs),
+    );
+    return lignes === null ? [] : lignes.split('\n');
+  };
+  return [...lire(ENSEMBLE_PERSONNEL_MODIFIES, p.modifies), ...lire(ENSEMBLE_PERSONNEL_FENETRE, p.fenetre)].sort().join('\n');
+}
+
+const ligneEvenementPersonnelFlux = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  location_name: z.string().nullable(),
+  all_day: z.union([z.literal(0), z.literal(1)]),
+  starts_at: z.string(),
+  ends_at: z.string().nullable(),
+  time_zone: z.string(),
+  updated_at: z.string(),
+});
+
+export type EvenementPersonnelFlux = z.infer<typeof ligneEvenementPersonnelFlux>;
+
+const COLONNES_EVENEMENT_PERSONNEL = `p.id AS id, p.title AS title, p.description AS description, p.location_name AS location_name,
+       p.all_day AS all_day, p.starts_at AS starts_at, p.ends_at AS ends_at, p.time_zone AS time_zone, p.updated_at AS updated_at`;
+
+/** Les créneaux personnels non supprimés de CE compte pour la fenêtre du flux. */
+export function evenementsPersonnelsFlux(portee: PorteeUtilisateur, fenetre: FenetreFlux): EvenementPersonnelFlux[] {
+  const base = baseDe(portee);
+  const p = parametresPersonnels(portee, fenetre);
+  const lire = (ensemble: string, valeurs: Array<string | number>): EvenementPersonnelFlux[] =>
+    preparer(base, `SELECT ${COLONNES_EVENEMENT_PERSONNEL} ${ensemble} ORDER BY p.starts_at, p.id LIMIT ?`)
+      .all(...valeurs, LIMITE_PAR_GROUPE)
+      .map((ligne) => ligneEvenementPersonnelFlux.parse(ligne));
+  return [...lire(ENSEMBLE_PERSONNEL_MODIFIES, p.modifies), ...lire(ENSEMBLE_PERSONNEL_FENETRE, p.fenetre)];
 }

@@ -26,31 +26,43 @@ export function Connexion({ onConnecte }: { onConnecte: () => void }) {
   };
 
   return (
-    <main className="accueil">
-      <h1>{t('app.nom')}</h1>
-      <h2>{inscription ? t('connexion.titre_inscription') : t('connexion.titre_connexion')}</h2>
-      <form onSubmit={soumettre} className="formulaire">
-        <label>
-          {t('connexion.email')}
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
-        </label>
-        {inscription && (
+    <main className="connexion-enveloppe">
+      <section className="carte connexion-carte">
+        <div className="connexion-entete">
+          <img src="/icons/logo.png" alt={''} className="connexion-logo" aria-hidden="true" />
+          <h1 className="marque">{t('app.nom')}</h1>
+          <p className="discret">{t('app.accroche')}</p>
+        </div>
+        <h2>{inscription ? t('connexion.titre_inscription') : t('connexion.titre_connexion')}</h2>
+        <form onSubmit={soumettre} className="formulaire">
           <label>
-            {t('connexion.nom_utilisateur')}
-            <input type="text" value={nom} onChange={(e) => setNom(e.target.value)} required minLength={3} maxLength={32} autoComplete="username" />
+            {t('connexion.email')}
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
           </label>
+          {inscription && (
+            <label>
+              {t('connexion.nom_utilisateur')}
+              <input type="text" value={nom} onChange={(e) => setNom(e.target.value)} required minLength={3} maxLength={32} autoComplete="username" />
+            </label>
+          )}
+          <label>
+            {t('connexion.mot_de_passe')}
+            <input type="password" value={motDePasse} onChange={(e) => setMotDePasse(e.target.value)} required autoComplete={inscription ? 'new-password' : 'current-password'} />
+          </label>
+          <button type="submit" className="bouton-primaire">
+            {inscription ? t('connexion.s_inscrire') : t('connexion.se_connecter')}
+          </button>
+        </form>
+        {info !== null && (
+          <p role="status" className="info">
+            {info}
+          </p>
         )}
-        <label>
-          {t('connexion.mot_de_passe')}
-          <input type="password" value={motDePasse} onChange={(e) => setMotDePasse(e.target.value)} required autoComplete={inscription ? 'new-password' : 'current-password'} />
-        </label>
-        <button type="submit">{inscription ? t('connexion.s_inscrire') : t('connexion.se_connecter')}</button>
-      </form>
-      {info !== null && <p role="status">{info}</p>}
-      <Erreur message={erreur} />
-      <button type="button" className="lien" onClick={() => setInscription(!inscription)}>
-        {inscription ? t('connexion.vers_connexion') : t('connexion.vers_inscription')}
-      </button>
+        <Erreur message={erreur} />
+        <button type="button" className="lien" onClick={() => setInscription(!inscription)}>
+          {inscription ? t('connexion.vers_connexion') : t('connexion.vers_inscription')}
+        </button>
+      </section>
     </main>
   );
 }

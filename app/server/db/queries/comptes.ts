@@ -5,6 +5,7 @@ import type { Base } from '../base.js';
 import { nouvelIdentifiant } from '../identifiant.js';
 import { baseDe, type PorteeUtilisateur } from '../portee-utilisateur.js';
 import { executerEnTransaction, preparer } from '../sql.js';
+import { urlAvatar } from './avatar.js';
 import { enfilerEmail, type EmailAEnfiler } from './transverse.js';
 
 // Comptes, sessions et jetons d'authentification (lot 2). Ces tables n'ont pas de groupe : on y accède
@@ -438,17 +439,24 @@ const ligneProfil = z.object({
   locale: z.string(),
   time_zone: z.string(),
   created_at: z.string(),
+  avatar_updated_at: z.string().nullable(),
 });
 
-export type Profil = z.infer<typeof ligneProfil>;
+export type Profil = Omit<z.infer<typeof ligneProfil>, 'avatar_updated_at'> & {
+  readonly avatar_url: string | null;
+};
 
 /** Le compte de la portée (jamais le hachage du mot de passe). */
 export function lireProfil(portee: PorteeUtilisateur): Profil {
-  const ligne = preparer(
+  const brut = preparer(
     baseDe(portee),
-    'SELECT id, email, email_verified_at, username, display_name, birthday, locale, time_zone, created_at FROM users WHERE id = ?',
+    'SELECT id, email, email_verified_at, username, display_name, birthday, locale, time_zone, created_at, avatar_updated_at FROM users WHERE id = ?',
   ).get(portee.userId);
-  return ligneProfil.parse(ligne);
+  const { avatar_updated_at, ...reste } = ligneProfil.parse(brut);
+  return {
+    ...reste,
+    avatar_url: urlAvatar(reste.id, avatar_updated_at),
+  };
 }
 
 export interface ModificationProfil {

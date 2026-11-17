@@ -105,6 +105,36 @@ describe('suite générique de cloisonnement : une attaque par route du registre
       return;
     }
 
+    // Relai média signé : exige une session ET une signature HMAC liée à l'utilisateur + albumId + assetId.
+    if (e.exige === 'media') {
+      const photosA = await w.alice.client.get(`/api/groupes/${w.a.groupId}/albums/${w.ressources.a.album}/photos`);
+      expect(photosA.statut).toBe(200);
+      const urlAlice = (photosA.corps['photos'] as Array<{ thumbnail_url: string }>)[0]?.thumbnail_url;
+      expect(urlAlice).toBeTypeOf('string');
+      if (urlAlice === undefined) throw new Error('URL signée absente.');
+
+      // 1. Sans session → 401
+      const sansMedia = await anonyme.get(urlAlice);
+      expect(sansMedia.statut).toBe(401);
+      expect(sansMedia.corps).toEqual({ error: 'session.requise' });
+
+      // 2. Rejeu de l'URL d'Alice par Manon (ou Bob) → 403 media.signature_invalide
+      const rejeuManon = await w.manon.client.get(urlAlice);
+      expect(rejeuManon.statut).toBe(403);
+      expect(rejeuManon.corps).toEqual({ error: 'media.signature_invalide' });
+
+      // 3. Accès légitime d'Alice → 200
+      const legitime = await w.alice.client.get(urlAlice);
+      expect(legitime.statut).toBe(200);
+
+      // 4. Retrait d'Alice de A → même avec sa propre URL signée valide, elle obtient 404 media.introuvable
+      w.d.sql.prepare("UPDATE memberships SET status = 'removed', ended_at = ? WHERE group_id = ? AND user_id = ?").run('2026-11-16T00:00:00Z', w.a.groupId, w.alice.userId);
+      const apresRetrait = await w.alice.client.get(urlAlice);
+      expect(apresRetrait.statut).toBe(404);
+      expect(apresRetrait.corps).toEqual({ error: 'media.introuvable' });
+      return;
+    }
+
     // 1. Sans session.
     const sans = await appeler(anonyme, e, idsA);
     expect(sans.statut, 'sans session').toBe(401);
@@ -133,6 +163,9 @@ describe('suite générique de cloisonnement : une attaque par route du registre
     for (const [attaquante, client] of [['Alice', w.alice.client], ['Manon (membre de A et de B)', w.manon.client]] as const) {
       for (const [endroit, declaration, libelle] of ENDROITS) {
         for (const [cleForgee, nature] of Object.entries(e[declaration] ?? {})) {
+          // Un compte n'est pas cloisonné par le groupe de l'URL mais par un groupe commun avec l'appelant : Manon, membre de B,
+          // lit légitimement la photo d'un membre de B. Seule Alice (aucun groupe commun avec lui) joue cette attaque.
+          if (nature === 'utilisateur' && client !== w.alice.client) continue;
           const forges: Identifiants = { ...idsA, [endroit]: { ...idsA[endroit], [cleForgee]: w.ressources.b[nature] } };
           await attaquer(`${libelle} (${cleForgee}), par ${attaquante}`, client, forges, 404, INTROUVABLE[nature]);
         }
@@ -171,7 +204,12 @@ describe('suite générique de cloisonnement : une attaque par route du registre
       try {
         const scene = autre ?? w;
         const membre = await appeler(scene.erin.client, e, { groupId: scene.a.groupId, ...ressourcesDe(e, scene, 'a') });
-        expect(membre.statut, `${cle(e)} est déclarée « appartenance » mais refuse une simple membre : sous-déclarée (admin ?) — ${JSON.stringify(membre.corps)}`).not.toBe(403);
+        if (e.droitFin !== undefined) {
+          expect(membre.statut, `${cle(e)} avec droit fin doit refuser Erin en 403`).toBe(403);
+          expect(membre.corps).toEqual({ error: e.droitFin });
+        } else {
+          expect(membre.statut, `${cle(e)} est déclarée « appartenance » mais refuse une simple membre : sous-déclarée (admin ?) — ${JSON.stringify(membre.corps)}`).not.toBe(403);
+        }
       } finally {
         autre?.d.nettoyer();
       }

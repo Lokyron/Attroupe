@@ -119,3 +119,34 @@ export function marquerEmailEchec(
 ): void {
   preparerTransverse(base, MARQUER_ECHEC).run(statut, compterEssai ? 1 : 0, prochaine, erreur.slice(0, 500), statut, id);
 }
+
+const NOTIFICATIONS_ATTENTE_RESUME = `SELECT n.id AS notification_id, n.user_id AS user_id, n.group_id AS group_id,
+          g.name AS group_name, g.time_zone AS time_zone,
+          u.email AS email, u.display_name AS display_name
+   FROM notifications AS n
+   JOIN groups AS g ON g.id = n.group_id
+   JOIN memberships AS m ON m.user_id = n.user_id AND m.group_id = n.group_id
+   JOIN users AS u ON u.id = n.user_id
+   WHERE n.read_at IS NULL AND n.email_queued_at IS NULL AND n.email_sent_at IS NULL
+     AND g.deleted_at IS NULL AND m.status = 'active'
+     AND u.email_verified_at IS NOT NULL AND u.disabled_at IS NULL AND u.anonymized_at IS NULL
+   ORDER BY n.user_id, n.group_id, n.created_at`;
+
+const ligneNotificationAttenteResume = z.object({
+  notification_id: z.string(),
+  user_id: z.string(),
+  group_id: z.string(),
+  group_name: z.string(),
+  time_zone: z.string(),
+  email: z.string(),
+  display_name: z.string(),
+});
+
+export type NotificationAttenteResume = z.infer<typeof ligneNotificationAttenteResume>;
+
+/** Notifications non lues et pas encore mises en file d'e-mail, pour l'envoi des résumés quotidiens. */
+export function listerNotificationsEnAttenteResume(base: Base): NotificationAttenteResume[] {
+  return preparerTransverse(base, NOTIFICATIONS_ATTENTE_RESUME)
+    .all()
+    .map((ligne) => ligneNotificationAttenteResume.parse(ligne));
+}

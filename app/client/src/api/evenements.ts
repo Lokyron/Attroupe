@@ -18,6 +18,7 @@ export interface Evenement {
   host_membership_id: string | null;
   capacity: number | null;
   status: 'draft' | 'published' | 'cancelled';
+  source_date_poll_id: string | null;
 }
 
 export interface MaPresence {
@@ -89,6 +90,7 @@ function evenement(e: unknown): Evenement {
     host_membership_id: texteOuNul(champ(e, 'host_membership_id')),
     capacity: nombreOuNul(champ(e, 'capacity')),
     status,
+    source_date_poll_id: texteOuNul(champ(e, 'source_date_poll_id')),
   };
 }
 

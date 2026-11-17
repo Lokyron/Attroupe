@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react';
+import {
+  changerMaVisibiliteDefaut,
+  listerDisponibilitesGroupe,
+  visibilitePartage,
+  type DisponibiliteMembre,
+  type VisibilitePartage,
+} from '../api/agenda-personnel';
 import { listerEvenements, type Evenement } from '../api/evenements';
+import { lireGroupe } from '../api/groupes';
 import { ajouterJours, aujourdhui, grilleMois, jourDeDebut, joursDe, joursDeSemaine, moisVoisin } from '../agenda/dates';
 import { libelleHoraire, libelleJour, libelleJourCourt, libelleMois } from '../agenda/format';
+import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { t } from '../i18n';
 
-type Vue = 'mois' | 'semaine' | 'liste';
-const VUES: readonly Vue[] = ['mois', 'semaine', 'liste'];
+type Vue = 'liste' | 'semaine' | 'mois';
+const VUES: readonly Vue[] = ['liste', 'semaine', 'mois'];
 
 const lienEvenement = (groupId: string, id: string): string => `#/groupe/${encodeURIComponent(groupId)}/evenement/${encodeURIComponent(id)}`;
 
@@ -26,20 +35,54 @@ function LigneEvenement({ groupId, e, court }: { groupId: string; e: Evenement; 
   );
 }
 
-/** L'agenda du groupe : mois, semaine, liste. La grille est calculée à la main (agenda/dates.ts), sans dépendance. */
+function LigneDisponibilite({ d }: { d: DisponibiliteMembre }) {
+  const horaire = libelleHoraire(d);
+  const libelle =
+    d.visibility === 'details' && d.title !== null
+      ? t('disponibilites.ligne_details', { nom: d.display_name, titre: d.title, horaire })
+      : t('disponibilites.ligne_busy', { nom: d.display_name, horaire });
+  return <div className="discret ligne-meta">{libelle}</div>;
+}
+
+/** L'agenda du groupe : liste, semaine, mois. La grille est calculée à la main (agenda/dates.ts), sans dépendance. */
 export function Agenda({ groupId }: { groupId: string }) {
-  const [vue, setVue] = useState<Vue>('mois');
+  const [vue, setVue] = useState<Vue>(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'liste' : 'mois'));
   const [ancre, setAncre] = useState(aujourdhui);
   const [evenements, setEvenements] = useState<Evenement[]>([]);
+  const [disponibilites, setDisponibilites] = useState<DisponibiliteMembre[]>([]);
+  const [maVisibilite, setMaVisibilite] = useState<VisibilitePartage>('busy');
+  const [nomGroupe, setNomGroupe] = useState<string | undefined>(undefined);
+  const [photosActives, setPhotosActives] = useState<boolean | undefined>(undefined);
   const [erreur, setErreur] = useState<string | null>(null);
 
   useEffect(() => {
-    setErreur(null);
-    // Réponses dans le désordre (deux clics rapides) : celle d'une fenêtre abandonnée est ignorée.
     let abandonne = false;
-    listerEvenements(groupId, fenetre(vue, ancre))
-      .then((lus) => {
-        if (!abandonne) setEvenements(lus);
+    lireGroupe(groupId)
+      .then((g) => {
+        if (!abandonne) {
+          setMaVisibilite(g.ma_visibilite_defaut);
+          setNomGroupe(g.name);
+          setPhotosActives(g.fonctionnalites.photos);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!abandonne) setErreur(messageDe(err));
+      });
+    return () => {
+      abandonne = true;
+    };
+  }, [groupId]);
+
+  useEffect(() => {
+    setErreur(null);
+    let abandonne = false;
+    const f = fenetre(vue, ancre);
+    Promise.all([listerEvenements(groupId, f), listerDisponibilitesGroupe(groupId, f)])
+      .then(([lus, dispos]) => {
+        if (!abandonne) {
+          setEvenements(lus);
+          setDisponibilites(dispos);
+        }
       })
       .catch((err: unknown) => {
         if (!abandonne) setErreur(messageDe(err));
@@ -49,104 +92,160 @@ export function Agenda({ groupId }: { groupId: string }) {
     };
   }, [groupId, vue, ancre]);
 
+  const modifierVisibilite = (nouvelle: VisibilitePartage): void => {
+    setErreur(null);
+    changerMaVisibiliteDefaut(groupId, nouvelle)
+      .then(setMaVisibilite)
+      .catch((err: unknown) => setErreur(messageDe(err)));
+  };
+
   const parJour = new Map<string, Evenement[]>();
   for (const e of evenements) {
     for (const jour of vue === 'liste' ? [jourDeDebut(e)] : joursDe(e)) parJour.set(jour, [...(parJour.get(jour) ?? []), e]);
   }
 
+  const disposParJour = new Map<string, DisponibiliteMembre[]>();
+  for (const d of disponibilites) {
+    for (const jour of vue === 'liste' ? [jourDeDebut(d)] : joursDe(d)) {
+      disposParJour.set(jour, [...(disposParJour.get(jour) ?? []), d]);
+    }
+  }
+
   const precedent = (): void => setAncre(vue === 'mois' ? moisVoisin(ancre, -1) : ajouterJours(ancre, -7));
   const suivant = (): void => setAncre(vue === 'mois' ? moisVoisin(ancre, 1) : ajouterJours(ancre, 7));
   const semaine = joursDeSemaine(ancre);
-  const titre = vue === 'mois' ? libelleMois(ancre) : vue === 'semaine' ? t('agenda.semaine_du', { jour: libelleJour(semaine[0] ?? ancre, { day: 'numeric', month: 'long' }) }) : t('agenda.a_venir');
+  const titre =
+    vue === 'mois'
+      ? libelleMois(ancre)
+      : vue === 'semaine'
+        ? t('agenda.semaine_du', { jour: libelleJour(semaine[0] ?? ancre, { day: 'numeric', month: 'long' }) })
+        : t('agenda.a_venir');
 
   return (
-    <section>
-      <p>
-        <a href={`#/groupe/${encodeURIComponent(groupId)}`}>{t('agenda.retour_groupe')}</a>
-      </p>
-      <h2>{t('agenda.titre')}</h2>
-      <p>
-        <a className="bouton" href={`#/groupe/${encodeURIComponent(groupId)}/evenement-nouveau`}>
-          {t('agenda.nouvel_evenement')}
-        </a>
-      </p>
-      <div className="barre" role="group" aria-label={t('agenda.vues')}>
-        {VUES.map((v) => (
-          <button key={v} type="button" aria-pressed={vue === v} onClick={() => setVue(v)}>
-            {t(`agenda.vue_${v}` as const)}
-          </button>
-        ))}
-      </div>
-      {vue !== 'liste' && (
-        <div className="barre">
-          <button type="button" onClick={precedent} aria-label={t('agenda.precedent')}>
-            {t('agenda.fleche_precedent')}
-          </button>
-          <strong>{titre}</strong>
-          <button type="button" onClick={suivant} aria-label={t('agenda.suivant')}>
-            {t('agenda.fleche_suivant')}
-          </button>
-          <button type="button" onClick={() => setAncre(aujourdhui())}>
-            {t('agenda.aujourdhui')}
-          </button>
-        </div>
-      )}
+    <section className="page-groupe-pile">
+      <EnteteGroupe
+        groupId={groupId}
+        ongletActif="agenda"
+        nomGroupe={nomGroupe}
+        photosActives={photosActives}
+        titre={t('agenda.titre')}
+        actions={
+          <a className="bouton bouton-primaire" href={`#/groupe/${encodeURIComponent(groupId)}/evenement-nouveau`}>
+            {t('groupe.action_evenement')}
+          </a>
+        }
+      />
+
       <Erreur message={erreur} />
 
-      {vue === 'mois' && (
-        <div className="grille-mois" role="table" aria-label={titre}>
-          <div className="grille-ligne" role="row">
-            {(grilleMois(ancre)[0] ?? []).map((jour) => (
-              <span key={jour} className="grille-entete" role="columnheader">
-                {libelleJourCourt(jour)}
-              </span>
-            ))}
-          </div>
-          {grilleMois(ancre).map((ligne) => (
-            <div key={ligne[0]} className="grille-ligne" role="row">
-              {ligne.map((jour) => (
-                <div key={jour} role="cell" className={`grille-jour${jour.slice(0, 7) === ancre.slice(0, 7) ? '' : ' hors-mois'}${jour === aujourdhui() ? ' aujourdhui' : ''}`}>
-                  <span className="numero">{Number(jour.slice(8))}</span>
-                  {(parJour.get(jour) ?? []).map((e) => (
-                    <LigneEvenement key={e.id} groupId={groupId} e={e} court />
-                  ))}
-                </div>
+      <div className="carte">
+        <div className="calendrier-barre-outils">
+          <div className="agenda-outils-haut">
+            <div className="barre-onglets" role="group" aria-label={t('agenda.vues')}>
+              {VUES.map((v) => (
+                <button key={v} type="button" aria-pressed={vue === v} onClick={() => setVue(v)}>
+                  {t(`agenda.vue_${v}` as const)}
+                </button>
               ))}
             </div>
-          ))}
+            <label className="agenda-visibilite-champ">
+              <span className="discret ligne-meta">{t('disponibilites.ma_visibilite')}</span>
+              <select value={maVisibilite} onChange={(e) => modifierVisibilite(visibilitePartage(e.target.value))}>
+                <option value="none">{t('disponibilites.visibilite_none')}</option>
+                <option value="busy">{t('disponibilites.visibilite_busy')}</option>
+                <option value="details">{t('disponibilites.visibilite_details')}</option>
+              </select>
+            </label>
+          </div>
+
+          {vue !== 'liste' && (
+            <div className="calendrier-nav">
+              <div className="calendrier-nav-boutons">
+                <button type="button" className="bouton-compact" onClick={precedent} aria-label={t('agenda.precedent')}>
+                  {t('agenda.fleche_precedent')}
+                </button>
+                <button type="button" className="bouton-compact" onClick={() => setAncre(aujourdhui())}>
+                  {t('agenda.aujourdhui')}
+                </button>
+                <button type="button" className="bouton-compact" onClick={suivant} aria-label={t('agenda.suivant')}>
+                  {t('agenda.fleche_suivant')}
+                </button>
+              </div>
+              <strong className="calendrier-periode">{titre}</strong>
+            </div>
+          )}
         </div>
-      )}
 
-      {vue === 'semaine' && (
-        <ul className="jours">
-          {semaine.map((jour) => (
-            <li key={jour}>
-              <h3>{libelleJour(jour, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
-              {(parJour.get(jour) ?? []).length === 0 && <p className="discret">{t('agenda.rien')}</p>}
-              {(parJour.get(jour) ?? []).map((e) => (
-                <LigneEvenement key={e.id} groupId={groupId} e={e} />
+        {vue === 'mois' && (
+          <div className="grille-mois" role="table" aria-label={titre}>
+            <div className="grille-ligne" role="row">
+              {(grilleMois(ancre)[0] ?? []).map((jour) => (
+                <span key={jour} className="grille-entete" role="columnheader">
+                  {libelleJourCourt(jour)}
+                </span>
               ))}
-            </li>
-          ))}
-        </ul>
-      )}
+            </div>
+            {grilleMois(ancre).map((ligne) => (
+              <div key={ligne[0]} className="grille-ligne" role="row">
+                {ligne.map((jour) => (
+                  <div
+                    key={jour}
+                    role="cell"
+                    className={`grille-jour${jour.slice(0, 7) === ancre.slice(0, 7) ? '' : ' hors-mois'}${jour === aujourdhui() ? ' aujourdhui' : ''}`}
+                  >
+                    <span className="numero">{Number(jour.slice(8))}</span>
+                    {(parJour.get(jour) ?? []).map((e) => (
+                      <LigneEvenement key={e.id} groupId={groupId} e={e} court />
+                    ))}
+                    {(disposParJour.get(jour) ?? []).map((d) => (
+                      <LigneDisponibilite key={`${d.id}-${d.membership_id}`} d={d} />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
-      {vue === 'liste' && (
-        <>
-          <h3>{titre}</h3>
-          {evenements.length === 0 && <p>{t('agenda.aucun')}</p>}
-          <ul className="jours">
-            {[...parJour.entries()].map(([jour, doux]) => (
-              <li key={jour}>
-                <h3>{libelleJour(jour)}</h3>
-                {doux.map((e) => (
+        {vue === 'semaine' && (
+          <ul className="jours semaine">
+            {semaine.map((jour) => (
+              <li key={jour} className={jour === aujourdhui() ? 'aujourdhui' : undefined}>
+                <h3>{libelleJour(jour, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
+                {(parJour.get(jour) ?? []).length === 0 && (disposParJour.get(jour) ?? []).length === 0 && (
+                  <p className="discret">{t('agenda.rien')}</p>
+                )}
+                {(parJour.get(jour) ?? []).map((e) => (
                   <LigneEvenement key={e.id} groupId={groupId} e={e} />
+                ))}
+                {(disposParJour.get(jour) ?? []).map((d) => (
+                  <LigneDisponibilite key={`${d.id}-${d.membership_id}`} d={d} />
                 ))}
               </li>
             ))}
           </ul>
-        </>
-      )}
+        )}
+
+        {vue === 'liste' && (
+          <>
+            <h3 className="sous-titre-compact">{titre}</h3>
+            {evenements.length === 0 && disponibilites.length === 0 && <p className="discret">{t('agenda.aucun')}</p>}
+            <ul className="jours">
+              {[...new Set([...parJour.keys(), ...disposParJour.keys()])].sort().map((jour) => (
+                <li key={jour}>
+                  <h3>{libelleJour(jour)}</h3>
+                  {(parJour.get(jour) ?? []).map((e) => (
+                    <LigneEvenement key={e.id} groupId={groupId} e={e} />
+                  ))}
+                  {(disposParJour.get(jour) ?? []).map((d) => (
+                    <LigneDisponibilite key={`${d.id}-${d.membership_id}`} d={d} />
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
     </section>
   );
 }

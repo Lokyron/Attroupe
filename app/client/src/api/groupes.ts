@@ -1,4 +1,4 @@
-import { appeler, champ, liste, nombre, role, texte, texteOuNul } from './client';
+import { appeler, booleen, champ, liste, nombre, role, texte, texteOuNul } from './client';
 
 // Les formes de l'API de groupes (architecture §6), relues champ par champ à l'arrivée.
 
@@ -7,8 +7,10 @@ export type Role = 'admin' | 'member';
 export interface Moi {
   username: string;
   display_name: string;
+  avatar_url: string | null;
   groupes: GroupeResume[];
   invitations_en_attente: number;
+  service_email: 'actif' | 'non_configure';
 }
 
 export interface GroupeResume {
@@ -20,6 +22,7 @@ export interface GroupeResume {
 export interface Membre {
   id: string;
   display_name: string;
+  avatar_url: string | null;
   role: Role;
   status: 'active' | 'removed' | 'left';
 }
@@ -56,16 +59,77 @@ export interface DetailGroupe {
   time_zone: string;
   mon_role: Role;
   mon_appartenance_id: string;
+  ma_visibilite_defaut: 'none' | 'busy' | 'details';
+  fonctionnalites: {
+    photos: boolean;
+  };
+}
+
+function avatarUrlOptionnel(valeur: unknown): string | null {
+  if (typeof valeur !== 'object' || valeur === null || !('avatar_url' in valeur)) return null;
+  return texteOuNul((valeur as Record<string, unknown>)['avatar_url']);
 }
 
 export async function lireMoi(): Promise<Moi> {
   const r = await appeler('GET', '/api/moi');
+  const serviceEmailBrut = champ(r, 'service_email');
+  const service_email = serviceEmailBrut === 'actif' ? 'actif' : 'non_configure';
   return {
     username: texte(champ(r, 'username')),
     display_name: texte(champ(r, 'display_name')),
+    avatar_url: avatarUrlOptionnel(r),
     groupes: liste(champ(r, 'groupes')).map((g) => ({ group_id: texte(champ(g, 'group_id')), name: texte(champ(g, 'name')), role: role(champ(g, 'role')) })),
     invitations_en_attente: nombre(champ(r, 'invitations_en_attente')),
+    service_email,
   };
+}
+
+export type MimeAvatar = 'image/webp' | 'image/jpeg' | 'image/png';
+
+/** Recadre un fichier image au centre en carré 256×256 et l'encode en base64 (WebP ou repli JPEG). */
+export async function preparerImageAvatar(fichier: File): Promise<{ mime: 'image/webp' | 'image/jpeg'; data_base64: string }> {
+  const url = URL.createObjectURL(fichier);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error('avatar.invalide'));
+      element.src = url;
+    });
+    if (img.naturalWidth === 0 || img.naturalHeight === 0) throw new Error('avatar.invalide');
+    const cote = Math.min(img.naturalWidth, img.naturalHeight);
+    const sx = Math.floor((img.naturalWidth - cote) / 2);
+    const sy = Math.floor((img.naturalHeight - cote) / 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    if (ctx === null) throw new Error('avatar.invalide');
+    ctx.drawImage(img, sx, sy, cote, cote, 0, 0, 256, 256);
+
+    const webp = canvas.toDataURL('image/webp', 0.85);
+    const prefixeWebp = 'data:image/webp;base64,';
+    if (webp.startsWith(prefixeWebp)) {
+      return { mime: 'image/webp', data_base64: webp.slice(prefixeWebp.length) };
+    }
+    const jpeg = canvas.toDataURL('image/jpeg', 0.85);
+    const prefixeJpeg = 'data:image/jpeg;base64,';
+    if (jpeg.startsWith(prefixeJpeg)) {
+      return { mime: 'image/jpeg', data_base64: jpeg.slice(prefixeJpeg.length) };
+    }
+    throw new Error('avatar.invalide');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+export async function enregistrerAvatar(mime: MimeAvatar, dataBase64: string): Promise<string> {
+  const r = await appeler('PUT', '/api/moi/avatar', { mime, data_base64: dataBase64 });
+  return texte(champ(r, 'avatar_url'));
+}
+
+export async function supprimerAvatar(): Promise<void> {
+  await appeler('DELETE', '/api/moi/avatar');
 }
 
 export async function connecter(email: string, password: string): Promise<void> {
@@ -86,6 +150,9 @@ export async function creerGroupe(name: string): Promise<string> {
 
 export async function lireGroupe(groupId: string): Promise<DetailGroupe> {
   const r = await appeler('GET', `/api/groupes/${encodeURIComponent(groupId)}`);
+  const vis = champ(r, 'ma_visibilite_defaut');
+  const maVisibilite = vis === 'none' || vis === 'busy' || vis === 'details' ? vis : 'busy';
+  const fonct = champ(r, 'fonctionnalites');
   return {
     id: texte(champ(r, 'id')),
     name: texte(champ(r, 'name')),
@@ -93,6 +160,10 @@ export async function lireGroupe(groupId: string): Promise<DetailGroupe> {
     time_zone: texte(champ(r, 'time_zone')),
     mon_role: role(champ(r, 'mon_role')),
     mon_appartenance_id: texte(champ(r, 'mon_appartenance_id')),
+    ma_visibilite_defaut: maVisibilite,
+    fonctionnalites: {
+      photos: booleen(champ(fonct, 'photos')),
+    },
   };
 }
 
@@ -101,7 +172,13 @@ export async function listerMembres(groupId: string): Promise<Membre[]> {
   return liste(champ(r, 'membres')).map((m) => {
     const status = champ(m, 'status');
     if (status !== 'active' && status !== 'removed' && status !== 'left') throw new Error('Statut de membre inconnu.');
-    return { id: texte(champ(m, 'id')), display_name: texte(champ(m, 'display_name')), role: role(champ(m, 'role')), status };
+    return {
+      id: texte(champ(m, 'id')),
+      display_name: texte(champ(m, 'display_name')),
+      avatar_url: avatarUrlOptionnel(m),
+      role: role(champ(m, 'role')),
+      status,
+    };
   });
 }
 
