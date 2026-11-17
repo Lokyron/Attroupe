@@ -300,6 +300,15 @@ reçoit rien et son flux se ferme. Pas de reprise par `Last-Event-ID` : le clien
 Registre de cloisonnement : `app/tests/cloisonnement/registre.ts` recense chaque route et son exigence ; le test de
 complétude échoue si une route montée n'y figure pas (les routeurs se montent avec `monter()`, `http/montage.ts`).
 
+Requêtes sortantes : **tout** appel vers un hôte dont l'URL vient de l'extérieur passe par
+`app/server/services/requete-epinglee.ts` (`resoudreEtVerifier` puis `envoyerEpingle`) — une seule résolution DNS,
+connexion épinglée sur une adresse déjà vérifiée (donc pas de rebinding), refus dès qu'**une** adresse résolue n'est
+pas autorisée, aucune redirection suivie. Son paramètre `autoriserPrive` est obligatoire, sans valeur par défaut :
+Immich le met à `ATTROUPE_IMMICH_ALLOW_PRIVATE` (l'instance est légitimement privée en homelab), le Web Push le met à
+`false` en dur, parce que son URL est choisie par n'importe quel compte. **N'écris pas une seconde implémentation** :
+ce module était dupliqué, et c'est par là qu'une SSRF est revenue (voir
+[`ADR-0012`](docs/decisions/ADR-0012-push-navigateur.md)).
+
 Cadence (en mémoire, 15 min, report exponentiel au-delà), clés par **couple (e-mail, IP)**, par e-mail
 seul (large), par IP (/64 en IPv6) et par réseau /48 IPv6 : connexion 10 / 100 / 30 / 90 ; inscription
 5 / 30 / 10 / 30 ; mot de passe oublié 5 / 30 / 20 / 60 ; jeton 30 / 90 par IP / réseau ; changement de

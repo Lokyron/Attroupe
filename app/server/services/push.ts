@@ -1,6 +1,3 @@
-import { lookup } from 'node:dns/promises';
-import https from 'node:https';
-import { isIP } from 'node:net';
 import type { Base } from '../db/base.js';
 import {
   enregistrerConfigPush,
@@ -10,7 +7,6 @@ import {
   supprimerAbonnementPushExpire,
   type ConfigPush,
 } from '../db/queries/push.js';
-import { estAdresseIpPriveeOuReservee } from '../domain/immich.js';
 import { versInstant } from '../domain/instant.js';
 import {
   chiffrerPayloadPush,
@@ -21,7 +17,8 @@ import {
   type PayloadPush,
 } from '../domain/push.js';
 import type { Journal } from '../http/middleware/journal.js';
-import type { DnsLookupImmich, EntreeDns } from './immich-client.js';
+import type { DnsLookupImmich } from './immich-client.js';
+import { dnsLookupSysteme, envoyerEpingle, resoudreEtVerifier, ErreurResolutionEpinglee, type AdressesVerifiees } from './requete-epinglee.js';
 
 // Web Push sans librairie (RFC 8030 / 8291 / 8292). Le serveur POSTe vers une URL choisie par l'utilisateur (l'endpoint de son
 // abonnement) : c'est une porte SSRF, protégée comme l'est Immich — hôte public seulement (domain/push.ts), TOUTES les adresses
@@ -112,28 +109,20 @@ export function obtenirClePubliqueVapid(base: Base, env: EnvPush): string {
  */
 export async function verifierEndpointPublic(
   endpoint: string,
-  dnsLookup: DnsLookupImmich = (hote, opts) => lookup(hote, opts) as Promise<readonly EntreeDns[]>,
-): Promise<readonly EntreeDns[]> {
+  dnsLookup: DnsLookupImmich = dnsLookupSysteme,
+): Promise<AdressesVerifiees> {
   const validation = validerEndpointPush(endpoint);
   if (!validation.valide) throw new ErreurEndpointPush('interdit', `Endpoint push refusé (${validation.raison}).`);
 
-  const hote = validation.url.hostname.replace(/^\[|\]$/g, '');
-  const famille = isIP(hote);
-  if (famille !== 0) return [{ address: hote, family: famille }];
-
-  let adresses: readonly EntreeDns[];
   try {
-    adresses = await dnsLookup(hote, { all: true });
+    // `autoriserPrive: false` en dur : `ATTROUPE_IMMICH_ALLOW_PRIVATE` ne s'applique JAMAIS à une URL fournie par un client.
+    return await resoudreEtVerifier(validation.url.hostname, { autoriserPrive: false, dnsLookup });
   } catch (erreur) {
-    throw new ErreurEndpointPush('injoignable', `Résolution DNS impossible : ${erreur instanceof Error ? erreur.message : String(erreur)}`);
+    if (!(erreur instanceof ErreurResolutionEpinglee)) throw erreur;
+    if (erreur.code === 'dns_echec') throw new ErreurEndpointPush('injoignable', `Résolution DNS impossible : ${erreur.message}`);
+    if (erreur.code === 'aucune_adresse') throw new ErreurEndpointPush('injoignable', 'Aucune adresse résolue pour l’endpoint push.');
+    throw new ErreurEndpointPush('interdit', 'Endpoint push refusé : le nom résout vers une adresse non publique.');
   }
-  if (adresses.length === 0) throw new ErreurEndpointPush('injoignable', 'Aucune adresse résolue pour l’endpoint push.');
-  for (const entree of adresses) {
-    if (estAdresseIpPriveeOuReservee(entree.address)) {
-      throw new ErreurEndpointPush('interdit', 'Endpoint push refusé : le nom résout vers une adresse non publique.');
-    }
-  }
-  return adresses;
 }
 
 interface RequeteEnvoi {
@@ -143,31 +132,18 @@ interface RequeteEnvoi {
 }
 
 /** POST HTTPS dont la connexion est épinglée sur `adresses` (déjà vérifiées). Une redirection n'est pas suivie : son statut est rendu tel quel. */
-function posterEpingle(endpoint: string, requete: RequeteEnvoi, adresses: readonly EntreeDns[]): Promise<number> {
-  const premiere = adresses[0];
-  if (premiere === undefined) return Promise.reject(new ErreurEndpointPush('injoignable', 'Aucune adresse disponible.'));
-  return new Promise<number>((resolve, reject) => {
-    const req = https.request(
-      new URL(endpoint),
-      {
-        method: 'POST',
-        headers: { ...requete.headers, 'Content-Length': String(requete.body.length) },
-        signal: requete.signal,
-        lookup: (_hote, options, callback) => {
-          if (typeof options === 'object' && options !== null && 'all' in options && options.all === true) {
-            (callback as (err: NodeJS.ErrnoException | null, resultats: readonly EntreeDns[]) => void)(null, adresses);
-          } else {
-            callback(null, premiere.address, premiere.family);
-          }
-        },
-      },
-      (res) => {
-        res.resume();
-        resolve(res.statusCode ?? 500);
-      },
-    );
-    req.on('error', reject);
-    req.end(requete.body);
+function posterEpingle(endpoint: string, requete: RequeteEnvoi, adresses: AdressesVerifiees): Promise<number> {
+  return envoyerEpingle({
+    url: new URL(endpoint),
+    method: 'POST',
+    headers: { ...requete.headers, 'Content-Length': String(requete.body.length) },
+    body: requete.body,
+    signal: requete.signal,
+    adresses,
+    autoriserPrive: false,
+  }).then((res) => {
+    res.resume();
+    return res.statusCode ?? 500;
   });
 }
 

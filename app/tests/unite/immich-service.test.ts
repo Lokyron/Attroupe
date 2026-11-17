@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { creerPorteeUtilisateur } from '../../server/db/portee-utilisateur.js';
 import { lireConfigImmich } from '../../server/db/queries/immich.js';
 import { creerScope } from '../../server/db/scope.js';
@@ -207,6 +207,17 @@ describe('ClientImmich : le délai ne borne que les en-têtes d’un média', ()
       morceaux.push(value);
     }
     expect(Buffer.concat(morceaux).toString()).toBe('0123456789'.repeat(5));
+  });
+
+  it('se connecte à l’adresse épinglée (résolue une seule fois) pour un nom que le système ne résout pas', async () => {
+    const port = (serveur.address() as AddressInfo).port;
+    const dnsLookupImpl = vi.fn(async () => [{ address: '127.0.0.1', family: 4 }]);
+    const client = new ClientImmich({ allowPrivate: true, delaiMs: 300, dnsLookupImpl });
+    // `.invalid` ne se résout nulle part : seul l'épinglage sur l'adresse vérifiée peut faire aboutir la connexion.
+    const media = await client.recupererMediaImmich(`http://immich-epingle.invalid:${port}/api`, 'cle', 'lent', 'original');
+    expect(media.status).toBe(200);
+    expect(dnsLookupImpl).toHaveBeenCalledTimes(1);
+    if (media.body !== null && !(media.body instanceof ArrayBuffer)) await media.body.cancel();
   });
 
   it('échoue toujours si les en-têtes n’arrivent pas dans le délai', async () => {

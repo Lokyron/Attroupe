@@ -1,9 +1,14 @@
-import { lookup } from 'node:dns/promises';
-import http from 'node:http';
-import https from 'node:https';
-import { isIP } from 'node:net';
 import { Readable } from 'node:stream';
 import { validerUrlImmich, type TailleMedia } from '../domain/immich.js';
+import {
+  dnsLookupSysteme,
+  envoyerEpingle,
+  resoudreEtVerifier,
+  ErreurResolutionEpinglee,
+  type DnsLookupEpingle,
+  type AdressesVerifiees,
+  type EntreeDns,
+} from './requete-epinglee.js';
 
 // Client HTTP sortant vers Immich (architecture §7.2, docs/integration-immich.md).
 // - Validation anti-SSRF sur l'URL ET sur chaque adresse IP résolue par DNS avant tout appel.
@@ -14,12 +19,9 @@ export const TENTATIVES_MAX_IMMICH = 2;
 
 export type FetchImmich = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-export interface EntreeDns {
-  readonly address: string;
-  readonly family: number;
-}
+export type { EntreeDns };
 
-export type DnsLookupImmich = (hostname: string, options: { all: true }) => Promise<readonly EntreeDns[]>;
+export type DnsLookupImmich = DnsLookupEpingle;
 
 export interface OptionsClientImmich {
   readonly allowPrivate?: boolean;
@@ -78,16 +80,14 @@ export class ClientImmich {
   constructor(options: OptionsClientImmich = {}) {
     this.allowPrivate = options.allowPrivate ?? false;
     this.fetchPersonnalise = options.fetchImpl;
-    this.dnsLookupImpl =
-      options.dnsLookupImpl ??
-      ((hostname, opts) => lookup(hostname, opts) as Promise<readonly EntreeDns[]>);
+    this.dnsLookupImpl = options.dnsLookupImpl ?? dnsLookupSysteme;
     this.delaiMs = options.delaiMs ?? DELAI_APPEL_IMMICH_MS;
   }
 
   /** Valide l'URL et résout son nom d'hôte via DNS pour bloquer tout rebond vers une IP interdite. */
   private async verifierEtNormaliserUrl(
     baseUrl: string,
-  ): Promise<{ readonly urlNormalisee: string; readonly adresses: readonly EntreeDns[] }> {
+  ): Promise<{ readonly urlNormalisee: string; readonly adresses: AdressesVerifiees }> {
     const validation = validerUrlImmich(baseUrl, this.allowPrivate);
     if (!validation.valide) {
       throw new ErreurClientImmich('url_invalide', `URL Immich invalide (${validation.raison}).`);
@@ -95,33 +95,15 @@ export class ClientImmich {
 
     const url = new URL(validation.urlNormalisee);
     const hoteSansCrochets = url.hostname.replace(/^\[|\]$/g, '');
-    const typeIp = isIP(hoteSansCrochets);
-    if (typeIp !== 0) {
-      return {
-        urlNormalisee: validation.urlNormalisee,
-        adresses: [{ address: hoteSansCrochets, family: typeIp }],
-      };
-    }
-
-    let adresses: readonly EntreeDns[];
+    let adresses: AdressesVerifiees;
     try {
-      adresses = await this.dnsLookupImpl(hoteSansCrochets, { all: true });
+      adresses = await resoudreEtVerifier(hoteSansCrochets, { autoriserPrive: this.allowPrivate, dnsLookup: this.dnsLookupImpl });
     } catch (erreur) {
-      throw new ErreurClientImmich(
-        'injoignable',
-        `Résolution DNS impossible pour ${hoteSansCrochets} : ${erreur instanceof Error ? erreur.message : String(erreur)}`,
-      );
-    }
-    if (adresses.length === 0) {
-      throw new ErreurClientImmich('injoignable', `Aucune adresse IP résolue pour ${hoteSansCrochets}.`);
-    }
-    for (const entree of adresses) {
-      const ip = entree.address.trim();
-      const urlIp = `http://${ip.includes(':') ? `[${ip}]` : ip}`;
-      const verifIp = validerUrlImmich(urlIp, this.allowPrivate);
-      if (!verifIp.valide) {
-        throw new ErreurClientImmich('ssrf_refuse', `Adresse IP résolue interdite (${verifIp.raison}).`);
+      if (!(erreur instanceof ErreurResolutionEpinglee)) throw erreur;
+      if (erreur.code === 'dns_echec') {
+        throw new ErreurClientImmich('injoignable', `Résolution DNS impossible pour ${hoteSansCrochets} : ${erreur.message}`);
       }
+      throw new ErreurClientImmich(erreur.code === 'aucune_adresse' ? 'injoignable' : 'ssrf_refuse', erreur.message);
     }
 
     return { urlNormalisee: validation.urlNormalisee, adresses };
@@ -134,7 +116,7 @@ export class ClientImmich {
   private async executerRequeteEpinglee(
     urlCible: string,
     init: RequestInit,
-    adresses: readonly EntreeDns[],
+    adresses: AdressesVerifiees,
   ): Promise<Response> {
     if (this.fetchPersonnalise !== undefined) {
       return this.fetchPersonnalise(urlCible, init);
@@ -147,57 +129,34 @@ export class ClientImmich {
       entetes[cle] = valeur;
     });
 
-    const premiere = adresses[0];
-    if (premiere === undefined) {
-      throw new ErreurClientImmich('injoignable', 'Aucune adresse IP disponible.');
-    }
-
-    const transport = cible.protocol === 'https:' ? https : http;
-    return new Promise<Response>((resolve, reject) => {
-      const req = transport.request(
-        cible,
-        {
-          method: requeteWeb.method,
-          headers: entetes,
-          signal: init.signal ?? undefined,
-          // Inactivité de la socket (et non durée totale) : un transfert lent mais vivant continue, un flux
-          // qui ne délivre plus rien est coupé au lieu de rester pendu.
-          timeout: this.delaiMs,
-          lookup: (_hostname, options, callback) => {
-            if (typeof options === 'object' && options !== null && 'all' in options && options.all === true) {
-              (callback as (err: NodeJS.ErrnoException | null, addresses: readonly EntreeDns[]) => void)(null, adresses);
-            } else {
-              callback(null, premiere.address, premiere.family);
-            }
-          },
-        },
-        (res) => {
-          const status = res.statusCode ?? 500;
-          if (status >= 300 && status < 400) {
-            res.resume();
-            resolve(new Response(null, { status }));
-            return;
-          }
-          const headersReponse = new Headers();
-          for (const [k, v] of Object.entries(res.headers)) {
-            if (Array.isArray(v)) {
-              for (const item of v) headersReponse.append(k, item);
-            } else if (v !== undefined) {
-              headersReponse.set(k, v);
-            }
-          }
-          const corpsReponse =
-            status === 204 || status === 304
-              ? null
-              : (Readable.toWeb(res) as unknown as NonNullable<ConstructorParameters<typeof Response>[0]>);
-          resolve(new Response(corpsReponse, { status, headers: headersReponse }));
-        },
-      );
-      req.on('timeout', () => req.destroy(new Error(`Aucune activité d'Immich depuis ${this.delaiMs} ms.`)));
-      req.on('error', reject);
-      if (corps !== null && corps.length > 0) req.write(corps);
-      req.end();
+    const res = await envoyerEpingle({
+      url: cible,
+      method: requeteWeb.method,
+      headers: entetes,
+      body: corps,
+      signal: init.signal ?? undefined,
+      adresses,
+      autoriserPrive: this.allowPrivate,
+      inactivite: { delaiMs: this.delaiMs, message: `Aucune activité d'Immich depuis ${this.delaiMs} ms.` },
     });
+    const status = res.statusCode ?? 500;
+    if (status >= 300 && status < 400) {
+      res.resume();
+      return new Response(null, { status });
+    }
+    const headersReponse = new Headers();
+    for (const [k, v] of Object.entries(res.headers)) {
+      if (Array.isArray(v)) {
+        for (const item of v) headersReponse.append(k, item);
+      } else if (v !== undefined) {
+        headersReponse.set(k, v);
+      }
+    }
+    const corpsReponse =
+      status === 204 || status === 304
+        ? null
+        : (Readable.toWeb(res) as unknown as NonNullable<ConstructorParameters<typeof Response>[0]>);
+    return new Response(corpsReponse, { status, headers: headersReponse });
   }
 
   /**

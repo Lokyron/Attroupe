@@ -69,7 +69,8 @@ describe('validerEndpointPush (partie statique)', () => {
 describe('verifierEndpointPublic (DNS)', () => {
   it('rend les adresses publiques à épingler', async () => {
     const adresses = await verifierEndpointPublic('https://push.exemple.org/x', dnsVers('93.184.216.34'));
-    expect(adresses).toEqual([{ address: '93.184.216.34', family: 4 }]);
+    expect(adresses.liste).toEqual([{ address: '93.184.216.34', family: 4 }]);
+    expect(adresses.autoriserPrive).toBe(false);
   });
 
   it('refuse un nom qui résout vers une adresse privée ou de métadonnées', async () => {
@@ -84,7 +85,7 @@ describe('verifierEndpointPublic (DNS)', () => {
 
   it('une adresse IP littérale ne passe pas par le DNS', async () => {
     const dns = dnsVers('10.0.0.1');
-    await expect(verifierEndpointPublic('https://93.184.216.34/x', dns)).resolves.toEqual([{ address: '93.184.216.34', family: 4 }]);
+    expect((await verifierEndpointPublic('https://93.184.216.34/x', dns)).liste).toEqual([{ address: '93.184.216.34', family: 4 }]);
     expect(dns).not.toHaveBeenCalled();
   });
 
@@ -155,6 +156,35 @@ describe('envoi, plafond et réattribution des abonnements push', () => {
     const res = await envoyerNotificationPush(t.base, d.a.userId, payload, { env, fetch: fetchEspion, dnsLookup: dnsVers('192.168.1.20') });
     expect(fetchEspion).not.toHaveBeenCalled();
     expect(res).toEqual({ envoyes: 0, echecs: 1 });
+  });
+
+  // Invariant de la mutualisation (ADR-0012) : la tolérance homelab d'Immich ne vaut jamais pour une URL fournie par un client.
+  // Le levier réel est `env: envPermissif` passé à `envoyerNotificationPush` : un câblage accidentel de `autoriserPrive` sur
+  // `options.env` ferait aboutir l'envoi vers l'adresse privée, et le test échouerait.
+  it('refuse une adresse privée même quand ATTROUPE_IMMICH_ALLOW_PRIVATE vaut true dans l’env de l’appel', async () => {
+    const envPermissif = envValide({ ATTROUPE_IMMICH_ALLOW_PRIVATE: 'true' });
+    expect(envPermissif.ATTROUPE_IMMICH_ALLOW_PRIVATE).toBe(true);
+
+    enregistrerAbonnementPush(ouvrirPortee(d.a.userId), { endpoint: 'https://push.exemple.org/prive', ...cles(), userAgent: null });
+    const fetchEspion = vi.fn<typeof fetch>(() => Promise.resolve(new Response(null, { status: 201 })));
+    const spyHttps = vi.spyOn(https, 'request');
+    const spyHttp = vi.spyOn(http, 'request');
+    try {
+      for (const ip of ['192.168.1.20', '10.1.20.5', '127.0.0.1', '::1', 'fd00::5']) {
+        const res = await envoyerNotificationPush(t.base, d.a.userId, payload, { env: envPermissif, fetch: fetchEspion, dnsLookup: dnsVers(ip) });
+        const resReel = await envoyerNotificationPush(t.base, d.a.userId, payload, { env: envPermissif, dnsLookup: dnsVers(ip) });
+        expect(res).toEqual({ envoyes: 0, echecs: 1 });
+        expect(resReel).toEqual({ envoyes: 0, echecs: 1 });
+      }
+      // Mélange public + privé : une seule adresse interne suffit à refuser.
+      const melange = await envoyerNotificationPush(t.base, d.a.userId, payload, { env: envPermissif, dnsLookup: dnsVers('93.184.216.34', '10.0.0.7') });
+      expect(melange).toEqual({ envoyes: 0, echecs: 1 });
+      expect(fetchEspion).not.toHaveBeenCalled();
+      expect(spyHttps).not.toHaveBeenCalled();
+      expect(spyHttp).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('un DNS en échec ne supprime pas l’abonnement (panne passagère)', async () => {
