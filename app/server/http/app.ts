@@ -53,6 +53,12 @@ const DELAI_MINIMAL_OUBLI_MS = 300;
 const EN_TETES_SECURITE: Readonly<Record<string, string>> = {
   'Content-Security-Policy': [
     "default-src 'self'",
+    // `img-src` doit être explicite : sans lui, `default-src 'self'` s'applique aux images et BLOQUE les URL
+    // `blob:`. Or la préparation de la photo de profil passe par `URL.createObjectURL` pour décoder le fichier
+    // choisi (api/groupes.ts). Sans cette ligne, l'image ne se charge jamais, `onerror` part, et l'ajout de
+    // photo échoue pour tout le monde — silencieusement, puisque seule la console du navigateur le dit.
+    // `blob:` ne désigne que des objets fabriqués par la page elle-même, de même origine : rien n'entre par là.
+    "img-src 'self' blob:",
     "base-uri 'self'",
     "object-src 'none'",
     "form-action 'self'",

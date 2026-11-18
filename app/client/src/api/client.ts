@@ -13,6 +13,20 @@ export class ErreurApi extends Error {
   }
 }
 
+/**
+ * Refus décidé par le CLIENT lui-même, avant tout appel réseau : fichier image illisible, par exemple.
+ *
+ * Elle porte une clé `domaine.cas` comme celles du serveur, pour être traduite de la même façon. Sans elle,
+ * un `new Error('avatar.invalide')` ordinaire n'était pas reconnu par `messageDe`, qui retombait sur le
+ * message générique : le libellé « Ce fichier image n'est pas valide » existait mais ne s'affichait jamais.
+ */
+export class ErreurLocale extends Error {
+  constructor(public readonly cle: string) {
+    super(cle);
+    this.name = 'ErreurLocale';
+  }
+}
+
 function estObjet(valeur: unknown): valeur is Record<string, unknown> {
   return typeof valeur === 'object' && valeur !== null;
 }

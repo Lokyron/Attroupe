@@ -150,3 +150,13 @@ export function listerNotificationsEnAttenteResume(base: Base): NotificationAtte
     .all()
     .map((ligne) => ligneNotificationAttenteResume.parse(ligne));
 }
+
+const PURGER_ABONNEMENTS_REVOQUES = `DELETE FROM calendar_feed_tokens WHERE revoked_at < ?`;
+
+/**
+ * Entretien : supprime les abonnements iCal révoqués avant `avant`. Renvoie le nombre de lignes. Un abonnement actif
+ * (`revoked_at` nul) ne satisfait jamais la comparaison : il n'est jamais supprimé. Transverse car la tâche de fond traverse les comptes.
+ */
+export function purgerAbonnementsRevoques(base: Base, avant: string): number {
+  return Number(preparerTransverse(base, PURGER_ABONNEMENTS_REVOQUES).run(avant).changes);
+}

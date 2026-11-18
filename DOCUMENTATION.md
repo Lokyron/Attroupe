@@ -255,7 +255,7 @@ chaque requête, donc le jeton d'un membre retiré ne rend plus rien de son anci
 |---|---|---|
 | GET | `/api/moi/flux-ical` | Mes abonnements : `label`, groupe éventuel, drapeaux, `last_used_at`, `last_user_agent`. **Jamais le jeton ni aucune adresse** (stocké haché : le lien ne se reconstitue pas, un lien perdu se révoque et se recrée). |
 | POST | `/api/moi/flux-ical` | `{label?, group_id?, include_personal?, include_declined?}` → 201 **avec le jeton en clair, une seule fois**, et ses deux adresses : `url` (`https://…/ical/<jeton>.ics`, pour Google Agenda et les clients de bureau) et `url_webcal` (même adresse en `webcal://`, celle qui fait créer un abonnement sur iOS ; base en `http://` en développement local). 404 `groupe.introuvable` si l'appartenance n'est pas active. Plafond de 20 abonnements non révoqués (409 `flux.plafond`) + cadence `abonnement`. |
-| DELETE | `/api/moi/flux-ical/:fluxId` | Révoque (`revoked_at`, jamais de suppression). 404 si ce n'est pas le mien. |
+| DELETE | `/api/moi/flux-ical/:fluxId` | Révoque (`revoked_at`) ; la ligne reste visible 30 jours, puis la tâche d'entretien horaire (`services/taches.ts`) l'efface. 404 si ce n'est pas le mien. |
 | GET | `/api/moi/push/cle` | Clé publique VAPID et nombre d'appareils enregistrés. |
 | POST | `/api/moi/push/abonnement` | `{endpoint, keys:{p256dh, auth}}` → 201. L'`endpoint` est **contraint** : `https` seul, port 443, sans identifiants, hôte résolvant uniquement vers des adresses publiques (400 `push.endpoint_invalide`, réponse identique quelle que soit la cause). Plafond de 10 appareils par compte : au-delà, le plus ancien est remplacé. Cadence `push`. |
 | DELETE | `/api/moi/push/abonnement` | `{endpoint?}` ; sans corps, retire tous mes appareils. |

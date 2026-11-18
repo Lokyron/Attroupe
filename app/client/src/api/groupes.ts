@@ -1,4 +1,4 @@
-import { appeler, booleen, champ, liste, nombre, role, texte, texteOuNul } from './client';
+import { appeler, ErreurLocale, booleen, champ, liste, nombre, role, texte, texteOuNul } from './client';
 
 // Les formes de l'API de groupes (architecture §6), relues champ par champ à l'arrivée.
 
@@ -93,10 +93,10 @@ export async function preparerImageAvatar(fichier: File): Promise<{ mime: 'image
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
       const element = new Image();
       element.onload = () => resolve(element);
-      element.onerror = () => reject(new Error('avatar.invalide'));
+      element.onerror = () => reject(new ErreurLocale('avatar.invalide'));
       element.src = url;
     });
-    if (img.naturalWidth === 0 || img.naturalHeight === 0) throw new Error('avatar.invalide');
+    if (img.naturalWidth === 0 || img.naturalHeight === 0) throw new ErreurLocale('avatar.invalide');
     const cote = Math.min(img.naturalWidth, img.naturalHeight);
     const sx = Math.floor((img.naturalWidth - cote) / 2);
     const sy = Math.floor((img.naturalHeight - cote) / 2);
@@ -104,7 +104,7 @@ export async function preparerImageAvatar(fichier: File): Promise<{ mime: 'image
     canvas.width = 256;
     canvas.height = 256;
     const ctx = canvas.getContext('2d');
-    if (ctx === null) throw new Error('avatar.invalide');
+    if (ctx === null) throw new ErreurLocale('avatar.invalide');
     ctx.drawImage(img, sx, sy, cote, cote, 0, 0, 256, 256);
 
     const webp = canvas.toDataURL('image/webp', 0.85);
@@ -117,7 +117,7 @@ export async function preparerImageAvatar(fichier: File): Promise<{ mime: 'image
     if (jpeg.startsWith(prefixeJpeg)) {
       return { mime: 'image/jpeg', data_base64: jpeg.slice(prefixeJpeg.length) };
     }
-    throw new Error('avatar.invalide');
+    throw new ErreurLocale('avatar.invalide');
   } finally {
     URL.revokeObjectURL(url);
   }

@@ -630,6 +630,8 @@ export const TEXTES_TRANSVERSES: readonly string[] = Object.freeze([
      AND g.deleted_at IS NULL AND m.status = 'active'
      AND u.email_verified_at IS NOT NULL AND u.disabled_at IS NULL AND u.anonymized_at IS NULL
    ORDER BY n.user_id, n.group_id, n.created_at`,
+  // Purge des abonnements iCal révoqués (entretien périodique) : global par nature, sans compte ni groupe.
+  `DELETE FROM calendar_feed_tokens WHERE revoked_at < ?`,
 ]);
 
 /** Prépare un texte de `TEXTES_TRANSVERSES`, et rien d'autre. */

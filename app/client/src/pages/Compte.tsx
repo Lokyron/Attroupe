@@ -480,6 +480,37 @@ function CartePhotoProfil({ moi, onProfilChange }: { moi: Moi; onProfilChange?: 
   );
 }
 
+/** Une ligne d'abonnement : nom, portée, usage, et l'action à droite. */
+function LigneAbonnement({ abonnement, onRevoquer }: { abonnement: Abonnement; onRevoquer: (id: string) => void }) {
+  const a = abonnement;
+  return (
+    <li className="ligne-interactive">
+      <div className="ligne-principale">
+        <strong>{a.label ?? t('flux.sans_nom')}</strong>
+        <span className="ligne-meta">
+          {a.group_id === null
+            ? t('flux.tous')
+            : a.group_name === null
+              ? t('flux.groupe_quitte')
+              : t('flux.groupe', { groupe: a.group_name })}
+          {a.include_personal && `${t('flux.separateur')}${t('flux.avec_perso')}`}
+        </span>
+        <span className="ligne-meta">
+          {a.last_used_at === null ? t('flux.jamais_utilise') : t('flux.derniere_utilisation', { date: dateCourte(a.last_used_at) })}
+          {a.last_user_agent !== null && `${t('flux.separateur')}${t('flux.appareil', { agent: a.last_user_agent })}`}
+        </span>
+      </div>
+      {a.revoked_at !== null ? (
+        <span className="pilule pilule-neutre">{t('flux.revoque')}</span>
+      ) : (
+        <button type="button" className="bouton bouton-compact bouton-danger-discret" onClick={() => onRevoquer(a.id)}>
+          {t('flux.revoquer')}
+        </button>
+      )}
+    </li>
+  );
+}
+
 /** Mon compte : photo de profil, notifications push, agenda personnel et abonnements calendrier. */
 export function Compte({
   moi,
@@ -505,7 +536,12 @@ export function Compte({
     revoquerAbonnement(id).then(charger).catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  const vide = abonnements !== null && abonnements.length === 0;
+  // Un abonnement révoqué n'est plus actionnable : il ne sert qu'à se souvenir qu'on l'a coupé. Il reste
+  // consultable (la purge d'entretien l'efface au bout de 30 jours) mais replié, sinon la liste s'allonge
+  // sans fin et les abonnements vivants s'y noient.
+  const actifs = abonnements?.filter((a) => a.revoked_at === null) ?? null;
+  const revoques = abonnements?.filter((a) => a.revoked_at !== null) ?? [];
+  const vide = actifs !== null && actifs.length === 0;
   const formulaireVisible = ouvert || vide;
 
   return (
@@ -533,35 +569,23 @@ export function Compte({
 
         {abonnements === null && <p className="texte-doux">{t('commun.chargement')}</p>}
         {vide && <p className="texte-doux">{t('flux.aucun')}</p>}
-        {abonnements !== null && abonnements.length > 0 && (
+        {actifs !== null && actifs.length > 0 && (
           <ul className="liste-elements">
-            {abonnements.map((a) => (
-              <li key={a.id} className="ligne-interactive">
-                <div className="ligne-principale">
-                  <strong>{a.label ?? t('flux.sans_nom')}</strong>
-                  <span className="ligne-meta">
-                    {a.group_id === null
-                      ? t('flux.tous')
-                      : a.group_name === null
-                        ? t('flux.groupe_quitte')
-                        : t('flux.groupe', { groupe: a.group_name })}
-                    {a.include_personal && `${t('flux.separateur')}${t('flux.avec_perso')}`}
-                  </span>
-                  <span className="ligne-meta">
-                    {a.last_used_at === null ? t('flux.jamais_utilise') : t('flux.derniere_utilisation', { date: dateCourte(a.last_used_at) })}
-                    {a.last_user_agent !== null && `${t('flux.separateur')}${t('flux.appareil', { agent: a.last_user_agent })}`}
-                  </span>
-                </div>
-                {a.revoked_at !== null ? (
-                  <span className="pilule pilule-neutre">{t('flux.revoque')}</span>
-                ) : (
-                  <button type="button" className="bouton bouton-compact bouton-danger-discret" onClick={() => revoquer(a.id)}>
-                    {t('flux.revoquer')}
-                  </button>
-                )}
-              </li>
+            {actifs.map((a) => (
+              <LigneAbonnement key={a.id} abonnement={a} onRevoquer={revoquer} />
             ))}
           </ul>
+        )}
+        {revoques.length > 0 && (
+          <details className="flux-details">
+            <summary>{t('flux.revoques', { nombre: String(revoques.length) })}</summary>
+            <p className="texte-doux">{t('flux.revoques_aide')}</p>
+            <ul className="liste-elements">
+              {revoques.map((a) => (
+                <LigneAbonnement key={a.id} abonnement={a} onRevoquer={revoquer} />
+              ))}
+            </ul>
+          </details>
         )}
       </section>
     </section>

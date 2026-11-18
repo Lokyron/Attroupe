@@ -1,9 +1,10 @@
-import { ErreurApi } from '../api/client';
+import { ErreurApi, ErreurLocale } from '../api/client';
 import { texteErreur } from '../i18n';
 
-/** Message d'une erreur d'API (traduit), ou générique pour toute autre erreur. */
+/** Message d'une erreur porteuse d'une clé — venue du serveur (`ErreurApi`) ou décidée ici (`ErreurLocale`) — ou générique pour le reste. */
 export function messageDe(erreur: unknown): string {
-  return erreur instanceof ErreurApi ? texteErreur(erreur.cle) : texteErreur('erreur.interne');
+  if (erreur instanceof ErreurApi || erreur instanceof ErreurLocale) return texteErreur(erreur.cle);
+  return texteErreur('erreur.interne');
 }
 
 export function Erreur({ message }: { message: string | null }) {

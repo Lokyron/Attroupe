@@ -1,6 +1,7 @@
 import type { Base } from '../db/base.js';
 import { purgerAuthentification } from '../db/queries/comptes.js';
 import { envoyerResumesQuotidiens } from '../db/queries/notifications.js';
+import { purgerAbonnementsRevoques } from '../db/queries/transverse.js';
 import { JOUR_MS, MINUTE_MS, SECONDE_MS, versInstant } from '../domain/instant.js';
 import type { Journal } from '../http/middleware/journal.js';
 import { remettreFile, type Transporteur } from './brevo.js';
@@ -13,6 +14,8 @@ export const INTERVALLE_FILE_MS = 30 * SECONDE_MS;
 const INTERVALLE_PURGE_MS = 60 * MINUTE_MS;
 /** On garde une semaine de sessions mortes avant de les effacer (diagnostic d'un appareil perdu). */
 const CONSERVATION_MS = 7 * JOUR_MS;
+/** Un abonnement iCal révoqué reste visible un mois dans « Mon compte », puis sa ligne est effacée. */
+const CONSERVATION_ABONNEMENTS_REVOQUES_MS = 30 * JOUR_MS;
 
 export interface OptionsTaches {
   readonly base: Base;
@@ -54,6 +57,8 @@ export function demarrerTaches(options: OptionsTaches): Taches {
       derniereCharge = maintenant.getTime();
       const purgees = purgerAuthentification(options.base, versInstant(new Date(maintenant.getTime() - CONSERVATION_MS)));
       if (purgees > 0) options.journal.info('auth.purge', { lignes: purgees });
+      const abonnements = purgerAbonnementsRevoques(options.base, versInstant(new Date(maintenant.getTime() - CONSERVATION_ABONNEMENTS_REVOQUES_MS)));
+      if (abonnements > 0) options.journal.info('flux.purge', { lignes: abonnements });
       const resumes = envoyerResumesQuotidiens(options.base, options.baseUrl, maintenant);
       if (resumes > 0) options.journal.info('notifications.resumes_quotidiens', { emails: resumes });
     } catch (erreur) {

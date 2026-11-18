@@ -242,6 +242,8 @@
   "flux.derniere_utilisation": "Dernière utilisation : {date}",
   "flux.appareil": "Appareil : {agent}",
   "flux.revoque": "Révoqué",
+  "flux.revoques": "Abonnements révoqués ({nombre})",
+  "flux.revoques_aide": "Ces liens ne fonctionnent plus. Ils disparaissent d'eux-mêmes au bout de 30 jours.",
   "flux.revoquer": "Révoquer",
   "flux.revoquer_confirmation": "Révoquer cet abonnement ? Le calendrier qui l'utilise cessera de se mettre à jour.",
   "erreur.flux.introuvable": "Cet abonnement n'existe pas.",
