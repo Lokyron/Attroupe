@@ -124,7 +124,7 @@ export function FilDiscussion({ groupId, filId }: { groupId: string; filId: stri
                 </div>
                 {editionId === m.id ? (
                   <form onSubmit={enregistrerEdition} className="formulaire">
-                    <textarea value={editionCorps} onChange={(e) => setEditionCorps(e.target.value)} required />
+                    <textarea value={editionCorps} aria-label={t('fil.modifier')} onChange={(e) => setEditionCorps(e.target.value)} required />
                     <div className="barre-compacte">
                       <button type="submit" className="bouton-compact">
                         {t('fil.enregistrer')}
@@ -152,7 +152,7 @@ export function FilDiscussion({ groupId, filId }: { groupId: string; filId: stri
                     <button
                       type="button"
                       className="bouton-icone-discret"
-                      aria-label={t('fil.supprimer')}
+                      aria-label={`${t('fil.supprimer')} ${m.author_name}`}
                       onClick={() => supprimer(m.id)}
                     >
                       <IconePoubelle className="icone-mini" />

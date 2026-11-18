@@ -210,7 +210,7 @@ export function CarteSourcesAgenda() {
             const pilule = pilulteStatut(s);
             const enCours = occupe === s.id;
             return (
-              <li key={s.id} className="ligne-interactive ligne-interactive-pile">
+              <li key={s.id} className="ligne ligne-pile">
                 <div className="ligne-principale">
                   <strong>{s.label}</strong>
                   <span className="ligne-meta">{s.url_host}</span>
@@ -229,13 +229,20 @@ export function CarteSourcesAgenda() {
                   {s.disabled_at !== null && <span className="ligne-meta">{t('source.desactivee_aide')}</span>}
                 </div>
                 <div className="barre-compacte">
-                  <button type="button" className="bouton bouton-compact" disabled={enCours} onClick={() => relancer(s)}>
+                  <button
+                    type="button"
+                    className="bouton bouton-compact"
+                    disabled={enCours}
+                    aria-label={`${enCours ? t('source.synchro_en_cours') : t('source.synchroniser')} ${s.label}`}
+                    onClick={() => relancer(s)}
+                  >
                     {enCours ? t('source.synchro_en_cours') : t('source.synchroniser')}
                   </button>
                   <button
                     type="button"
                     className="bouton bouton-compact"
                     disabled={enCours}
+                    aria-label={`${s.disabled_at === null ? t('source.desactiver') : t('source.reactiver')} ${s.label}`}
                     onClick={() =>
                       agir(
                         s.id,
@@ -250,6 +257,7 @@ export function CarteSourcesAgenda() {
                     type="button"
                     className="bouton bouton-compact bouton-danger-discret"
                     disabled={enCours}
+                    aria-label={`${t('source.supprimer')} ${s.label}`}
                     onClick={() => retirer(s)}
                   >
                     {t('source.supprimer')}

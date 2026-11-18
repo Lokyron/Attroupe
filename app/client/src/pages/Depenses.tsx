@@ -20,7 +20,7 @@ import { lireGroupe, listerMembres, type DetailGroupe, type Membre } from '../ap
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconeBalance, IconePoubelle, IconeRecu } from '../components/Icones';
-import { t, type CleTexte } from '../i18n';
+import { t } from '../i18n';
 
 function formaterMontant(minor: number, code: string, devises: readonly Devise[]): string {
   const exposant = devises.find((d) => d.code === code)?.exponent ?? 2;
@@ -32,8 +32,13 @@ function formaterMontant(minor: number, code: string, devises: readonly Devise[]
   }).format(minor / 10 ** exposant);
 }
 
+/**
+ * Lit un montant saisi en unités majeures et le rend en unités mineures, ou `null` s'il est invalide.
+ * Seul le bruit de saisie est toléré avant l'analyse : espaces (ordinaires, insécables U+00A0, fines
+ * insécables U+202F) et symbole de devise. Le nombre lui-même reste strict (décimales limitées à l'exposant).
+ */
 function analyserMontant(saisie: string, exposant: number, autoriserZero = false): number | null {
-  const texte = saisie.trim();
+  const texte = saisie.replace(/[\s\u00A0\u202F]/g, '').replace(/\p{Sc}/gu, '');
   if (texte === '') return null;
   if (exposant === 0) {
     if (!/^\d+$/.test(texte)) return null;
@@ -51,8 +56,22 @@ function analyserMontant(saisie: string, exposant: number, autoriserZero = false
   return Number(v);
 }
 
+/**
+ * Date du jour dans le fuseau local, au format AAAA-MM-JJ. `toISOString()` serait piégeux ici : il convertit
+ * en UTC, donc entre minuit et 1 h ou 2 h à Paris il rend encore la date de la veille.
+ */
 function aujourdhuiIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  const maintenant = new Date();
+  const mois = String(maintenant.getMonth() + 1).padStart(2, '0');
+  const jour = String(maintenant.getDate()).padStart(2, '0');
+  return `${String(maintenant.getFullYear())}-${mois}-${jour}`;
+}
+
+/** Date AAAA-MM-JJ (sans heure) lisible, lue en UTC pour ne jamais glisser d'un jour selon le fuseau. */
+function formaterDateJour(jour: string): string {
+  const date = new Date(`${jour}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return jour;
+  return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(date);
 }
 
 export interface PropsSectionDepenses {
@@ -89,7 +108,8 @@ export function SectionDepenses({
   const [libelle, setLibelle] = useState('');
   const [dateDepense, setDateDepense] = useState(aujourdhuiIso);
   const [montantSaisi, setMontantSaisi] = useState('');
-  const [deviseCode, setDeviseCode] = useState('EUR');
+  // `null` tant que l'utilisateur n'a rien choisi : la devise effective suit alors celle du groupe.
+  const [deviseChoisie, setDeviseChoisie] = useState<string | null>(null);
   const [tauxSaisi, setTauxSaisi] = useState('1');
   const [payeurId, setPayeurId] = useState('');
   const [mode, setMode] = useState<ModeRepartition>('equal');
@@ -101,7 +121,7 @@ export function SectionDepenses({
   const [deMembreId, setDeMembreId] = useState('');
   const [versMembreId, setVersMembreId] = useState('');
   const [montantRembSaisi, setMontantRembSaisi] = useState('');
-  const [deviseRembCode, setDeviseRembCode] = useState('EUR');
+  const [deviseRembChoisie, setDeviseRembChoisie] = useState<string | null>(null);
   const [tauxRembSaisi, setTauxRembSaisi] = useState('1');
   const [noteRemb, setNoteRemb] = useState('');
 
@@ -123,17 +143,14 @@ export function SectionDepenses({
         setRemboursements(rembs);
         setSoldes(slds);
 
-        const cible = deviseCibleDefaut ?? g.default_currency_code;
-        setDeviseCode((prev) => (prev === 'EUR' && cible !== 'EUR' ? cible : prev));
-        setDeviseRembCode((prev) => (prev === 'EUR' && cible !== 'EUR' ? cible : prev));
         setPayeurId((prev) => (prev === '' ? g.mon_appartenance_id : prev));
 
         const actifs = m.filter((x) => x.status === 'active');
+        // Un membre arrivé depuis le dernier chargement est coché par défaut ; les choix déjà faits sont conservés.
         setParticipantsCoches((prev) => {
-          if (Object.keys(prev).length > 0) return prev;
-          const init: Record<string, boolean> = {};
-          for (const a of actifs) init[a.id] = true;
-          return init;
+          const suite: Record<string, boolean> = { ...prev };
+          for (const a of actifs) if (!(a.id in suite)) suite[a.id] = true;
+          return suite;
         });
         setDeMembreId((prev) => (prev === '' ? g.mon_appartenance_id : prev));
         setVersMembreId((prev) => {
@@ -147,12 +164,22 @@ export function SectionDepenses({
 
   useEffect(charger, [charger]);
 
-  if (groupe === null || soldes === null) return <Erreur message={erreur} />;
+  // Trois états : erreur (rien à afficher), chargement, prêt.
+  if (groupe === null || soldes === null) {
+    if (erreur !== null) return <Erreur message={erreur} onReessayer={charger} />;
+    return (
+      <p role="status" className="discret">
+        {t('commun.chargement')}
+      </p>
+    );
+  }
 
   const deviseCible = deviseCibleDefaut ?? groupe.default_currency_code;
+  const deviseCode = deviseChoisie ?? deviseCible;
+  const deviseRembCode = deviseRembChoisie ?? deviseCible;
   const estCloture = soldes.cloture !== null;
   const actifs = membres.filter((m) => m.status === 'active');
-  const nomDe = (id: string): string => membres.find((m) => m.id === id)?.display_name ?? id;
+  const nomDe = (id: string): string => membres.find((m) => m.id === id)?.display_name ?? t('groupe.ancien_membre');
 
   const soumettreDepense = (e: FormEvent): void => {
     e.preventDefault();
@@ -184,7 +211,11 @@ export function SectionDepenses({
     for (const m of selectionnes) {
       if (mode === 'weights') {
         const w = Number(poidsParMembre[m.id] ?? '1');
-        shares.push({ membership_id: m.id, weight: Number.isInteger(w) && w > 0 ? w : 1 });
+        if (!Number.isInteger(w) || w <= 0) {
+          setErreur(t('erreur.depenses.poids_invalide'));
+          return;
+        }
+        shares.push({ membership_id: m.id, weight: w });
       } else if (mode === 'exact') {
         const part = analyserMontant(partsExactesParMembre[m.id] ?? '0', exposant, true);
         if (part === null) {
@@ -361,7 +392,7 @@ export function SectionDepenses({
                       {ardoise.transferts.map((tr, idx) => (
                         <li
                           key={`${tr.from_membership_id}-${tr.to_membership_id}-${String(idx)}`}
-                          className="ligne-interactive ligne-compacte"
+                          className="ligne ligne-compacte"
                         >
                           <span>
                             {t('depenses.suggestion_ligne', {
@@ -396,15 +427,23 @@ export function SectionDepenses({
                 {t('depenses.champ_montant')}
                 <input
                   type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
                   value={montantSaisi}
                   onChange={(e) => setMontantSaisi(e.target.value)}
                   placeholder={t('depenses.exemple_montant')}
+                  aria-describedby="aide-montant-depense"
                   required
                 />
+                {/* La contrainte est dite avant l'erreur : le `placeholder` seul ne suffit pas,
+                    il disparaît dès la première frappe. */}
+                <small id="aide-montant-depense" className="texte-doux">
+                  {t('depenses.aide_montant')}
+                </small>
               </label>
               <label>
                 {t('depenses.champ_devise')}
-                <select value={deviseCode} onChange={(e) => setDeviseCode(e.target.value)}>
+                <select value={deviseCode} onChange={(e) => setDeviseChoisie(e.target.value)}>
                   {devises.map((d) => (
                     <option key={d.code} value={d.code}>
                       {t('depenses.option_devise', { code: d.code, symbole: d.symbol })}
@@ -416,7 +455,15 @@ export function SectionDepenses({
             {deviseCode !== deviseCible && (
               <label>
                 {t('depenses.champ_taux', { source: deviseCode, cible: deviseCible })}
-                <input type="text" value={tauxSaisi} onChange={(e) => setTauxSaisi(e.target.value)} required />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={tauxSaisi}
+                  onChange={(e) => setTauxSaisi(e.target.value)}
+                  placeholder={t('depenses.exemple_montant')}
+                  required
+                />
               </label>
             )}
             <div className="grille-champs-2">
@@ -466,6 +513,9 @@ export function SectionDepenses({
                   {participantsCoches[m.id] === true && mode === 'exact' && (
                     <input
                       type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      aria-label={`${t('depenses.champ_mode')} ${m.display_name}`}
                       placeholder={t('depenses.exemple_part')}
                       value={partsExactesParMembre[m.id] ?? ''}
                       onChange={(e) => setPartsExactesParMembre((p) => ({ ...p, [m.id]: e.target.value }))}
@@ -510,11 +560,19 @@ export function SectionDepenses({
             <div className="grille-champs-2">
               <label>
                 {t('depenses.champ_montant')}
-                <input type="text" value={montantRembSaisi} onChange={(e) => setMontantRembSaisi(e.target.value)} required />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={montantRembSaisi}
+                  onChange={(e) => setMontantRembSaisi(e.target.value)}
+                  placeholder={t('depenses.exemple_montant')}
+                  required
+                />
               </label>
               <label>
                 {t('depenses.champ_devise')}
-                <select value={deviseRembCode} onChange={(e) => setDeviseRembCode(e.target.value)}>
+                <select value={deviseRembCode} onChange={(e) => setDeviseRembChoisie(e.target.value)}>
                   {devises.map((d) => (
                     <option key={d.code} value={d.code}>
                       {t('depenses.option_devise', { code: d.code, symbole: d.symbol })}
@@ -526,7 +584,15 @@ export function SectionDepenses({
             {deviseRembCode !== deviseCible && (
               <label>
                 {t('depenses.champ_taux', { source: deviseRembCode, cible: deviseCible })}
-                <input type="text" value={tauxRembSaisi} onChange={(e) => setTauxRembSaisi(e.target.value)} required />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={tauxRembSaisi}
+                  onChange={(e) => setTauxRembSaisi(e.target.value)}
+                  placeholder={t('depenses.exemple_montant')}
+                  required
+                />
               </label>
             )}
             <label>
@@ -556,14 +622,14 @@ export function SectionDepenses({
                   d.payer_membership_id === groupe.mon_appartenance_id ||
                   groupe.mon_role === 'admin');
               return (
-                <li key={d.id} className="ligne-interactive ligne-depense">
+                <li key={d.id} className="ligne ligne-depense">
                   <span className="depense-icone-rond" aria-hidden="true">
                     <IconeRecu className="icone-mini" />
                   </span>
                   <div className="ligne-principale">
                     <span className="ligne-titre">{d.label}</span>
                     <span className="ligne-meta">
-                      {t('depenses.paye_par_date', { nom: nomDe(d.payer_membership_id), date: d.spent_on })}
+                      {t('depenses.paye_par_date', { nom: nomDe(d.payer_membership_id), date: formaterDateJour(d.spent_on) })}
                     </span>
                   </div>
                   <div className="ligne-depense-droite">
@@ -581,7 +647,7 @@ export function SectionDepenses({
                       <button
                         type="button"
                         className="bouton-icone-discret"
-                        aria-label={t('depenses.supprimer')}
+                        aria-label={`${t('depenses.supprimer')} ${d.label}`}
                         onClick={() =>
                           supprimerDepense(groupId, d.id)
                             .then(charger)
@@ -607,10 +673,10 @@ export function SectionDepenses({
           <ul className="liste-elements">
             {remboursements.map((r) => {
               const confirme = r.confirmed_by_membership_id !== null;
-              const statut = t(confirme ? 'depenses.statut_confirme' : ('depenses.statut_en_attente' as CleTexte));
+              const statut = t(confirme ? 'depenses.statut_confirme' : 'depenses.statut_en_attente');
               const montant = formaterMontant(r.amount_minor, r.currency_code, devises);
               return (
-                <li key={r.id} className="ligne-interactive">
+                <li key={r.id} className="ligne">
                   <div className="ligne-principale">
                     <span className="ligne-titre">
                       {r.method_note !== null
@@ -635,6 +701,7 @@ export function SectionDepenses({
                       <button
                         type="button"
                         className="bouton-compact"
+                        aria-label={`${t('depenses.confirmer')} ${nomDe(r.from_membership_id)} → ${nomDe(r.to_membership_id)}`}
                         onClick={() =>
                           confirmerRemboursement(groupId, r.id)
                             .then(charger)

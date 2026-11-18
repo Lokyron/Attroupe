@@ -34,6 +34,11 @@ import {
 } from '../components/Icones';
 import { t, type CleTexte } from '../i18n';
 
+/** La cible affichée d'une invitation émise (courriel ou nom d'utilisateur), vide si le serveur n'en donne aucune. */
+function cibleInvitation(i: InvitationEmise): string {
+  return i.email ?? i.username ?? '';
+}
+
 function initialesMembre(nom: string): string {
   const morceaux = nom.trim().split(/\s+/).filter(Boolean);
   if (morceaux.length === 0) return '?';
@@ -221,7 +226,7 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
               {membres.map((m) => {
                 const actif = m.status === 'active';
                 return (
-                  <li key={m.id} className="ligne-interactive ligne-membre">
+                  <li key={m.id} className="ligne ligne-membre">
                     <div className="ligne-membre-info">
                       {m.avatar_url !== null ? (
                         <img
@@ -249,6 +254,7 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                         <button
                           type="button"
                           className="bouton-compact"
+                          aria-label={`${t(m.role === 'admin' ? 'membres.retrograder' : 'membres.promouvoir')} ${m.display_name}`}
                           onClick={() => agir(changerRole(groupId, m.id, m.role === 'admin' ? 'member' : 'admin'))}
                         >
                           {t(m.role === 'admin' ? 'membres.retrograder' : 'membres.promouvoir')}
@@ -256,6 +262,7 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                         <button
                           type="button"
                           className="bouton-compact bouton-danger-discret"
+                          aria-label={`${t('membres.retirer')} ${m.display_name}`}
                           onClick={() => window.confirm(t('membres.retirer_confirmation')) && agir(retirerMembre(groupId, m.id))}
                         >
                           {t('membres.retirer')}
@@ -309,13 +316,18 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
               ) : (
                 <ul className="liste-elements liste-compacte-haut">
                   {invitations.map((i) => (
-                    <li key={i.id} className="ligne-interactive">
+                    <li key={i.id} className="ligne">
                       <div className="ligne-principale">
                         <span className="ligne-titre">{i.email ?? i.username ?? ''}</span>
                         <span className="ligne-meta">{t(`invitations_emises.statut_${i.status}` as CleTexte)}</span>
                       </div>
                       {i.status === 'pending' && (
-                        <button type="button" className="bouton-compact" onClick={() => agir(revoquerInvitation(groupId, i.id))}>
+                        <button
+                          type="button"
+                          className="bouton-compact"
+                          aria-label={cibleInvitation(i) === '' ? undefined : `${t('invitations_emises.revoquer')} ${cibleInvitation(i)}`}
+                          onClick={() => agir(revoquerInvitation(groupId, i.id))}
+                        >
                           {t('invitations_emises.revoquer')}
                         </button>
                       )}
@@ -344,7 +356,6 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                   <p className="discret ligne-meta">
                     {t('immich.etat', {
                       url: immich.base_url,
-                      empreinte: immich.api_key_fingerprint,
                       statut: t(`immich.statut_${immich.status}` as CleTexte),
                     })}
                   </p>

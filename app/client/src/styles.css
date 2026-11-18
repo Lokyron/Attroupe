@@ -13,16 +13,29 @@
   --accent-negatif-clair: rgba(225, 29, 72, 0.12);
   --accent-photos: #d97706;
   --accent-photos-clair: rgba(217, 119, 6, 0.13);
+  /* Accents « texte » : les accents vifs ci-dessus ne servent qu'aux remplissages, points et
+     icônes. Tout `color:` posé sur un fond `*-clair` ou sur du verre utilise ces variantes
+     assombries, qui atteignent 4,5:1 (WCAG AA). */
+  --accent-agenda-texte: #1d4ed8;
+  --accent-positif-texte: #047857;
+  --accent-negatif-texte: #be123c;
+  --accent-photos-texte: #92400e;
   --texte: #0f172a;
   --texte-doux: #475569;
+  /* Séparateur décoratif (trop pâle pour délimiter un champ) ; `--bordure-champ` atteint 3:1 (WCAG 1.4.11). */
   --bordure: rgba(148, 163, 184, 0.28);
+  --bordure-champ: #64748b;
   --verre-fond: rgba(255, 255, 255, 0.72);
   --verre-fond-fort: rgba(255, 255, 255, 0.86);
   --verre-bordure: rgba(255, 255, 255, 0.85);
   --ombre: 0 8px 28px rgba(15, 23, 42, 0.06);
   --rayon: 1.1rem;
 
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Police système assumée : Inter n'est ni chargée ni hébergée. L'héberger (dépendance ou fichiers
+     de police) demanderait une ADR. */
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Les contrôles natifs (barre de défilement, sélecteur de date) restent clairs. */
+  color-scheme: light;
   line-height: 1.5;
   color: var(--texte);
 }
@@ -36,6 +49,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   background-color: #eef2f7;
   color: var(--texte);
   -webkit-font-smoothing: antialiased;
@@ -84,6 +98,7 @@ h4 {
   max-width: 100%;
   min-width: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -93,7 +108,10 @@ h4 {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow-x: hidden;
+  /* `clip` et non `hidden` : `hidden` force `overflow-y: auto` et fait de cet élément le conteneur
+     de défilement des descendants `position: sticky` (en-tête mobile, ajout rapide), qui ne
+     colleraient alors plus à l'écran. `clip` coupe sans créer de contexte de défilement. */
+  overflow-x: clip;
 }
 
 .barre-laterale {
@@ -137,21 +155,6 @@ h4 {
   box-shadow: 0 8px 24px rgba(67, 56, 202, 0.14);
 }
 
-.marque-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.6rem;
-  background: var(--primaire);
-  color: #fff;
-  font-size: 1rem;
-  font-weight: 800;
-  box-shadow: 0 4px 12px rgba(67, 56, 202, 0.25);
-  flex-shrink: 0;
-}
-
 .avatar-initiales {
   display: inline-flex;
   align-items: center;
@@ -169,9 +172,23 @@ h4 {
   box-shadow: 0 2px 8px rgba(67, 56, 202, 0.2);
 }
 
+/* Seul accès au compte sur mobile : cible tactile de 44 px minimum. */
+.avatar-lien {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .avatar-lien:hover {
   color: #fff;
-  transform: scale(1.04);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .avatar-lien:hover {
+    transform: scale(1.04);
+  }
 }
 
 /* Conteneur principal */
@@ -507,6 +524,10 @@ h4 {
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
+.nav-mobile-lien:active {
+  background: var(--primaire-clair);
+}
+
 .nav-mobile-lien.actif,
 .nav-mobile-lien[aria-current='page'] {
   color: var(--primaire);
@@ -554,7 +575,8 @@ h4 {
 
 /* Boutons et liens d'action globaux */
 button,
-a.bouton {
+a.bouton,
+label.bouton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -573,21 +595,29 @@ a.bouton {
   transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
 }
 
-button:hover,
-a.bouton:hover {
+/* `:where()` garde la spécificité d'origine de `button:hover`, pour que les surcharges de
+   classe (`.bouton-icone-discret:hover`, etc.) continuent de l'emporter. */
+button:where(:not(:disabled)):where(:not([aria-disabled='true'])):hover,
+a.bouton:hover,
+label.bouton:where(:hover) {
   background: #fff;
   border-color: rgba(67, 56, 202, 0.35);
   color: var(--primaire);
 }
 
-button:active,
-a.bouton:active {
+button:where(:not(:disabled)):where(:not([aria-disabled='true'])):active,
+a.bouton:active,
+label.bouton:where(:active) {
   transform: translateY(1px);
 }
 
 button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+a.bouton[aria-disabled='true'] {
+  pointer-events: none;
 }
 
 .bouton-primaire,
@@ -598,8 +628,13 @@ button[type='submit'] {
   box-shadow: 0 4px 14px rgba(67, 56, 202, 0.22);
 }
 
+/* `a.bouton-primaire` et `label.bouton-primaire` sont nommés explicitement : sans eux,
+   `a.bouton:hover` (0,2,1) l'emporte sur `.bouton-primaire:hover` (0,2,0) et un lien
+   d'action primaire devient blanc à texte indigo au survol, au lieu de foncer. */
 .bouton-primaire:hover,
-button[type='submit']:hover {
+a.bouton-primaire:hover,
+label.bouton-primaire:hover,
+button[type='submit']:where(:not(:disabled)):hover {
   background: var(--primaire-hover);
   border-color: var(--primaire-hover);
   color: #fff;
@@ -620,7 +655,9 @@ button[type='submit']:hover {
 }
 
 button.lien {
-  min-height: auto;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
   padding: 0.25rem 0;
   background: none;
   border: none;
@@ -651,7 +688,7 @@ textarea {
   max-width: 100%;
   padding: 0.5rem 0.75rem;
   border-radius: 0.75rem;
-  border: 1px solid var(--bordure);
+  border: 1px solid var(--bordure-champ);
   background: rgba(255, 255, 255, 0.85);
   color: var(--texte);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -662,7 +699,9 @@ textarea {
   resize: vertical;
 }
 
-input:focus,
+/* La lueur ne remplace l'anneau que sur les champs texte : sur une case, un radio ou un fichier,
+   `border-color` ne s'applique pas et la lueur à 10 % d'opacité serait invisible. */
+input:not([type='checkbox']):not([type='radio']):not([type='file']):focus,
 select:focus,
 textarea:focus {
   border-color: var(--primaire);
@@ -670,11 +709,26 @@ textarea:focus {
   outline: none;
 }
 
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primaire);
+  outline-offset: 2px;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled,
+[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 input[type='checkbox'],
 input[type='radio'] {
-  width: 1.25rem;
-  height: 1.25rem;
-  min-height: 1.25rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 1.5rem;
   flex-shrink: 0;
   padding: 0;
   accent-color: var(--primaire);
@@ -705,10 +759,8 @@ input[type='radio'] {
 .carte > p:first-child > a,
 section > p:first-child > a,
 .pied a,
-.groupe-actions a,
-.onglets-filtre button,
 .tableau-de-bord button,
-.tableau-de-bord a:not(.ligne-interactive):not(.vignette-photo):not(.vignette-photo-bento):not(.evenement):not(.kpi-tuile):not(.tuile-evenement) {
+.tableau-de-bord a:not(.ligne-interactive):not(.vignette-photo-bento):not(.evenement):not(.kpi-tuile):not(.tuile-evenement) {
   min-height: 44px;
   display: inline-flex;
   align-items: center;
@@ -722,11 +774,14 @@ ul:not([class]) li {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.25rem 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Écran de connexion */
 .connexion-enveloppe {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 1.5rem 1rem;
@@ -806,35 +861,6 @@ ul:not([class]) li {
   margin: 0.75rem 0;
 }
 
-/* Tableaux */
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1rem 0;
-  background: rgba(255, 255, 255, 0.55);
-  border-radius: 0.85rem;
-  overflow: hidden;
-  border: 1px solid var(--bordure);
-}
-
-th,
-td {
-  text-align: left;
-  padding: 0.7rem 0.9rem;
-  border-bottom: 1px solid var(--bordure);
-}
-
-th {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--texte-doux);
-  background: rgba(255, 255, 255, 0.55);
-}
-
-tr:last-child td {
-  border-bottom: none;
-}
-
 /* Dashboard d'accueil Bento */
 .tableau-de-bord {
   display: grid;
@@ -886,13 +912,16 @@ tr:last-child td {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  width: 100%;
-  max-width: 100%;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  padding-bottom: 0.15rem;
+  /* L'anneau de focus sort de 4 px : marge intérieure compensée par une marge négative,
+     sinon le conteneur à défilement le rogne. */
+  width: calc(100% + 8px);
+  max-width: calc(100% + 8px);
+  padding: 4px 4px calc(0.15rem + 4px);
+  margin: -4px;
 }
 
 .actions-rapides::-webkit-scrollbar {
@@ -982,11 +1011,18 @@ tr:last-child td {
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
-.kpi-tuile:hover {
-  transform: translateY(-2px);
+/* Seul un lien réagit au survol : la tuile « Prochain événement » est rendue en `<div>` quand
+   elle n'a nulle part où mener, et ne doit alors promettre aucun clic. */
+a.kpi-tuile:hover {
   border-color: rgba(67, 56, 202, 0.32);
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.09);
   color: var(--texte);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  a.kpi-tuile:hover {
+    transform: translateY(-2px);
+  }
 }
 
 .kpi-texte {
@@ -1026,11 +1062,11 @@ tr:last-child td {
 }
 
 .kpi-positif {
-  color: var(--accent-positif);
+  color: var(--accent-positif-texte);
 }
 
 .kpi-negatif {
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
 }
 
 .kpi-neutre {
@@ -1042,11 +1078,11 @@ tr:last-child td {
 }
 
 .kpi-ambre {
-  color: var(--accent-photos);
+  color: var(--accent-photos-texte);
 }
 
 .kpi-rose {
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
 }
 
 .kpi-icone-badge {
@@ -1079,17 +1115,17 @@ tr:last-child td {
 
   .kpi-badge-emeraude {
     background: var(--accent-positif-clair);
-    color: var(--accent-positif);
+    color: var(--accent-positif-texte);
   }
 
   .kpi-badge-ambre {
     background: var(--accent-photos-clair);
-    color: var(--accent-photos);
+    color: var(--accent-photos-texte);
   }
 
   .kpi-badge-rose {
     background: var(--accent-negatif-clair);
-    color: var(--accent-negatif);
+    color: var(--accent-negatif-texte);
   }
 
   .kpi-icone {
@@ -1236,13 +1272,15 @@ tr:last-child td {
 .ruban-hebdo-jours {
   display: flex;
   gap: 0.4rem;
-  width: 100%;
-  max-width: 100%;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  padding-bottom: 0.35rem;
+  /* Marge pour l'anneau de focus (voir `.actions-rapides`). */
+  width: calc(100% + 8px);
+  max-width: calc(100% + 8px);
+  padding: 4px 4px calc(0.35rem + 4px);
+  margin: -4px;
 }
 
 .ruban-hebdo-jours::-webkit-scrollbar {
@@ -1329,7 +1367,9 @@ tr:last-child td {
   background: none;
   border: none;
   padding: 0;
-  min-height: auto;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
   box-shadow: none;
 }
 
@@ -1371,8 +1411,10 @@ tr:last-child td {
   transition: transform 0.25s ease;
 }
 
-.vignette-photo-bento:hover img {
-  transform: scale(1.05);
+@media (hover: hover) and (pointer: fine) {
+  .vignette-photo-bento:hover img {
+    transform: scale(1.05);
+  }
 }
 
 .vignette-overlay {
@@ -1392,7 +1434,7 @@ tr:last-child td {
   max-width: 100%;
   padding: 0.12rem 0.45rem;
   border-radius: 0.4rem;
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   font-weight: 700;
   color: #fff;
   background: rgba(67, 56, 202, 0.85);
@@ -1401,8 +1443,9 @@ tr:last-child td {
   text-overflow: ellipsis;
 }
 
+/* Fonds opaques pour cyan et ambre : sur le dégradé sombre, le blanc y tombait sous 4,5:1. */
 .vignette-badge.badge-cyan {
-  background: rgba(8, 145, 178, 0.85);
+  background: #0e7490;
 }
 
 .vignette-badge.badge-violet {
@@ -1414,7 +1457,7 @@ tr:last-child td {
 }
 
 .vignette-badge.badge-ambre {
-  background: rgba(217, 119, 6, 0.85);
+  background: #b45309;
 }
 
 .vignette-badge.badge-rose {
@@ -1486,10 +1529,15 @@ tr:last-child td {
 }
 
 .tuile-evenement:hover {
-  transform: translateY(-1px);
   background: rgba(255, 255, 255, 0.92);
   border-color: rgba(67, 56, 202, 0.3);
   color: var(--texte);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tuile-evenement:hover {
+    transform: translateY(-1px);
+  }
 }
 
 .tuile-evenement-haut {
@@ -1535,19 +1583,19 @@ tr:last-child td {
 .vignette-date-emeraude {
   background: var(--accent-positif-clair);
   border-color: rgba(5, 150, 105, 0.24);
-  color: var(--accent-positif);
+  color: var(--accent-positif-texte);
 }
 
 .vignette-date-ambre {
   background: var(--accent-photos-clair);
   border-color: rgba(217, 119, 6, 0.24);
-  color: var(--accent-photos);
+  color: var(--accent-photos-texte);
 }
 
 .vignette-date-rose {
   background: var(--accent-negatif-clair);
   border-color: rgba(225, 29, 72, 0.24);
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
 }
 
 .vignette-date-mois {
@@ -1620,15 +1668,15 @@ tr:last-child td {
 }
 
 .tuile-evenement-source.source-emeraude {
-  color: var(--accent-positif);
+  color: var(--accent-positif-texte);
 }
 
 .tuile-evenement-source.source-ambre {
-  color: var(--accent-photos);
+  color: var(--accent-photos-texte);
 }
 
 .tuile-evenement-source.source-rose {
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
 }
 
 .depense-icone-rond {
@@ -1653,12 +1701,6 @@ tr:last-child td {
 }
 
 /* Section Mes Groupes */
-.grille-groupes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 0.9rem;
-}
-
 .tuile-groupe {
   display: flex;
   flex-direction: column;
@@ -1671,9 +1713,14 @@ tr:last-child td {
 }
 
 .tuile-groupe:hover {
-  transform: translateY(-2px);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
   border-color: rgba(67, 56, 202, 0.3);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tuile-groupe:hover {
+    transform: translateY(-2px);
+  }
 }
 
 .tuile-groupe-haut {
@@ -1684,6 +1731,8 @@ tr:last-child td {
 }
 
 .tuile-groupe-nom {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 1.05rem;
   font-weight: 700;
   color: var(--texte);
@@ -1721,7 +1770,7 @@ tr:last-child td {
 
 .pilule-agenda {
   background: var(--accent-agenda-clair);
-  color: var(--accent-agenda);
+  color: var(--accent-agenda-texte);
 }
 
 .pilule-perso {
@@ -1731,17 +1780,17 @@ tr:last-child td {
 
 .pilule-statut-yes {
   background: var(--accent-positif-clair);
-  color: var(--accent-positif);
+  color: var(--accent-positif-texte);
 }
 
 .pilule-statut-maybe {
   background: var(--accent-photos-clair);
-  color: var(--accent-photos);
+  color: var(--accent-photos-texte);
 }
 
 .pilule-statut-no {
   background: var(--accent-negatif-clair);
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
 }
 
 .pilule-statut-aucun {
@@ -1770,33 +1819,21 @@ tr:last-child td {
   border-color: rgba(67, 56, 202, 0.3);
 }
 
-.pilule-lien-primaire {
-  background: var(--primaire);
-  border-color: var(--primaire);
-  color: #fff;
-}
-
-.pilule-lien-primaire:hover {
-  background: var(--primaire-hover);
-  border-color: var(--primaire-hover);
-  color: #fff;
-}
-
 .pilule-lien-agenda:hover {
   background: var(--accent-agenda-clair);
-  color: var(--accent-agenda);
+  color: var(--accent-agenda-texte);
   border-color: rgba(37, 99, 235, 0.3);
 }
 
 .pilule-lien-depenses:hover {
   background: var(--accent-positif-clair);
-  color: var(--accent-positif);
+  color: var(--accent-positif-texte);
   border-color: rgba(5, 150, 105, 0.3);
 }
 
 .pilule-lien-photos:hover {
   background: var(--accent-photos-clair);
-  color: var(--accent-photos);
+  color: var(--accent-photos-texte);
   border-color: rgba(217, 119, 6, 0.3);
 }
 
@@ -1848,6 +1885,11 @@ tr:last-child td {
   color: var(--texte-doux);
 }
 
+.barre-onglets button:hover:not([aria-pressed='true']) {
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--texte);
+}
+
 .barre-onglets button[aria-pressed='true'] {
   background: var(--primaire);
   color: #fff;
@@ -1863,6 +1905,11 @@ tr:last-child td {
   gap: 0.5rem;
 }
 
+/* Le motif de ligne de liste existe en deux variantes, et la distinction compte :
+   `.ligne` pour une ligne qu'on ne clique pas, `.ligne-interactive` pour un vrai lien.
+   Les deux partagent la mise en page ; seule la seconde réagit au survol. Appliquer
+   `.ligne-interactive` à un `<li>` inerte promettait un clic qui n'existait pas. */
+.ligne,
 .ligne-interactive {
   display: flex;
   align-items: center;
@@ -1935,13 +1982,13 @@ tr:last-child td {
 .pilule-positif {
   background: var(--accent-positif-clair);
   border-color: rgba(5, 150, 105, 0.25);
-  color: var(--accent-positif);
+  color: var(--accent-positif-texte);
 }
 
 .pilule-negatif {
   background: var(--accent-negatif-clair);
   border-color: rgba(225, 29, 72, 0.25);
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
 }
 
 .pilule-neutre {
@@ -1956,53 +2003,7 @@ tr:last-child td {
   color: var(--texte);
 }
 
-/* Galerie photos du dashboard */
-.grille-photos-mini {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-  gap: 0.65rem;
-}
-
-.vignette-photo {
-  position: relative;
-  display: block;
-  border-radius: 0.75rem;
-  overflow: hidden;
-  text-decoration: none;
-  border: 1px solid var(--bordure);
-  background: rgba(255, 255, 255, 0.6);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.vignette-photo:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.1);
-}
-
-.vignette-photo img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 0.75rem;
-  display: block;
-}
-
-.vignette-legende {
-  display: block;
-  padding: 0.35rem 0.45rem;
-  font-size: 0.72rem;
-  color: var(--texte-doux);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Page Groupe */
-.groupe-page {
-  display: grid;
-  gap: 1rem;
-}
-
 .groupe-entete {
   display: flex;
   flex-wrap: wrap;
@@ -2019,35 +2020,6 @@ tr:last-child td {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-}
-
-.nav-groupe {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border-radius: 0.95rem;
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid var(--bordure);
-}
-
-.nav-groupe .pilule-lien {
-  min-height: 44px;
-  justify-content: center;
-  text-align: center;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.9rem;
-}
-
-@media (min-width: 768px) {
-  .nav-groupe {
-    display: flex;
-    flex-wrap: wrap;
-  }
-
-  .nav-groupe .pilule-lien {
-    padding: 0.35rem 1rem;
-  }
 }
 
 /* Agenda (lot 4) : une colonne sur téléphone, la grille du mois reste lisible grâce aux titres tronqués. */
@@ -2110,13 +2082,33 @@ tr:last-child td {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 0.2rem 0.3rem;
+  min-height: 1.75rem;
+  padding: 0.3rem;
   border-radius: 0.35rem;
   margin-top: 0.2rem;
   background: var(--primaire-clair);
   color: var(--primaire);
   text-decoration: none;
   border-left: 2px solid var(--primaire);
+}
+
+/* Le conteneur est en `overflow: hidden` : l'anneau de focus doit rentrer à l'intérieur. */
+.grille-jour .evenement:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Couleur de repli par type d'événement. Elle est déclarée AVANT les `bordure-*` : à spécificité
+   égale, c'est la couleur propre au groupe qui doit l'emporter (le TSX pose les deux classes). */
+.grille-jour .evenement.evenement-groupe,
+.semaine .evenement.evenement-groupe {
+  background: var(--accent-agenda-clair);
+  color: var(--accent-agenda-texte);
+}
+
+.grille-jour .evenement.evenement-perso,
+.semaine .evenement.evenement-perso {
+  background: var(--accent-perso-clair);
+  color: var(--accent-perso);
 }
 
 .grille-jour .evenement.bordure-cyan {
@@ -2133,34 +2125,20 @@ tr:last-child td {
 
 .grille-jour .evenement.bordure-emeraude {
   background: var(--accent-positif-clair);
-  color: var(--accent-positif);
+  color: var(--accent-positif-texte);
   border-left-color: var(--accent-positif);
 }
 
 .grille-jour .evenement.bordure-ambre {
   background: var(--accent-photos-clair);
-  color: var(--accent-photos);
+  color: var(--accent-photos-texte);
   border-left-color: var(--accent-photos);
 }
 
 .grille-jour .evenement.bordure-rose {
   background: var(--accent-negatif-clair);
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
   border-left-color: var(--accent-negatif);
-}
-
-.grille-jour .evenement.evenement-groupe,
-.semaine .evenement.evenement-groupe {
-  background: var(--accent-agenda-clair);
-  color: var(--accent-agenda);
-  border-color: rgba(37, 99, 235, 0.25);
-}
-
-.grille-jour .evenement.evenement-perso,
-.semaine .evenement.evenement-perso {
-  background: var(--accent-perso-clair);
-  color: var(--accent-perso);
-  border-color: rgba(124, 58, 237, 0.25);
 }
 
 .grille-jour .evenement-heure {
@@ -2269,11 +2247,6 @@ tr:last-child td {
   color: var(--texte-doux);
 }
 
-.article-preneur {
-  flex: none;
-  min-width: 7rem;
-}
-
 .article-actions {
   display: flex;
   align-items: center;
@@ -2377,13 +2350,15 @@ tr:last-child td {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  width: 100%;
-  max-width: 100%;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  padding-top: 0.5rem;
+  /* Marge pour l'anneau de focus (voir `.actions-rapides`) ; le haut a déjà 0,5rem. */
+  width: calc(100% + 8px);
+  max-width: calc(100% + 8px);
+  padding: 0.5rem 4px 4px;
+  margin: 0 -4px -4px;
   border-top: 1px solid var(--bordure);
 }
 
@@ -2472,10 +2447,15 @@ tr:last-child td {
 }
 
 .tuile-module:hover {
-  transform: translateY(-2px);
   background: rgba(255, 255, 255, 0.95);
   border-color: rgba(67, 56, 202, 0.3);
   color: var(--texte);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tuile-module:hover {
+    transform: translateY(-2px);
+  }
 }
 
 .module-icone-badge {
@@ -2548,11 +2528,11 @@ tr:last-child td {
 .bouton-icone-discret:hover {
   background: var(--accent-negatif-clair);
   border-color: rgba(225, 29, 72, 0.25);
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
 }
 
 .bouton-danger-discret {
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
   border-color: rgba(225, 29, 72, 0.25);
   background: rgba(255, 255, 255, 0.7);
 }
@@ -2560,7 +2540,7 @@ tr:last-child td {
 .bouton-danger-discret:hover {
   background: var(--accent-negatif-clair);
   border-color: rgba(225, 29, 72, 0.45);
-  color: var(--accent-negatif);
+  color: var(--accent-negatif-texte);
 }
 
 .formulaire-compact {
@@ -2653,10 +2633,15 @@ tr:last-child td {
 }
 
 .carte-lien-module:hover {
-  transform: translateY(-2px);
   border-color: rgba(67, 56, 202, 0.35);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
   color: var(--texte);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .carte-lien-module:hover {
+    transform: translateY(-2px);
+  }
 }
 
 .carte-module-haut {
@@ -2851,14 +2836,14 @@ tr:last-child td {
 }
 
 .vote-btn-yes[aria-pressed='true'] {
-  background: var(--accent-positif);
-  border-color: var(--accent-positif);
+  background: var(--accent-positif-texte);
+  border-color: var(--accent-positif-texte);
   color: #fff;
 }
 
 .vote-btn-maybe[aria-pressed='true'] {
-  background: var(--accent-photos);
-  border-color: var(--accent-photos);
+  background: #b45309;
+  border-color: #b45309;
   color: #fff;
 }
 
@@ -3103,7 +3088,9 @@ tr:last-child td {
   gap: 0.45rem;
   overflow-x: auto;
   scrollbar-width: none;
-  padding-bottom: 0.15rem;
+  /* Marge pour l'anneau de focus (voir `.actions-rapides`). */
+  padding: 4px;
+  margin: -4px;
 }
 
 .pilules-albums::-webkit-scrollbar {
@@ -3134,6 +3121,11 @@ tr:last-child td {
   cursor: pointer;
 }
 
+.label-fichier:focus-within {
+  outline: 2px solid var(--primaire);
+  outline-offset: 2px;
+}
+
 .input-fichier-cache {
   position: absolute;
   inset: 0;
@@ -3159,8 +3151,8 @@ tr:last-child td {
   position: absolute;
   top: 0.35rem;
   right: 0.35rem;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 0;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.72);
@@ -3186,6 +3178,12 @@ tr:last-child td {
   justify-content: center;
   gap: 0.85rem;
   padding: 1rem;
+}
+
+/* Sur le fond sombre de la visionneuse, l'indigo n'atteint que 1,74:1 : anneau blanc. */
+.visionneuse-modale :focus-visible,
+.bouton-retirer-photo:focus-visible {
+  outline-color: #fff;
 }
 
 .visionneuse-barre {
@@ -3217,7 +3215,7 @@ tr:last-child td {
   padding: 0.6rem 0.85rem;
   border-radius: 0.75rem;
   background: var(--accent-positif-clair);
-  color: var(--accent-positif);
+  color: var(--accent-positif-texte);
   font-size: 0.9rem;
   font-weight: 500;
 }
@@ -3305,7 +3303,7 @@ tr:last-child td {
    Ces deux sections étaient rendues sans aucune classe : des h3, des ul et des li nus,
    posés sur le fond, alors que le haut de la page utilisait des cartes. D'où l'impression
    de vrac. Elles sont désormais des `.carte` comme les autres, et leurs lignes réutilisent
-   `.ligne-interactive` + `.ligne-principale`, le motif de liste du reste de l'application. */
+   `.ligne` + `.ligne-principale`, le motif de liste du reste de l'application. */
 
 /* Formulaire de création replié dans une carte : il doit se distinguer de la liste
    au-dessous sans devenir une deuxième carte imbriquée. */
@@ -3324,7 +3322,7 @@ tr:last-child td {
 
 /* Une ligne dont le contenu de gauche peut devenir haut (créneau avec partages par groupe) :
    les actions se calent en haut plutôt qu'au centre d'un bloc de plusieurs lignes. */
-.ligne-interactive-pile {
+.ligne-pile {
   align-items: flex-start;
 }
 
@@ -3381,4 +3379,27 @@ tr:last-child td {
   border: 1px solid rgba(180, 83, 9, 0.28);
   background: rgba(251, 191, 36, 0.14);
   font-size: 0.88rem;
+}
+
+/* Préférence « réduire les animations » : on neutralise transitions et animations, et les
+   décalages au survol. Placé en dernier pour l'emporter à spécificité égale. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  .avatar-lien:hover,
+  a.kpi-tuile:hover,
+  .vignette-photo-bento:hover img,
+  .tuile-evenement:hover,
+  .tuile-groupe:hover,
+  .tuile-module:hover,
+  .carte-lien-module:hover {
+    transform: none;
+  }
 }

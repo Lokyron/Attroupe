@@ -100,7 +100,7 @@ export function TachesEvenement({ groupId, evenementId, titreEvenement, membres 
                     </option>
                   ))}
                 </select>
-                <button type="button" aria-label={t('taches.supprimer')} onClick={() => window.confirm(t('taches.supprimer_confirmation')) && agir(supprimerTache(groupId, tache.id))}>
+                <button type="button" aria-label={`${t('taches.supprimer')} ${tache.title}`} onClick={() => window.confirm(t('taches.supprimer_confirmation')) && agir(supprimerTache(groupId, tache.id))}>
                   {t('liste.croix')}
                 </button>
               </span>

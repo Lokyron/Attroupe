@@ -446,5 +446,23 @@ ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
   `notifierMembresGroupe`, alors que `fr.json` promet « nouvel événement, message ou dépense »), et dix
   capacités du serveur n'ont aucune porte d'entrée dans l'interface (mot de passe, sessions, profil et
   fuseau, modification d'une dépense, renommage d'un groupe et d'un album, modification d'un créneau
-  personnel). Le plan d'action en trois phases est au chapitre 5 du rapport ; rien n'a encore été
-  corrigé.
+  personnel). Le plan d'action en trois phases est au chapitre 5 du rapport.
+- **Phase 1 de l'audit appliquée (quick wins).** Sont corrigés : les erreurs stylées et la clé de
+  repli de `Erreur.tsx` ; le chargement infini au démarrage, qui devient un écran d'erreur avec
+  « Réessayer » (sans démonter l'arbre d'un utilisateur déjà connecté, car `recharger` sert aussi
+  après une photo changée ou un groupe quitté) ; l'adresse de flux iCal qui n'était plus affichée au
+  premier abonnement ; le message « déjà pris par X » effacé en 150 ms dans `Liste.tsx`, et les mises
+  à jour optimistes désormais annulées sur échec ; le focus clavier sur les cases et les radios ; les
+  douze contrastes sous le seuil AA, via des tokens `--accent-*-texte` distincts des accents de
+  remplissage ; `overflow-x: clip` qui rend l'en-tête collant réellement collant ; les cibles
+  tactiles sous 44 px ; le codage couleur par groupe du calendrier mensuel ; « Inter », jamais
+  chargée, retirée de la pile ; `color-scheme`, `prefers-reduced-motion` et la garde `hover: hover` ;
+  une classe `.ligne` inerte distincte de `.ligne-interactive` ; `inputMode="decimal"` et les dates
+  calculées en local et non en UTC dans les dépenses ; les `aria-label` qui nomment leur cible ; les
+  libellés nus et le vocabulaire unifié ; l'orthotypographie française de `fr.json` (195 valeurs) ;
+  environ 130 lignes de CSS mort et 6 clés mortes supprimées, ainsi que `pages/Accueil.tsx`.
+- **Restent les phases 2 et 3**, c'est-à-dire les chantiers structurants : garde de double
+  soumission sur les 14 chemins d'écriture, modale de confirmation en remplacement des 8
+  `window.confirm`, hook de chargement partagé avec squelettes, contexte de groupe et flux SSE
+  unique, traitement central du 401, validation champ par champ des dépenses, pagination des listes
+  non bornées, écrans de compte manquants, et notifications autres que les messages.

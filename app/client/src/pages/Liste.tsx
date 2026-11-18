@@ -31,21 +31,30 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
   const [moi, setMoi] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [disparue, setDisparue] = useState(false);
-  const [flux, setFlux] = useState<EtatFlux>('reconnexion');
+  const [flux, setFlux] = useState<EtatFlux | null>(null);
   const [reordonner, setReordonner] = useState(false);
   const [saisie, setSaisie] = useState('');
   const [quantite, setQuantite] = useState('');
   const champSaisie = useRef<HTMLInputElement>(null);
+  const erreurDeLecture = useRef(false);
 
   const { recharger, planifier } = useRechargement(
     () => lireListe(groupId, listeId),
     (lue) => {
       setListe(lue);
-      setErreur(null);
+      // Une relecture réussie n'efface que l'erreur d'une relecture : jamais le message d'une action (« déjà pris par X »),
+      // que `echec` fait suivre d'une relecture et qui disparaîtrait avant d'être lu.
+      if (erreurDeLecture.current) {
+        erreurDeLecture.current = false;
+        setErreur(null);
+      }
     },
     (err) => {
       if (err instanceof ErreurApi && err.statut === 404) setDisparue(true);
-      else setErreur(messageDe(err));
+      else {
+        erreurDeLecture.current = true;
+        setErreur(messageDe(err));
+      }
     },
   );
 
@@ -67,7 +76,16 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
   const remplacer = (a: Article): void =>
     setListe((l) => (l === null ? l : { ...l, articles: l.articles.map((x) => (x.id === a.id ? a : x)) }));
 
-  const echec = (err: unknown): void => {
+  /** Début d'une action de l'utilisateur : c'est là, et non au succès d'une relecture, que l'ancienne erreur s'efface. */
+  const debutAction = (): void => {
+    erreurDeLecture.current = false;
+    setErreur(null);
+  };
+
+  /** `restaurer` annule la mise à jour optimiste sans attendre une relecture, qui peut elle-même échouer. */
+  const echec = (err: unknown, restaurer?: () => void): void => {
+    restaurer?.();
+    erreurDeLecture.current = false;
     setErreur(
       err instanceof ErreurApi && err.cle === 'article.deja_pris'
         ? t('liste.deja_pris_par', { nom: nomDuGagnant(err.donnees, 'pris_par') ?? t('liste.quelquun') })
@@ -77,13 +95,17 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
   };
 
   const cocher = (a: Article): void => {
+    debutAction();
     remplacer({ ...a, is_done: !a.is_done });
-    definirFait(groupId, listeId, a.id, !a.is_done).then(remplacer).catch(echec);
+    definirFait(groupId, listeId, a.id, !a.is_done)
+      .then(remplacer)
+      .catch((err: unknown) => echec(err, () => remplacer(a)));
   };
 
   const prendre = (a: Article): void => {
     const aMoi = a.claimed_by_membership_id === moi;
-    definirPreneur(groupId, listeId, a.id, !aMoi).then(remplacer).catch(echec);
+    debutAction();
+    definirPreneur(groupId, listeId, a.id, !aMoi).then(remplacer).catch((err: unknown) => echec(err));
   };
 
   const deplacer = (a: Article, sens: -1 | 1): void => {
@@ -91,8 +113,12 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
     const autres = liste.articles.filter((x) => x.id !== a.id);
     const rang = liste.articles.indexOf(a) + sens;
     if (rang < 0 || rang > autres.length) return;
+    const avant = liste;
+    debutAction();
     setListe({ ...liste, articles: [...autres.slice(0, rang), a, ...autres.slice(rang)] });
-    deplacerArticle(groupId, listeId, a.id, rang === 0 ? null : (autres[rang - 1]?.id ?? null)).catch(echec);
+    deplacerArticle(groupId, listeId, a.id, rang === 0 ? null : (autres[rang - 1]?.id ?? null)).catch((err: unknown) =>
+      echec(err, () => setListe(avant)),
+    );
   };
 
   const ajouter = (evt: FormEvent): void => {
@@ -100,6 +126,7 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
     const label = saisie.trim();
     if (label === '') return;
     const qte = quantite.trim() === '' ? null : quantite.trim();
+    debutAction();
     setSaisie('');
     setQuantite('');
     champSaisie.current?.focus();
@@ -107,12 +134,24 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
       .then((a) =>
         setListe((l) => (l === null || l.articles.some((x) => x.id === a.id) ? l : { ...l, articles: [...l.articles, a] })),
       )
-      .catch(echec);
+      // Le texte tapé est rendu à l'utilisateur, sauf s'il a déjà commencé à en saisir un autre.
+      .catch((err: unknown) =>
+        echec(err, () => {
+          setSaisie((s) => (s === '' ? label : s));
+          setQuantite((q) => (q === '' ? (qte ?? '') : q));
+        }),
+      );
   };
 
   const retirer = (a: Article): void => {
+    const avant = liste;
+    debutAction();
     setListe((l) => (l === null ? l : { ...l, articles: l.articles.filter((x) => x.id !== a.id) }));
-    retirerArticle(groupId, listeId, a.id).catch(echec);
+    retirerArticle(groupId, listeId, a.id).catch((err: unknown) =>
+      echec(err, () => {
+        if (avant !== null) setListe(avant);
+      }),
+    );
   };
 
   const retourListes = `#/groupe/${encodeURIComponent(groupId)}/listes`;
@@ -130,7 +169,7 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
       </section>
     );
   }
-  if (liste === null) return <Erreur message={erreur} />;
+  if (liste === null) return <Erreur message={erreur} onReessayer={recharger} />;
 
   const aFaire = liste.articles.filter((a) => !a.is_done);
   const coches = liste.articles.filter((a) => a.is_done);
@@ -153,7 +192,7 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
               type="button"
               className="bouton-compact"
               disabled={indexGlobal === 0}
-              aria-label={t('liste.monter')}
+              aria-label={`${t('liste.monter')} ${a.label}`}
               onClick={() => deplacer(a, -1)}
             >
               {t('liste.fleche_haut')}
@@ -162,7 +201,7 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
               type="button"
               className="bouton-compact"
               disabled={indexGlobal === liste.articles.length - 1}
-              aria-label={t('liste.descendre')}
+              aria-label={`${t('liste.descendre')} ${a.label}`}
               onClick={() => deplacer(a, 1)}
             >
               {t('liste.fleche_bas')}
@@ -170,7 +209,7 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
             <button
               type="button"
               className="bouton-compact bouton-danger-discret"
-              aria-label={t('liste.retirer')}
+              aria-label={`${t('liste.retirer')} ${a.label}`}
               onClick={() => retirer(a)}
             >
               <IconePoubelle className="icone-mini" />
@@ -197,7 +236,7 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
             <button
               type="button"
               className="bouton-icone-discret"
-              aria-label={t('liste.retirer')}
+              aria-label={`${t('liste.retirer')} ${a.label}`}
               onClick={() => retirer(a)}
             >
               <IconePoubelle className="icone-mini" />
@@ -233,7 +272,10 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
               className="bouton-compact"
               onClick={() => {
                 const titre = window.prompt(t('liste.renommer_invite'), liste.title);
-                if (titre !== null && titre.trim() !== '') renommerListe(groupId, listeId, titre.trim()).then(setListe).catch(echec);
+                if (titre !== null && titre.trim() !== '') {
+                  debutAction();
+                  renommerListe(groupId, listeId, titre.trim()).then(setListe).catch((err: unknown) => echec(err));
+                }
               }}
             >
               {t('liste.renommer')}
@@ -243,11 +285,12 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
               className="bouton-compact bouton-danger-discret"
               onClick={() => {
                 if (window.confirm(t('liste.supprimer_confirmation'))) {
+                  debutAction();
                   supprimerListe(groupId, listeId)
                     .then(() => {
                       window.location.hash = retourListes;
                     })
-                    .catch(echec);
+                    .catch((err: unknown) => echec(err));
                 }
               }}
             >

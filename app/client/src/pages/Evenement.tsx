@@ -283,7 +283,7 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
                 {presences.reponses.length > 0 && (
                   <ul className="liste-elements">
                     {presences.reponses.map((r) => (
-                      <li key={r.membership_id} className="ligne-interactive ligne-compacte">
+                      <li key={r.membership_id} className="ligne ligne-compacte">
                         <span>
                           {t('presence.ligne', { nom: r.display_name, reponse: t(`presence.${r.status}` as const) })}
                           {r.guests_count > 0 && ` ${t('presence.plus_invites', { n: String(r.guests_count) })}`}
@@ -323,7 +323,7 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
             ) : (
               <ul className="liste-elements">
                 {evenement.organisateurs.map((o) => (
-                  <li key={o.membership_id} className="ligne-interactive ligne-compacte">
+                  <li key={o.membership_id} className="ligne ligne-compacte">
                     <span>{o.display_name}</span>
                     {evenement.peut_modifier && (
                       <button

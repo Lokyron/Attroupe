@@ -18,6 +18,7 @@ import {
   IconeTableauDeBord,
   IconeUtilisateur,
 } from './components/Icones';
+import { Erreur, messageDe } from './components/Erreur';
 import { t } from './i18n';
 import { pageDuLien } from './lien';
 import { Compte } from './pages/Compte';
@@ -62,7 +63,7 @@ type Route =
   | { type: 'evenement'; id: string; evenementId: string }
   | { type: 'evenement-nouveau'; id: string };
 
-type Etat = { type: 'chargement' } | { type: 'anonyme' } | { type: 'connecte'; moi: Moi };
+type Etat = { type: 'chargement' } | { type: 'anonyme' } | { type: 'connecte'; moi: Moi } | { type: 'erreur'; message: string };
 
 function lireRoute(): Route {
   const [, premier, second, troisieme, quatrieme] = window.location.hash.split('/');
@@ -125,6 +126,8 @@ export function App() {
   }, []);
 
   const recharger = useCallback((): void => {
+    // Depuis l'écran d'erreur, « Réessayer » repasse par le chargement ; ailleurs on ne démonte rien.
+    setEtat((actuel): Etat => (actuel.type === 'erreur' ? { type: 'chargement' } : actuel));
     lireMoi()
       .then((moi) => {
         setEtat({ type: 'connecte', moi });
@@ -132,7 +135,19 @@ export function App() {
       })
       .catch((erreur: unknown) => {
         if (erreur instanceof ErreurApi && erreur.statut === 401) setEtat({ type: 'anonyme' });
-        else console.error(erreur);
+        else {
+          // Coupure réseau, 500, 502 pendant un redéploiement… : on ne reste pas sur « Chargement… ».
+          console.error(erreur);
+          // Mais `recharger` sert aussi APRÈS la connexion (photo de profil changée, groupe créé
+          // ou quitté, invitation acceptée) : y basculer sur l'écran d'erreur démonterait tout
+          // l'arbre connecté, et avec lui les formulaires en cours et l'adresse de flux iCal, qui
+          // n'est affichée qu'une fois. Un utilisateur déjà connecté garde donc son écran.
+          setEtat((actuel): Etat =>
+            actuel.type === 'connecte'
+              ? actuel
+              : { type: 'erreur', message: navigator.onLine ? messageDe(erreur) : t('app.hors_ligne') },
+          );
+        }
       });
   }, [rafraichirNotifications]);
 
@@ -154,6 +169,13 @@ export function App() {
   if (lien === 'reinitialisation') return <Reinitialisation />;
 
   if (etat.type === 'chargement') return <p className="accueil">{t('commun.chargement')}</p>;
+  if (etat.type === 'erreur') {
+    return (
+      <div className="accueil">
+        <Erreur message={etat.message} onReessayer={recharger} />
+      </div>
+    );
+  }
   if (etat.type === 'anonyme') {
     return (
       <>

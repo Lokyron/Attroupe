@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type RefObject } from 'react';
 import { instantDepuisHeureLocale } from '../agenda/dates';
 import { libelleDateHoraire } from '../agenda/format';
 import {
@@ -30,6 +30,37 @@ function dateCourte(instant: string): string {
   return new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(instant));
 }
 
+/** État d'un chargement distant : on ne déduit pas « en cours » de `null`, sinon un échec reste « Chargement… » à jamais. */
+type EtatChargement = 'chargement' | 'erreur' | 'pret';
+
+/**
+ * Réduit la chaîne `User-Agent` brute (« Mozilla/5.0 (iPhone; CPU iPhone OS… ») à un nom lisible, par exemple « Safari, iPhone ».
+ * Renvoie `null` quand rien de connu n'est reconnu : mieux vaut ne rien afficher que du bruit technique.
+ */
+function appareilLisible(agent: string): string | null {
+  const logiciel =
+    /Google-?Calendar/i.test(agent) ? 'Google Agenda'
+    : /dataaccessd|CalendarAgent|accountsd/i.test(agent) ? 'Calendrier Apple'
+    : /Thunderbird/i.test(agent) ? 'Thunderbird'
+    : /Outlook/i.test(agent) ? 'Outlook'
+    : /Edg\//.test(agent) ? 'Edge'
+    : /OPR\//.test(agent) ? 'Opera'
+    : /Firefox\//.test(agent) ? 'Firefox'
+    : /Chrome\//.test(agent) ? 'Chrome'
+    : /Safari\//.test(agent) ? 'Safari'
+    : null;
+  const systeme =
+    /iPhone/.test(agent) ? 'iPhone'
+    : /iPad/.test(agent) ? 'iPad'
+    : /Android/.test(agent) ? 'Android'
+    : /Windows/.test(agent) ? 'Windows'
+    : /Macintosh|Mac OS X/.test(agent) ? 'Mac'
+    : /Linux/.test(agent) ? 'Linux'
+    : null;
+  const morceaux = [logiciel, systeme].filter((m): m is string => m !== null);
+  return morceaux.length === 0 ? null : morceaux.join(', ');
+}
+
 /**
  * Création d'un abonnement : l'adresse complète n'est affichée qu'ICI, une seule fois, et l'application
  * n'en garde aucune copie lisible.
@@ -38,17 +69,24 @@ function dateCourte(instant: string): string {
  * `onFerme` — le bouton « J'ai terminé » — referme le formulaire. Si le parent repliait le formulaire dès
  * la création, ce composant serait démonté avant d'avoir montré l'adresse, et l'abonnement tout juste créé
  * serait bon à révoquer.
+ *
+ * Même piège côté parent avec un compte sans abonnement : le formulaire n'y est visible que parce que la liste est
+ * vide, et la création la rend non vide. Le parent force donc `ouvert` à la création (voir `onCree` plus bas), et
+ * `onAdresse` lui signale qu'une adresse est à l'écran pour qu'il masque son bouton « Annuler », qui démonterait
+ * le composant sans avoir laissé le temps de la copier.
  */
 function NouvelAbonnement({
   groupes,
   abonnements,
   onCree,
   onFerme,
+  onAdresse,
 }: {
   groupes: GroupeResume[];
   abonnements: Abonnement[] | null;
   onCree: () => void;
   onFerme: () => void;
+  onAdresse: (visible: boolean) => void;
 }) {
   const [nom, setNom] = useState('');
   const [groupeId, setGroupeId] = useState('');
@@ -58,11 +96,18 @@ function NouvelAbonnement({
   const [copie, setCopie] = useState<{ cible: 'webcal' | 'https'; ok: boolean } | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
 
+  const champWebcal = useRef<HTMLInputElement>(null);
+  const champHttps = useRef<HTMLInputElement>(null);
+
   // Le jeton qu'on vient de créer est révoqué depuis la liste : son adresse ne vaut plus rien, le panneau ne la garde pas affichée.
   const idRevoque = cree !== null && abonnements?.some((a) => a.id === cree.id && a.revoked_at !== null) === true;
+  const adresseVisible = cree !== null && !idRevoque;
+
+  // Le parent doit savoir qu'une adresse (qu'on ne reverra jamais) est à l'écran ; au démontage, il n'y en a plus.
   useEffect(() => {
-    if (idRevoque) setCree(null);
-  }, [idRevoque]);
+    onAdresse(adresseVisible);
+    return () => onAdresse(false);
+  }, [adresseVisible, onAdresse]);
 
   const soumettre = (e: FormEvent): void => {
     e.preventDefault();
@@ -82,14 +127,26 @@ function NouvelAbonnement({
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  const copier = (cible: 'webcal' | 'https', adresse: string): void => {
-    navigator.clipboard.writeText(adresse).then(
-      () => setCopie({ cible, ok: true }),
-      () => setCopie({ cible, ok: false }),
-    );
+  // `navigator.clipboard` est ABSENT hors contexte sécurisé (Attroupe auto-hébergé, parfois en HTTP sur le réseau local) :
+  // l'appel lève alors un `TypeError` synchrone que les gestionnaires de la promesse n'attraperaient pas. Dans tous les
+  // cas d'échec, on sélectionne le champ pour que l'utilisateur copie à la main, et on affiche le message de repli.
+  const copier = (cible: 'webcal' | 'https', adresse: string, champ: RefObject<HTMLInputElement | null>): void => {
+    const repli = (): void => {
+      champ.current?.select();
+      setCopie({ cible, ok: false });
+    };
+    try {
+      if (typeof navigator.clipboard?.writeText !== 'function') {
+        repli();
+        return;
+      }
+      navigator.clipboard.writeText(adresse).then(() => setCopie({ cible, ok: true }), repli);
+    } catch {
+      repli();
+    }
   };
 
-  if (cree !== null && !idRevoque) {
+  if (cree !== null && adresseVisible) {
     return (
       <div role="status" className="flux-cree">
         <h4>{t('flux.url_titre')}</h4>
@@ -107,6 +164,7 @@ function NouvelAbonnement({
           <p className="texte-doux">{t('flux.webcal_aide')}</p>
           <div className="barre-compacte">
             <input
+              ref={champWebcal}
               type="text"
               readOnly
               className="champ-adresse"
@@ -114,7 +172,7 @@ function NouvelAbonnement({
               aria-label={t('flux.webcal_titre')}
               onFocus={(e) => e.target.select()}
             />
-            <button type="button" className="bouton bouton-compact" onClick={() => copier('webcal', cree.url_webcal)}>
+            <button type="button" className="bouton bouton-compact" onClick={() => copier('webcal', cree.url_webcal, champWebcal)}>
               {t('flux.copier')}
             </button>
           </div>
@@ -127,6 +185,7 @@ function NouvelAbonnement({
           <p className="texte-doux">{t('flux.url_https_aide')}</p>
           <div className="barre-compacte">
             <input
+              ref={champHttps}
               type="text"
               readOnly
               className="champ-adresse"
@@ -134,7 +193,7 @@ function NouvelAbonnement({
               aria-label={t('flux.url_https_titre')}
               onFocus={(e) => e.target.select()}
             />
-            <button type="button" className="bouton bouton-compact" onClick={() => copier('https', cree.url)}>
+            <button type="button" className="bouton bouton-compact" onClick={() => copier('https', cree.url, champHttps)}>
               {t('flux.copier')}
             </button>
           </div>
@@ -203,20 +262,29 @@ function NouvelAbonnement({
 /** Mon agenda personnel : liste des créneaux, création, suppression et partage par groupe. */
 function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
   const [creneaux, setCreneaux] = useState<CreneauPersonnel[] | null>(null);
+  const [etat, setEtat] = useState<EtatChargement>('chargement');
   const [titre, setTitre] = useState('');
   const [journeeEntiere, setJourneeEntiere] = useState(false);
   const [debut, setDebut] = useState('');
   const [fin, setFin] = useState('');
-  const [fuseau, setFuseau] = useState('Europe/Paris');
+  const [fuseau, setFuseau] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [lieu, setLieu] = useState('');
   const [description, setDescription] = useState('');
   const [ouvert, setOuvert] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
 
   const charger = useCallback((): void => {
+    setEtat('chargement');
+    setErreur(null);
     listerMonAgenda()
-      .then(setCreneaux)
-      .catch((err: unknown) => setErreur(messageDe(err)));
+      .then((lus) => {
+        setCreneaux(lus);
+        setEtat('pret');
+      })
+      .catch((err: unknown) => {
+        setEtat('erreur');
+        setErreur(messageDe(err));
+      });
   }, []);
   useEffect(charger, [charger]);
 
@@ -287,7 +355,7 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
         )}
       </div>
       <p className="texte-doux">{t('agenda_perso.explication')}</p>
-      <Erreur message={erreur} />
+      <Erreur message={erreur} {...(etat === 'erreur' ? { onReessayer: charger } : {})} />
 
       {formulaireVisible && (
         <form onSubmit={soumettre} className="formulaire formulaire-encadre">
@@ -301,9 +369,14 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
               type="checkbox"
               checked={journeeEntiere}
               onChange={(e) => {
+                // Les dates déjà saisies sont conservées, converties au format du champ : « 2026-05-01T10:00 » ne
+                // s'affiche pas dans un champ `date`, et inversement une date seule n'est pas valide en `datetime-local`.
                 setJourneeEntiere(e.target.checked);
-                setDebut('');
-                setFin('');
+                const versJournee = e.target.checked;
+                const convertir = (v: string): string =>
+                  v === '' ? v : versJournee ? v.slice(0, 10) : v.length === 10 ? `${v}T00:00` : v;
+                setDebut(convertir);
+                setFin(convertir);
               }}
             />
             {t('agenda_perso.champ_journee')}
@@ -338,12 +411,16 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
         </form>
       )}
 
-      {creneaux === null && <p className="texte-doux">{t('commun.chargement')}</p>}
+      {etat === 'chargement' && (
+        <p role="status" className="texte-doux">
+          {t('commun.chargement')}
+        </p>
+      )}
       {vide && <p className="texte-doux">{t('agenda_perso.aucun')}</p>}
       {creneaux !== null && creneaux.length > 0 && (
         <ul className="liste-elements">
           {creneaux.map((c) => (
-            <li key={c.id} className="ligne-interactive ligne-interactive-pile">
+            <li key={c.id} className="ligne ligne-pile">
               <div className="ligne-principale">
                 {/* `ligne-principale` est une grille : une pastille posée directement dedans s'étirerait sur
                     toute la largeur. `ligne-badges` est la rangée flex prévue pour ça. */}
@@ -378,7 +455,7 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
                 )}
               </div>
               {c.calendar_source_id === null ? (
-                <button type="button" className="bouton bouton-compact bouton-danger-discret" onClick={() => supprimer(c.id)}>
+                <button type="button" className="bouton bouton-compact bouton-danger-discret" aria-label={`${t('agenda_perso.supprimer')} ${c.title}`} onClick={() => supprimer(c.id)}>
                   {t('agenda_perso.supprimer')}
                 </button>
               ) : (
@@ -497,8 +574,9 @@ function CartePhotoProfil({ moi, onProfilChange }: { moi: Moi; onProfilChange?: 
 /** Une ligne d'abonnement : nom, portée, usage, et l'action à droite. */
 function LigneAbonnement({ abonnement, onRevoquer }: { abonnement: Abonnement; onRevoquer: (id: string) => void }) {
   const a = abonnement;
+  const appareil = a.last_user_agent === null ? null : appareilLisible(a.last_user_agent);
   return (
-    <li className="ligne-interactive">
+    <li className="ligne">
       <div className="ligne-principale">
         <strong>{a.label ?? t('flux.sans_nom')}</strong>
         <span className="ligne-meta">
@@ -511,13 +589,16 @@ function LigneAbonnement({ abonnement, onRevoquer }: { abonnement: Abonnement; o
         </span>
         <span className="ligne-meta">
           {a.last_used_at === null ? t('flux.jamais_utilise') : t('flux.derniere_utilisation', { date: dateCourte(a.last_used_at) })}
-          {a.last_user_agent !== null && `${t('flux.separateur')}${t('flux.appareil', { agent: a.last_user_agent })}`}
+          {appareil !== null && `${t('flux.separateur')}${t('flux.appareil', { agent: appareil })}`}
         </span>
       </div>
       {a.revoked_at !== null ? (
         <span className="pilule pilule-neutre">{t('flux.revoque')}</span>
       ) : (
-        <button type="button" className="bouton bouton-compact bouton-danger-discret" onClick={() => onRevoquer(a.id)}>
+        <button type="button" className="bouton bouton-compact bouton-danger-discret"
+          aria-label={`${t('flux.revoquer')} ${a.label ?? t('flux.sans_nom')}`}
+          onClick={() => onRevoquer(a.id)}
+        >
           {t('flux.revoquer')}
         </button>
       )}
@@ -536,11 +617,23 @@ export function Compte({
   onProfilChange?: (() => void) | undefined;
 }) {
   const [abonnements, setAbonnements] = useState<Abonnement[] | null>(null);
+  const [etat, setEtat] = useState<EtatChargement>('chargement');
   const [ouvert, setOuvert] = useState(false);
+  const [adresseVisible, setAdresseVisible] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
 
   const charger = useCallback((): void => {
-    listerAbonnements().then(setAbonnements).catch((err: unknown) => setErreur(messageDe(err)));
+    setEtat('chargement');
+    setErreur(null);
+    listerAbonnements()
+      .then((lus) => {
+        setAbonnements(lus);
+        setEtat('pret');
+      })
+      .catch((err: unknown) => {
+        setEtat('erreur');
+        setErreur(messageDe(err));
+      });
   }, []);
   useEffect(charger, [charger]);
 
@@ -569,20 +662,38 @@ export function Compte({
       <section className="carte">
         <div className="carte-entete">
           <h3>{t('flux.titre')}</h3>
-          {!vide && (
+          {/* Masqué tant que l'adresse du flux est affichée : « Annuler » démonterait le panneau, et l'adresse ne sera plus jamais montrée. */}
+          {!vide && !adresseVisible && (
             <button type="button" className="bouton bouton-compact" onClick={() => setOuvert(!ouvert)}>
               {ouvert ? t('commun.annuler') : t('flux.nouveau')}
             </button>
           )}
         </div>
         <p className="texte-doux">{t('flux.explication')}</p>
-        <Erreur message={erreur} />
+        <Erreur message={erreur} {...(etat === 'erreur' ? { onReessayer: charger } : {})} />
 
         {formulaireVisible && (
-          <NouvelAbonnement groupes={groupes} abonnements={abonnements} onCree={charger} onFerme={() => setOuvert(false)} />
+          <NouvelAbonnement
+            groupes={groupes}
+            abonnements={abonnements}
+            // PIÈGE : avec zéro abonnement actif, le formulaire n'est visible que par `vide`. Dès que la création
+            // réussit, la liste n'est plus vide, `formulaireVisible` retomberait à faux et `NouvelAbonnement`
+            // serait démonté avec l'adresse secrète, jamais vue. On force donc `ouvert` : le panneau ne se
+            // referme que par `onFerme` (« J'ai terminé »).
+            onCree={() => {
+              setOuvert(true);
+              charger();
+            }}
+            onFerme={() => setOuvert(false)}
+            onAdresse={setAdresseVisible}
+          />
         )}
 
-        {abonnements === null && <p className="texte-doux">{t('commun.chargement')}</p>}
+        {etat === 'chargement' && (
+          <p role="status" className="texte-doux">
+            {t('commun.chargement')}
+          </p>
+        )}
         {vide && <p className="texte-doux">{t('flux.aucun')}</p>}
         {actifs !== null && actifs.length > 0 && (
           <ul className="liste-elements">

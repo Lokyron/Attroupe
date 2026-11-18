@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   ajouterJours,
   aujourdhui,
@@ -90,8 +90,13 @@ function libellePastilleCalendrier(el: ElementCalendrier): string {
     : t('tableau.pastille_perso', { titre: el.title });
 }
 
+/**
+ * Même comportement que `formaterMontant` de `Depenses.tsx` : l'exposant est celui de la devise (lu dans Intl,
+ * qui connaît les exposants ISO 4217), et non un cas particulier codé en dur. À factoriser dans `lib/`.
+ */
 function formaterMontant(montantMineur: number, devise: string, avecSigne = false): string {
-  const exposant = devise === 'JPY' ? 0 : 2;
+  const exposant = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: devise }).resolvedOptions()
+    .maximumFractionDigits ?? 2;
   const valeur = montantMineur / 10 ** exposant;
   const formate = new Intl.NumberFormat('fr-FR', {
     style: 'currency',
@@ -103,7 +108,12 @@ function formaterMontant(montantMineur: number, devise: string, avecSigne = fals
   return formate;
 }
 
-function formaterDateEvenement(iso: string, touteLaJournee: boolean): string {
+/**
+ * Date d'un événement dans SON fuseau (comme les vignettes et `jourDeDebut`), jamais celui du navigateur.
+ * Un événement « toute la journée » est une date sans heure, lue en UTC : sinon, sous un fuseau négatif,
+ * le jour affiché serait la veille.
+ */
+function formaterDateEvenement(iso: string, touteLaJournee: boolean, fuseau: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   if (touteLaJournee) {
@@ -111,6 +121,7 @@ function formaterDateEvenement(iso: string, touteLaJournee: boolean): string {
       weekday: 'short',
       day: 'numeric',
       month: 'short',
+      timeZone: 'UTC',
     }).format(date);
     return `${jour} · ${t('tableau.journee_entiere')}`;
   }
@@ -120,15 +131,18 @@ function formaterDateEvenement(iso: string, touteLaJournee: boolean): string {
     month: 'short',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: fuseau,
   }).format(date);
 }
 
+/** Date AAAA-MM-JJ d'une dépense (sans heure) : lue en UTC pour ne pas glisser d'un jour selon le fuseau. */
 function formaterDateCourte(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return new Intl.DateTimeFormat('fr-FR', {
     day: 'numeric',
     month: 'short',
+    timeZone: 'UTC',
   }).format(date);
 }
 
@@ -137,7 +151,7 @@ function formaterDateRelative(el: ElementCalendrier, jourAujourdHui: string): st
   const horaire = el.all_day ? t('tableau.journee_entiere') : libelleHoraire(el);
   if (jour === jourAujourdHui) return `${t('tableau.aujourdhui')} · ${horaire}`;
   if (jour === ajouterJours(jourAujourdHui, 1)) return `${t('tableau.demain')} · ${horaire}`;
-  return formaterDateEvenement(el.starts_at, el.all_day);
+  return formaterDateEvenement(el.starts_at, el.all_day, el.time_zone);
 }
 
 function partiesVignetteDate(el: ElementCalendrier): { mois: string; jour: string } {
@@ -174,9 +188,12 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
   const [vueCalendrier, setVueCalendrier] = useState<VueCalendrier>(vueInitialeCalendrier);
   const [ancre, setAncre] = useState<string>(aujourdhui);
   const [jourMobileSelectionne, setJourMobileSelectionne] = useState<string | null>(null);
+  // Incrémenté par « Réessayer » : relance l'effet de chargement sans changer de fenêtre.
+  const [tentative, setTentative] = useState(0);
   const [fenetreChargee, setFenetreChargee] = useState<'defaut' | { readonly du: string; readonly au: string } | null>(null);
 
   useEffect(() => {
+    setErreur(null);
     const fenetreDemandee = calculerFenetre(vueCalendrier, ancre);
     const dejaCouvert =
       fenetreDemandee === undefined
@@ -201,7 +218,7 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
     return () => {
       actif = false;
     };
-  }, [vueCalendrier, ancre, fenetreChargee]);
+  }, [vueCalendrier, ancre, fenetreChargee, tentative]);
 
   const couleurParGroupe = new Map<string, CouleurGroupe>();
   (donnees?.groupes ?? moi.groupes).forEach((g, idx) => {
@@ -209,13 +226,35 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
   });
 
   const jourActuel = aujourdhui();
-  const groupeCibleAction = filtreGroupe !== '' ? filtreGroupe : (donnees?.groupes[0]?.group_id ?? moi.groupes[0]?.group_id ?? '');
-  const hrefActionDepense =
-    groupeCibleAction !== '' ? `#/groupe/${encodeURIComponent(groupeCibleAction)}/depenses` : '#/nouveau';
-  const hrefActionListe =
-    groupeCibleAction !== '' ? `#/groupe/${encodeURIComponent(groupeCibleAction)}/listes` : '#/nouveau';
-  const hrefActionEvenement =
-    filtreGroupe !== '' ? `#/groupe/${encodeURIComponent(filtreGroupe)}/evenement-nouveau` : '#/compte';
+  // Groupe visé par les actions rapides : l'unique groupe de l'utilisateur, sinon celui du filtre. Avec plusieurs
+  // groupes et le filtre « Tous », il n'y a pas de cible : les actions sont désactivées plutôt que de deviner.
+  const groupesConnus = donnees?.groupes ?? moi.groupes;
+  const groupeCible =
+    groupesConnus.length === 1
+      ? (groupesConnus[0] ?? null)
+      : (groupesConnus.find((g) => g.group_id === filtreGroupe) ?? null);
+  const idAideActions = 'aide-actions-groupe';
+  const aideActions =
+    groupesConnus.length === 0 ? t('tableau.groupes_vide') : t('tableau.choisir_groupe_aide');
+
+  const actionCiblee = (suffixe: string, cle: CleTexte, icone: ReactNode, classe: string): ReactNode => {
+    const libelle = t(cle);
+    if (groupeCible === null) {
+      return (
+        <button type="button" className={classe} aria-disabled="true" aria-describedby={idAideActions}>
+          {icone}
+          <span>{libelle}</span>
+        </button>
+      );
+    }
+    const nomComplet = `${libelle} · ${groupeCible.name}`;
+    return (
+      <a href={`#/groupe/${encodeURIComponent(groupeCible.group_id)}/${suffixe}`} className={classe} title={nomComplet} aria-label={nomComplet}>
+        {icone}
+        <span>{libelle}</span>
+      </a>
+    );
+  };
 
   const evenementsGroupesFiltres =
     donnees === null
@@ -323,7 +362,41 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
       : t('agenda.semaine_du', { jour: libelleJour(semaine[0] ?? ancre, { day: 'numeric', month: 'long' }) });
 
   const premierGroupePhotos = groupesVisibles.find((g) => g.photos_actives) ?? donnees?.groupes.find((g) => g.photos_actives);
-  const premierGroupeDepenses = depensesFiltrees[0]?.group_id ?? soldesFiltres[0]?.group_id ?? groupeCibleAction;
+  // Repli sur le premier groupe connu, et non sur `groupeCible` : c'est un lien de CONSULTATION,
+  // il peut viser un groupe par défaut sans risque. Seules les actions de création exigent une
+  // cible non ambiguë — sans ce repli, la tuile menait à la création de groupe.
+  const premierGroupeDepenses =
+    depensesFiltrees[0]?.group_id ??
+    soldesFiltres[0]?.group_id ??
+    groupeCible?.group_id ??
+    groupesConnus[0]?.group_id ??
+    '';
+
+  // Sans événement à venir ni groupe ciblé, la tuile n'a nulle part où mener : elle n'est alors pas un lien.
+  const hrefTuileProchain =
+    prochainEvenement !== null
+      ? lienElementCalendrier(prochainEvenement)
+      : groupeCible !== null
+        ? `#/groupe/${encodeURIComponent(groupeCible.group_id)}/evenement-nouveau`
+        : null;
+  const contenuTuileProchain = (
+    <>
+      <div className="kpi-texte">
+        <span className="kpi-etiquette">{t('tableau.kpi_prochain_event')}</span>
+        <strong className="kpi-valeur">
+          {prochainEvenement !== null ? prochainEvenement.title : t('tableau.kpi_aucun_event')}
+        </strong>
+        <span className="kpi-sous kpi-indigo">
+          {prochainEvenement !== null
+            ? formaterDateRelative(prochainEvenement, jourActuel)
+            : t('tableau.kpi_planifier')}
+        </span>
+      </div>
+      <span className="kpi-icone-badge kpi-badge-indigo" aria-hidden="true">
+        <IconeCalendrier className="kpi-icone" />
+      </span>
+    </>
+  );
 
   return (
     <div className="tableau-de-bord">
@@ -349,18 +422,24 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
           </select>
 
           <div className="actions-rapides">
-            <a href={hrefActionDepense} className="bouton action-rapide">
-              <IconePlus className="icone-action icone-emeraude" />
-              <span>{t('tableau.action_depense')}</span>
-            </a>
-            <a href={hrefActionListe} className="bouton action-rapide">
-              <IconeListe className="icone-action icone-ambre" />
-              <span>{t('tableau.action_liste')}</span>
-            </a>
-            <a href={hrefActionEvenement} className="bouton bouton-primaire action-rapide">
-              <IconeCalendrierPlus className="icone-action" />
-              <span>{t('tableau.action_evenement')}</span>
-            </a>
+            {actionCiblee(
+              'depenses',
+              'tableau.action_depense',
+              <IconePlus className="icone-action icone-emeraude" />,
+              'bouton action-rapide',
+            )}
+            {actionCiblee(
+              'listes',
+              'tableau.action_liste',
+              <IconeListe className="icone-action icone-ambre" />,
+              'bouton action-rapide',
+            )}
+            {actionCiblee(
+              'evenement-nouveau',
+              'tableau.action_evenement',
+              <IconeCalendrierPlus className="icone-action" />,
+              'bouton bouton-primaire action-rapide',
+            )}
             {onNouveauGroupe !== undefined ? (
               <button type="button" className="bouton action-rapide" onClick={onNouveauGroupe}>
                 <IconePlus className="icone-action" />
@@ -373,34 +452,27 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
               </a>
             )}
           </div>
+          {groupeCible === null && (
+            <p id={idAideActions} className="discret">
+              {aideActions}
+            </p>
+          )}
         </div>
       </section>
 
-      <Erreur message={erreur} />
+      <Erreur message={erreur} onReessayer={() => setTentative((n) => n + 1)} />
       {donnees === null && erreur === null && <p className="discret">{t('commun.chargement')}</p>}
 
       {donnees !== null && (
         <>
           <section className="barre-kpis" aria-label={t('tableau.vue_ensemble')}>
-            <a
-              href={prochainEvenement !== null ? lienElementCalendrier(prochainEvenement) : '#/compte'}
-              className="carte kpi-tuile"
-            >
-              <div className="kpi-texte">
-                <span className="kpi-etiquette">{t('tableau.kpi_prochain_event')}</span>
-                <strong className="kpi-valeur">
-                  {prochainEvenement !== null ? prochainEvenement.title : t('tableau.kpi_aucun_event')}
-                </strong>
-                <span className="kpi-sous kpi-indigo">
-                  {prochainEvenement !== null
-                    ? formaterDateRelative(prochainEvenement, jourActuel)
-                    : t('tableau.kpi_planifier')}
-                </span>
-              </div>
-              <span className="kpi-icone-badge kpi-badge-indigo" aria-hidden="true">
-                <IconeCalendrier className="kpi-icone" />
-              </span>
-            </a>
+            {hrefTuileProchain !== null ? (
+              <a href={hrefTuileProchain} className="carte kpi-tuile">
+                {contenuTuileProchain}
+              </a>
+            ) : (
+              <div className="carte kpi-tuile">{contenuTuileProchain}</div>
+            )}
 
             <a
               href={
@@ -645,7 +717,7 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
                                 </div>
                                 <strong className="ligne-titre">{el.title}</strong>
                                 <span className="ligne-meta">
-                                  {formaterDateEvenement(el.starts_at, el.all_day)}
+                                  {formaterDateEvenement(el.starts_at, el.all_day, el.time_zone)}
                                   {el.location_name !== null ? ` · ${el.location_name}` : ''}
                                 </span>
                               </div>

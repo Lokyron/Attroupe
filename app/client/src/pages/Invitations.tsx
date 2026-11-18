@@ -34,10 +34,10 @@ export function Invitations({ onChange }: { onChange: () => void }) {
           <li key={i.id}>
             {t('invitations_recues.texte', { invitant: i.invited_by_name, groupe: i.group_name, role: t(i.role === 'admin' ? 'membres.role_admin' : 'membres.role_member') })}
             {i.message !== null && <blockquote>{i.message}</blockquote>}
-            <button type="button" onClick={() => repondre(i.id, 'acceptation')}>
+            <button type="button" aria-label={`${t('invitations_recues.accepter')} ${i.group_name}`} onClick={() => repondre(i.id, 'acceptation')}>
               {t('invitations_recues.accepter')}
             </button>
-            <button type="button" onClick={() => repondre(i.id, 'refus')}>
+            <button type="button" aria-label={`${t('invitations_recues.refuser')} ${i.group_name}`} onClick={() => repondre(i.id, 'refus')}>
               {t('invitations_recues.refuser')}
             </button>
           </li>
