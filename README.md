@@ -17,6 +17,7 @@
 | Reprendre le projet techniquement | [`DOCUMENTATION.md`](DOCUMENTATION.md) |
 | Savoir où on en est | [`Avancement du projet/AVANCEMENT.md`](Avancement%20du%20projet/AVANCEMENT.md) |
 | Savoir pourquoi une décision a été prise | [`docs/decisions/`](docs/decisions/) |
+| Savoir ce qui cloche dans l'interface | [`docs/audits/`](docs/audits/) |
 
 ## Arborescence
 
@@ -25,6 +26,6 @@
 | `AGENTS.md` | Consignes pour tout assistant de code (Antigravity, Gemini, Codex…) |
 | `app/` | Le code de l'application |
 | `.claude/agents/` | Définition des six sous-agents |
-| `docs/` | Documentation technique transverse et ADR |
+| `docs/` | Documentation technique transverse, ADR et audits |
 | `Dossier de conception/` | Vision, périmètre, règles métier, modèle de données |
 | `Avancement du projet/` | Journal des jalons |

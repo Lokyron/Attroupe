@@ -428,3 +428,23 @@ ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
   serveur par des tests, pas à la main) ; la reconnexion automatique d'`EventSource` n'est vérifiée que par lecture du code ; un membre retiré
   dont l'onglet reste ouvert réessaie (30 s) indéfiniment (404 muet) ; sur macOS, lancer `npm test` deux fois de suite en moins d'une minute
   peut épuiser les ports éphémères (`EADDRNOTAVAIL`, supertest ouvre un serveur par requête) — attendre 30 s. C'est `connect EADDRNOTAVAIL 127.0.0.1:<port>` : sans gravité, sans rapport avec le code testé ; peu probable sous Linux.
+- **Audit UI / UX / frontend du 2026-11-18** :
+  [`docs/audits/2026-11-18-ui-ux-frontend.md`](docs/audits/2026-11-18-ui-ux-frontend.md). Note globale
+  5/10 : les fonctions de la V1 sont là, la couche d'usage ne l'est pas. Les huit constats critiques,
+  tous vérifiés dans le code : les erreurs ne sont ni stylées ni correctement traduites
+  (`components/Erreur.tsx:7` et `:11` — la classe `.erreur` n'est référencée par aucun TSX, et
+  `messageDe` cherche la clé inexistante `erreur.erreur.interne`) ; 14 chemins d'écriture sans garde de
+  double soumission, dont la création d'une dépense et d'un règlement ; des destructions irréversibles
+  en un clic sans confirmation (dépense, créneau de sondage et ses votes) alors que
+  `PATCH /depenses/:id` n'est pas exposé ; toute erreur non-401 au démarrage bloque sur « Chargement… »
+  (`app/client/src/App.tsx:127-137`) ; le premier abonnement iCal détruit l'adresse secrète avant
+  qu'elle soit lue (`pages/Compte.tsx:556-583`) ; `input:focus { outline: none }` (`styles.css:665`)
+  rend le focus clavier invisible sur les cases et les radios ; douze contrastes sous le seuil WCAG AA,
+  calculés, dont les boutons de vote à 3,19:1 et les bordures de champ à 1,26:1 ; et `Liste.tsx`
+  efface le message « déjà pris par X » en 150 ms. À noter aussi : seuls les messages de discussion
+  déclenchent une notification (`app/server/services/fils.ts:57` est le seul appelant de
+  `notifierMembresGroupe`, alors que `fr.json` promet « nouvel événement, message ou dépense »), et dix
+  capacités du serveur n'ont aucune porte d'entrée dans l'interface (mot de passe, sessions, profil et
+  fuseau, modification d'une dépense, renommage d'un groupe et d'un album, modification d'un créneau
+  personnel). Le plan d'action en trois phases est au chapitre 5 du rapport ; rien n'a encore été
+  corrigé.
