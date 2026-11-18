@@ -3300,3 +3300,85 @@ tr:last-child td {
   font-size: 0.85rem;
   color: var(--texte-doux);
 }
+
+/* ---------- Page « Mon compte » : agenda personnel et abonnements calendrier ----------
+   Ces deux sections étaient rendues sans aucune classe : des h3, des ul et des li nus,
+   posés sur le fond, alors que le haut de la page utilisait des cartes. D'où l'impression
+   de vrac. Elles sont désormais des `.carte` comme les autres, et leurs lignes réutilisent
+   `.ligne-interactive` + `.ligne-principale`, le motif de liste du reste de l'application. */
+
+/* Formulaire de création replié dans une carte : il doit se distinguer de la liste
+   au-dessous sans devenir une deuxième carte imbriquée. */
+.formulaire-encadre {
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--verre-bordure);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.formulaire-encadre h4 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+/* Une ligne dont le contenu de gauche peut devenir haut (créneau avec partages par groupe) :
+   les actions se calent en haut plutôt qu'au centre d'un bloc de plusieurs lignes. */
+.ligne-interactive-pile {
+  align-items: flex-start;
+}
+
+/* Panneau affiché une seule fois après la création d'un abonnement. */
+.flux-cree {
+  display: grid;
+  gap: 1rem;
+}
+
+.flux-cree h4 {
+  margin: 0;
+}
+
+.flux-bloc {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.9rem;
+  border: 1px solid var(--verre-bordure);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.flux-bloc h5 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.flux-bloc p {
+  margin: 0;
+}
+
+/* L'adresse d'abonnement est longue : elle prend la place disponible, le bouton reste à côté. */
+.champ-adresse {
+  flex: 1 1 18rem;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.flux-details summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+/* Avertissement : ni une erreur (rien n'a échoué), ni un succès discret. */
+.message-avertissement {
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(180, 83, 9, 0.28);
+  background: rgba(251, 191, 36, 0.14);
+  font-size: 0.88rem;
+}

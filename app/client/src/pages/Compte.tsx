@@ -29,8 +29,26 @@ function dateCourte(instant: string): string {
   return new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(instant));
 }
 
-/** Création d'un abonnement : l'adresse complète n'est affichée qu'ici, une seule fois. */
-function NouvelAbonnement({ groupes, abonnements, onCree }: { groupes: GroupeResume[]; abonnements: Abonnement[] | null; onCree: () => void }) {
+/**
+ * Création d'un abonnement : l'adresse complète n'est affichée qu'ICI, une seule fois, et l'application
+ * n'en garde aucune copie lisible.
+ *
+ * D'où la séparation entre `onCree` et `onFerme` : `onCree` ne fait que recharger la liste, et seul
+ * `onFerme` — le bouton « J'ai terminé » — referme le formulaire. Si le parent repliait le formulaire dès
+ * la création, ce composant serait démonté avant d'avoir montré l'adresse, et l'abonnement tout juste créé
+ * serait bon à révoquer.
+ */
+function NouvelAbonnement({
+  groupes,
+  abonnements,
+  onCree,
+  onFerme,
+}: {
+  groupes: GroupeResume[];
+  abonnements: Abonnement[] | null;
+  onCree: () => void;
+  onFerme: () => void;
+}) {
   const [nom, setNom] = useState('');
   const [groupeId, setGroupeId] = useState('');
   const [inclurePerso, setInclurePerso] = useState(false);
@@ -72,37 +90,76 @@ function NouvelAbonnement({ groupes, abonnements, onCree }: { groupes: GroupeRes
 
   if (cree !== null && !idRevoque) {
     return (
-      <div role="status">
-        <h3>{t('flux.url_titre')}</h3>
-        <p role="alert">{t('flux.url_avertissement')}</p>
-        <p>
-          <a href={cree.url_webcal} className="bouton">
+      <div role="status" className="flux-cree">
+        <h4>{t('flux.url_titre')}</h4>
+        <p role="alert" className="message-avertissement">{t('flux.url_avertissement')}</p>
+
+        <div className="flux-bloc">
+          <a href={cree.url_webcal} className="bouton bouton-primaire">
             {t('flux.ajouter_calendrier')}
           </a>
-        </p>
-        <p>{t('flux.ajouter_calendrier_aide')}</p>
-        <h4>{t('flux.webcal_titre')}</h4>
-        <p>{t('flux.webcal_aide')}</p>
-        <input type="text" readOnly value={cree.url_webcal} aria-label={t('flux.webcal_titre')} onFocus={(e) => e.target.select()} />
-        <button type="button" onClick={() => copier('webcal', cree.url_webcal)}>
-          {t('flux.copier')}
-        </button>
-        {copie?.cible === 'webcal' && (copie.ok ? <p>{t('flux.copie')}</p> : <p role="alert">{t('flux.copie_impossible')}</p>)}
-        <h4>{t('flux.url_https_titre')}</h4>
-        <p>{t('flux.url_https_aide')}</p>
-        <input type="text" readOnly value={cree.url} aria-label={t('flux.url_https_titre')} onFocus={(e) => e.target.select()} />
-        <button type="button" onClick={() => copier('https', cree.url)}>
-          {t('flux.copier')}
-        </button>
-        {copie?.cible === 'https' && (copie.ok ? <p>{t('flux.copie')}</p> : <p role="alert">{t('flux.copie_impossible')}</p>)}
-        <p>
-          <a href={lienGoogleAgenda(cree.url)} className="bouton" target="_blank" rel="noopener noreferrer">
-            {t('flux.google_lien')}
-          </a>
-        </p>
-        <p>{t('flux.google_aide')}</p>
-        <p>{t('flux.rafraichissement')}</p>
-        <button type="button" onClick={() => setCree(null)}>
+          <p className="texte-doux">{t('flux.ajouter_calendrier_aide')}</p>
+        </div>
+
+        <div className="flux-bloc">
+          <h5>{t('flux.webcal_titre')}</h5>
+          <p className="texte-doux">{t('flux.webcal_aide')}</p>
+          <div className="barre-compacte">
+            <input
+              type="text"
+              readOnly
+              className="champ-adresse"
+              value={cree.url_webcal}
+              aria-label={t('flux.webcal_titre')}
+              onFocus={(e) => e.target.select()}
+            />
+            <button type="button" className="bouton bouton-compact" onClick={() => copier('webcal', cree.url_webcal)}>
+              {t('flux.copier')}
+            </button>
+          </div>
+          {copie?.cible === 'webcal' &&
+            (copie.ok ? <p className="message-succes">{t('flux.copie')}</p> : <p role="alert">{t('flux.copie_impossible')}</p>)}
+        </div>
+
+        <div className="flux-bloc">
+          <h5>{t('flux.url_https_titre')}</h5>
+          <p className="texte-doux">{t('flux.url_https_aide')}</p>
+          <div className="barre-compacte">
+            <input
+              type="text"
+              readOnly
+              className="champ-adresse"
+              value={cree.url}
+              aria-label={t('flux.url_https_titre')}
+              onFocus={(e) => e.target.select()}
+            />
+            <button type="button" className="bouton bouton-compact" onClick={() => copier('https', cree.url)}>
+              {t('flux.copier')}
+            </button>
+          </div>
+          {copie?.cible === 'https' &&
+            (copie.ok ? <p className="message-succes">{t('flux.copie')}</p> : <p role="alert">{t('flux.copie_impossible')}</p>)}
+          <p>
+            <a href={lienGoogleAgenda(cree.url)} className="bouton bouton-compact" target="_blank" rel="noopener noreferrer">
+              {t('flux.google_lien')}
+            </a>
+          </p>
+          <p className="texte-doux">{t('flux.google_aide')}</p>
+        </div>
+
+        <details className="flux-details">
+          <summary>{t('flux.rafraichissement_titre')}</summary>
+          <p className="texte-doux">{t('flux.rafraichissement')}</p>
+        </details>
+
+        <button
+          type="button"
+          className="bouton bouton-primaire"
+          onClick={() => {
+            setCree(null);
+            onFerme();
+          }}
+        >
           {t('flux.fermer')}
         </button>
       </div>
@@ -110,8 +167,8 @@ function NouvelAbonnement({ groupes, abonnements, onCree }: { groupes: GroupeRes
   }
 
   return (
-    <form onSubmit={soumettre} className="formulaire">
-      <h3>{t('flux.nouveau')}</h3>
+    <form onSubmit={soumettre} className="formulaire formulaire-encadre">
+      <h4>{t('flux.nouveau')}</h4>
       <Erreur message={erreur} />
       <label>
         {t('flux.nom')}
@@ -128,15 +185,16 @@ function NouvelAbonnement({ groupes, abonnements, onCree }: { groupes: GroupeRes
           ))}
         </select>
       </label>
-      <label>
+      {/* `ligne-case` : sans elle, `.formulaire label` est une grille et la case se place AU-DESSUS de son libellé. */}
+      <label className="ligne-case">
         <input type="checkbox" checked={inclurePerso} onChange={(e) => setInclurePerso(e.target.checked)} />
         {t('flux.inclure_perso')}
       </label>
-      <label>
+      <label className="ligne-case">
         <input type="checkbox" checked={refuses} onChange={(e) => setRefuses(e.target.checked)} />
         {t('flux.refuses')}
       </label>
-      <button type="submit">{t('flux.creer')}</button>
+      <button type="submit" className="bouton bouton-primaire">{t('flux.creer')}</button>
     </form>
   );
 }
@@ -151,6 +209,7 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
   const [fuseau, setFuseau] = useState('Europe/Paris');
   const [lieu, setLieu] = useState('');
   const [description, setDescription] = useState('');
+  const [ouvert, setOuvert] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
 
   const charger = useCallback((): void => {
@@ -188,6 +247,7 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
         setFin('');
         setLieu('');
         setDescription('');
+        setOuvert(false);
         charger();
       })
       .catch((err: unknown) => setErreur(messageDe(err)));
@@ -210,102 +270,111 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  return (
-    <div>
-      <h3>{t('agenda_perso.titre')}</h3>
-      <p>{t('agenda_perso.explication')}</p>
-      <Erreur message={erreur} />
-      <form onSubmit={soumettre} className="formulaire">
-        <h4>{t('agenda_perso.nouveau')}</h4>
-        <label>
-          {t('agenda_perso.champ_titre')}
-          <input type="text" value={titre} maxLength={140} onChange={(e) => setTitre(e.target.value)} required />
-        </label>
-        <label className="ligne-case">
-          <input
-            type="checkbox"
-            checked={journeeEntiere}
-            onChange={(e) => {
-              setJourneeEntiere(e.target.checked);
-              setDebut('');
-              setFin('');
-            }}
-          />
-          {t('agenda_perso.champ_journee')}
-        </label>
-        <label>
-          {t('agenda_perso.champ_debut')}
-          <input
-            type={journeeEntiere ? 'date' : 'datetime-local'}
-            value={debut}
-            onChange={(e) => setDebut(e.target.value)}
-            required
-          />
-        </label>
-        <label>
-          {t('agenda_perso.champ_fin')}
-          <input
-            type={journeeEntiere ? 'date' : 'datetime-local'}
-            value={fin}
-            min={debut}
-            onChange={(e) => setFin(e.target.value)}
-          />
-        </label>
-        <label>
-          {t('agenda_perso.champ_fuseau')}
-          <input type="text" value={fuseau} maxLength={64} onChange={(e) => setFuseau(e.target.value)} required />
-        </label>
-        <label>
-          {t('agenda_perso.champ_lieu')}
-          <input type="text" value={lieu} maxLength={140} onChange={(e) => setLieu(e.target.value)} />
-        </label>
-        <label>
-          {t('agenda_perso.champ_description')}
-          <textarea value={description} maxLength={5000} rows={2} onChange={(e) => setDescription(e.target.value)} />
-        </label>
-        <button type="submit" disabled={titre.trim() === '' || debut === ''}>
-          {t('agenda_perso.ajouter')}
-        </button>
-      </form>
+  const vide = creneaux !== null && creneaux.length === 0;
+  // Liste vide : le formulaire s'affiche d'emblée, il n'y a rien d'autre à montrer. Sinon il est replié,
+  // pour que la page s'ouvre sur ce qu'on a déjà enregistré et non sur sept champs à remplir.
+  const formulaireVisible = ouvert || vide;
 
-      {creneaux === null && <p>{t('commun.chargement')}</p>}
-      {creneaux?.length === 0 && <p>{t('agenda_perso.aucun')}</p>}
-      <ul>
-        {creneaux?.map((c) => (
-          <li key={c.id}>
-            <strong>{c.title}</strong>
-            {t('flux.separateur')}
-            {libelleDateHoraire(c)}
-            {c.location_name !== null && <p>{t('evenement.lieu', { lieu: c.location_name })}</p>}
-            {c.description !== null && <p>{c.description}</p>}
-            {groupes.length > 0 && (
-              <div className="barre">
-                <span>{t('agenda_perso.partages_titre')}</span>
-                {groupes.map((g) => {
-                  const partage = c.partages.find((p) => p.group_id === g.group_id)?.visibility ?? 'none';
-                  return (
-                    <label key={g.group_id}>
-                      {g.name}
-                      <select
-                        value={partage}
-                        onChange={(e) => changerPartage(c.id, g.group_id, visibilitePartage(e.target.value))}
-                      >
-                        <option value="none">{t('agenda_perso.visibilite_none')}</option>
-                        <option value="busy">{t('agenda_perso.visibilite_busy')}</option>
-                        <option value="details">{t('agenda_perso.visibilite_details')}</option>
-                      </select>
-                    </label>
-                  );
-                })}
+  return (
+    <section className="carte">
+      <div className="carte-entete">
+        <h3>{t('agenda_perso.titre')}</h3>
+        {!vide && (
+          <button type="button" className="bouton bouton-compact" onClick={() => setOuvert(!ouvert)}>
+            {ouvert ? t('commun.annuler') : t('agenda_perso.nouveau')}
+          </button>
+        )}
+      </div>
+      <p className="texte-doux">{t('agenda_perso.explication')}</p>
+      <Erreur message={erreur} />
+
+      {formulaireVisible && (
+        <form onSubmit={soumettre} className="formulaire formulaire-encadre">
+          <h4>{t('agenda_perso.nouveau')}</h4>
+          <label>
+            {t('agenda_perso.champ_titre')}
+            <input type="text" value={titre} maxLength={140} onChange={(e) => setTitre(e.target.value)} required />
+          </label>
+          <label className="ligne-case">
+            <input
+              type="checkbox"
+              checked={journeeEntiere}
+              onChange={(e) => {
+                setJourneeEntiere(e.target.checked);
+                setDebut('');
+                setFin('');
+              }}
+            />
+            {t('agenda_perso.champ_journee')}
+          </label>
+          <div className="grille-champs-2">
+            <label>
+              {t('agenda_perso.champ_debut')}
+              <input type={journeeEntiere ? 'date' : 'datetime-local'} value={debut} onChange={(e) => setDebut(e.target.value)} required />
+            </label>
+            <label>
+              {t('agenda_perso.champ_fin')}
+              <input type={journeeEntiere ? 'date' : 'datetime-local'} value={fin} min={debut} onChange={(e) => setFin(e.target.value)} />
+            </label>
+          </div>
+          <div className="grille-champs-2">
+            <label>
+              {t('agenda_perso.champ_fuseau')}
+              <input type="text" value={fuseau} maxLength={64} onChange={(e) => setFuseau(e.target.value)} required />
+            </label>
+            <label>
+              {t('agenda_perso.champ_lieu')}
+              <input type="text" value={lieu} maxLength={140} onChange={(e) => setLieu(e.target.value)} />
+            </label>
+          </div>
+          <label>
+            {t('agenda_perso.champ_description')}
+            <textarea value={description} maxLength={5000} rows={2} onChange={(e) => setDescription(e.target.value)} />
+          </label>
+          <button type="submit" className="bouton bouton-primaire" disabled={titre.trim() === '' || debut === ''}>
+            {t('agenda_perso.ajouter')}
+          </button>
+        </form>
+      )}
+
+      {creneaux === null && <p className="texte-doux">{t('commun.chargement')}</p>}
+      {vide && <p className="texte-doux">{t('agenda_perso.aucun')}</p>}
+      {creneaux !== null && creneaux.length > 0 && (
+        <ul className="liste-elements">
+          {creneaux.map((c) => (
+            <li key={c.id} className="ligne-interactive ligne-interactive-pile">
+              <div className="ligne-principale">
+                <strong>{c.title}</strong>
+                <span className="ligne-meta">{libelleDateHoraire(c)}</span>
+                {c.location_name !== null && <span className="ligne-meta">{t('evenement.lieu', { lieu: c.location_name })}</span>}
+                {c.description !== null && <span className="ligne-meta">{c.description}</span>}
+                {groupes.length > 0 && (
+                  <div className="agenda-visibilite-champ">
+                    <span className="ligne-meta">{t('agenda_perso.partages_titre')}</span>
+                    {groupes.map((g) => {
+                      const partage = c.partages.find((p) => p.group_id === g.group_id)?.visibility ?? 'none';
+                      return (
+                        <label key={g.group_id} className="agenda-visibilite-champ">
+                          <span className="ligne-meta">{g.name}</span>
+                          <select value={partage} onChange={(e) => changerPartage(c.id, g.group_id, visibilitePartage(e.target.value))}>
+                            <option value="none">{t('agenda_perso.visibilite_none')}</option>
+                            <option value="busy">{t('agenda_perso.visibilite_busy')}</option>
+                            <option value="details">{t('agenda_perso.visibilite_details')}</option>
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-            <button type="button" onClick={() => supprimer(c.id)}>
-              {t('agenda_perso.supprimer')}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
+              <button type="button" className="bouton bouton-compact bouton-danger-discret" onClick={() => supprimer(c.id)}>
+                {t('agenda_perso.supprimer')}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -422,6 +491,7 @@ export function Compte({
   onProfilChange?: (() => void) | undefined;
 }) {
   const [abonnements, setAbonnements] = useState<Abonnement[] | null>(null);
+  const [ouvert, setOuvert] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
 
   const charger = useCallback((): void => {
@@ -435,38 +505,65 @@ export function Compte({
     revoquerAbonnement(id).then(charger).catch((err: unknown) => setErreur(messageDe(err)));
   };
 
+  const vide = abonnements !== null && abonnements.length === 0;
+  const formulaireVisible = ouvert || vide;
+
   return (
     <section className="page-pile">
       <h2>{t('compte.titre')}</h2>
       <CartePhotoProfil moi={moi} onProfilChange={onProfilChange} />
       <CarteNotificationsPush />
       <MonAgendaPersonnel groupes={groupes} />
-      <h3>{t('flux.titre')}</h3>
-      <p>{t('flux.explication')}</p>
-      <Erreur message={erreur} />
-      <NouvelAbonnement groupes={groupes} abonnements={abonnements} onCree={charger} />
-      {abonnements === null && <p>{t('commun.chargement')}</p>}
-      {abonnements?.length === 0 && <p>{t('flux.aucun')}</p>}
-      <ul>
-        {abonnements?.map((a) => (
-          <li key={a.id}>
-            <strong>{a.label ?? t('flux.sans_nom')}</strong>
-            {t('flux.separateur')}
-            {a.group_id === null ? t('flux.tous') : a.group_name === null ? t('flux.groupe_quitte') : t('flux.groupe', { groupe: a.group_name })}
-            {a.include_personal && `${t('flux.separateur')}${t('flux.avec_perso')}`}
-            <br />
-            {a.last_used_at === null ? t('flux.jamais_utilise') : t('flux.derniere_utilisation', { date: dateCourte(a.last_used_at) })}
-            {a.last_user_agent !== null && `${t('flux.separateur')}${t('flux.appareil', { agent: a.last_user_agent })}`}
-            {a.revoked_at !== null ? (
-              <em>{`${t('flux.separateur')}${t('flux.revoque')}`}</em>
-            ) : (
-              <button type="button" onClick={() => revoquer(a.id)}>
-                {t('flux.revoquer')}
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
+
+      <section className="carte">
+        <div className="carte-entete">
+          <h3>{t('flux.titre')}</h3>
+          {!vide && (
+            <button type="button" className="bouton bouton-compact" onClick={() => setOuvert(!ouvert)}>
+              {ouvert ? t('commun.annuler') : t('flux.nouveau')}
+            </button>
+          )}
+        </div>
+        <p className="texte-doux">{t('flux.explication')}</p>
+        <Erreur message={erreur} />
+
+        {formulaireVisible && (
+          <NouvelAbonnement groupes={groupes} abonnements={abonnements} onCree={charger} onFerme={() => setOuvert(false)} />
+        )}
+
+        {abonnements === null && <p className="texte-doux">{t('commun.chargement')}</p>}
+        {vide && <p className="texte-doux">{t('flux.aucun')}</p>}
+        {abonnements !== null && abonnements.length > 0 && (
+          <ul className="liste-elements">
+            {abonnements.map((a) => (
+              <li key={a.id} className="ligne-interactive">
+                <div className="ligne-principale">
+                  <strong>{a.label ?? t('flux.sans_nom')}</strong>
+                  <span className="ligne-meta">
+                    {a.group_id === null
+                      ? t('flux.tous')
+                      : a.group_name === null
+                        ? t('flux.groupe_quitte')
+                        : t('flux.groupe', { groupe: a.group_name })}
+                    {a.include_personal && `${t('flux.separateur')}${t('flux.avec_perso')}`}
+                  </span>
+                  <span className="ligne-meta">
+                    {a.last_used_at === null ? t('flux.jamais_utilise') : t('flux.derniere_utilisation', { date: dateCourte(a.last_used_at) })}
+                    {a.last_user_agent !== null && `${t('flux.separateur')}${t('flux.appareil', { agent: a.last_user_agent })}`}
+                  </span>
+                </div>
+                {a.revoked_at !== null ? (
+                  <span className="pilule pilule-neutre">{t('flux.revoque')}</span>
+                ) : (
+                  <button type="button" className="bouton bouton-compact bouton-danger-discret" onClick={() => revoquer(a.id)}>
+                    {t('flux.revoquer')}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </section>
   );
 }

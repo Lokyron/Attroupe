@@ -228,6 +228,7 @@
   "flux.url_https_aide": "Ne l'ouvrez pas sur un téléphone : cela n'importerait qu'une copie figée de vos soirées.",
   "flux.google_lien": "S'abonner avec Google Agenda (depuis un ordinateur)",
   "flux.google_aide": "Google Agenda ne permet pas d'ajouter un calendrier par adresse depuis son application mobile. Faites-le une fois sur calendar.google.com, depuis un ordinateur : l'abonnement se rattache à votre compte Google et apparaît ensuite sur le téléphone.",
+  "flux.rafraichissement_titre": "À quelle fréquence le calendrier se met-il à jour ?",
   "flux.rafraichissement": "Sur iPhone, l'abonnement se rafraîchit à l'intervalle choisi dans les réglages du Calendrier, et vous pouvez le forcer en tirant vers le bas la liste des calendriers. Sur Google Agenda, c'est Google qui décide : la première récupération prend souvent plusieurs heures, puis le calendrier se rafraîchit toutes les 8 à 24 heures, sans aucun moyen de la forcer. Une soirée modifiée n'y apparaîtra donc pas tout de suite, et ce n'est pas une panne de l'application.",
   "flux.copier": "Copier l'adresse",
   "flux.copie": "Adresse copiée.",
