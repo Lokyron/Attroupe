@@ -14,9 +14,11 @@ import {
   type ModificationCreneauPersonnel,
   type VisibilitePartage,
 } from '../db/queries/agenda-personnel.js';
+import { lireDetailsImportes } from '../db/queries/agenda-externe.js';
 import type { GroupScope } from '../db/scope.js';
 import { champsHoraireInvalides } from '../domain/evenements.js';
 import { ErreurHttp } from '../http/erreurs.js';
+import type { Journal } from '../http/middleware/journal.js';
 
 // Cas d'usage de l'agenda personnel et du partage de disponibilités (lot 8, modèle §3.6, architecture §6 et §10).
 // Cloisonnement strict :
@@ -44,11 +46,27 @@ function trouverCreneau(portee: PorteeUtilisateur, creneauId: string): CreneauPe
   return creneau;
 }
 
+/**
+ * Agenda du PROPRIÉTAIRE : les créneaux importés reviennent avec leurs titre, description et lieu déchiffrés (ADR-0013, révision du
+ * 2026-11-18). Un blob illisible (clé maîtresse changée) laisse le créneau sans texte et est compté dans le journal : jamais d'exception.
+ */
 export function listerMonAgenda(
   portee: PorteeUtilisateur,
-  fenetre?: { readonly du?: string | undefined; readonly au?: string | undefined },
+  fenetre: { readonly du?: string | undefined; readonly au?: string | undefined } | undefined,
+  cleChiffrement: string,
+  journal: Journal,
 ): CreneauPersonnelPublic[] {
-  return listerCreneauxPersonnels(portee, fenetre).map(publierCreneau);
+  const creneaux = listerCreneauxPersonnels(portee, fenetre);
+  const { details, illisibles } = creneaux.some((c) => c.calendar_source_id !== null)
+    ? lireDetailsImportes(portee, cleChiffrement)
+    : { details: new Map<string, never>(), illisibles: 0 };
+  if (illisibles > 0) journal.warn('agenda.details_illisibles', { illisibles });
+  return creneaux.map((c) => {
+    const lus = c.calendar_source_id === null ? undefined : details.get(c.id);
+    return publierCreneau(
+      lus === undefined ? c : { ...c, title: lus.titre ?? '', description: lus.description ?? null, location_name: lus.lieu ?? null },
+    );
+  });
 }
 
 export function creerDansMonAgenda(

@@ -286,8 +286,16 @@ export async function synchroniserSource(contexte: ContexteSynchro, portee: Port
     throw erreur;
   }
 
-  const plages: PlageImportee[] = analyse.plages.map((p) => ({ starts_at: p.debut, ends_at: p.fin, all_day: p.journeeEntiere, time_zone: fuseau }));
-  const ecrites = remplacerCreneauxImportes(portee, sourceId, plages);
+  const plages: PlageImportee[] = analyse.plages.map((p) => ({
+    starts_at: p.debut,
+    ends_at: p.fin,
+    all_day: p.journeeEntiere,
+    time_zone: fuseau,
+    titre: p.titre,
+    description: p.description,
+    lieu: p.lieu,
+  }));
+  const ecrites = remplacerCreneauxImportes(portee, sourceId, plages, contexte.cleChiffrement);
   if (ecrites === undefined) return undefined;
   // Un ICS valide sans aucun VEVENT est appliqué tel quel (l'agenda est peut-être réellement vide), mais reste visible dans le journal.
   const vide = !/^BEGIN:VEVENT\s*$/im.test(resultat.texte);

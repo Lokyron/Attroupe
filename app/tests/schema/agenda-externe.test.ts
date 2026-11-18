@@ -230,7 +230,7 @@ describe('agenda externe : base et requêtes', () => {
       expect(lireUrlSource(bob, r.id, CLE)).toBeUndefined();
       expect(modifierSource(bob, r.id, { label: 'Pris' })).toBe(false);
       expect(supprimerSource(bob, r.id)).toBe(false);
-      expect(remplacerCreneauxImportes(bob, r.id, [PLAGE])).toBeUndefined();
+      expect(remplacerCreneauxImportes(bob, r.id, [PLAGE], CLE)).toBeUndefined();
       expect(t.sql.prepare('SELECT count(*) FROM personal_events WHERE calendar_source_id = ?').pluck().get(r.id)).toBe(0);
       expect(lireSource(portee(d.a.userId), r.id)?.label).toBe('Google');
     });
@@ -265,12 +265,12 @@ describe('agenda externe : base et requêtes', () => {
       const r = creerSource(alice, nouvelle(), CLE);
       if (!r.ok) throw new Error('création attendue');
       const manuel = creneauBrut(d.a.userId, null, 'Kiné');
-      expect(remplacerCreneauxImportes(alice, r.id, [PLAGE, { ...PLAGE, starts_at: '2027-03-02T09:00:00Z', ends_at: '2027-03-02T10:00:00Z' }])).toBe(2);
-      expect(remplacerCreneauxImportes(alice, r.id, [{ ...PLAGE, starts_at: '2027-04-01T09:00:00Z', ends_at: '2027-04-01T10:00:00Z' }])).toBe(1);
+      expect(remplacerCreneauxImportes(alice, r.id, [PLAGE, { ...PLAGE, starts_at: '2027-03-02T09:00:00Z', ends_at: '2027-03-02T10:00:00Z' }], CLE)).toBe(2);
+      expect(remplacerCreneauxImportes(alice, r.id, [{ ...PLAGE, starts_at: '2027-04-01T09:00:00Z', ends_at: '2027-04-01T10:00:00Z' }], CLE)).toBe(1);
       const lignes = t.sql.prepare('SELECT title, description, location_name, starts_at FROM personal_events WHERE calendar_source_id = ?').all(r.id);
       expect(lignes).toEqual([{ title: '', description: null, location_name: null, starts_at: '2027-04-01T09:00:00Z' }]);
       expect(t.sql.prepare('SELECT count(*) FROM personal_events WHERE id = ?').pluck().get(manuel)).toBe(1);
-      expect(remplacerCreneauxImportes(alice, r.id, [])).toBe(0);
+      expect(remplacerCreneauxImportes(alice, r.id, [], CLE)).toBe(0);
       expect(t.sql.prepare('SELECT count(*) FROM personal_events WHERE calendar_source_id = ?').pluck().get(r.id)).toBe(0);
     });
 
@@ -280,7 +280,7 @@ describe('agenda externe : base et requêtes', () => {
       if (!r.ok) throw new Error('création attendue');
       t.sql.prepare("UPDATE memberships SET default_personal_visibility = 'details' WHERE id = ?").run(d.a.membershipId);
       try {
-        expect(remplacerCreneauxImportes(alice, r.id, [PLAGE])).toBe(1);
+        expect(remplacerCreneauxImportes(alice, r.id, [PLAGE], CLE)).toBe(1);
         const visibilites = t.sql
           .prepare(
             'SELECT s.visibility FROM personal_event_shares AS s JOIN personal_events AS p ON p.id = s.personal_event_id WHERE p.calendar_source_id = ?',
@@ -299,7 +299,7 @@ describe('agenda externe : base et requêtes', () => {
       if (!r.ok) throw new Error('création attendue');
       t.sql.prepare("UPDATE memberships SET default_personal_visibility = 'none' WHERE id = ?").run(d.a.membershipId);
       try {
-        expect(remplacerCreneauxImportes(alice, r.id, [PLAGE])).toBe(1);
+        expect(remplacerCreneauxImportes(alice, r.id, [PLAGE], CLE)).toBe(1);
         expect(
           t.sql
             .prepare('SELECT count(*) FROM personal_event_shares AS s JOIN personal_events AS p ON p.id = s.personal_event_id WHERE p.calendar_source_id = ?')
@@ -315,9 +315,9 @@ describe('agenda externe : base et requêtes', () => {
       const alice = portee(d.a.userId);
       const r = creerSource(alice, nouvelle(), CLE);
       if (!r.ok) throw new Error('création attendue');
-      remplacerCreneauxImportes(alice, r.id, [PLAGE]);
+      remplacerCreneauxImportes(alice, r.id, [PLAGE], CLE);
       const casse: PlageImportee = { starts_at: 'pas-un-instant', ends_at: null, all_day: false, time_zone: 'UTC' };
-      expect(() => remplacerCreneauxImportes(alice, r.id, [PLAGE, casse])).toThrow();
+      expect(() => remplacerCreneauxImportes(alice, r.id, [PLAGE, casse], CLE)).toThrow();
       expect(t.sql.prepare('SELECT starts_at FROM personal_events WHERE calendar_source_id = ?').pluck().all(r.id)).toEqual([PLAGE.starts_at]);
     });
 
@@ -325,7 +325,7 @@ describe('agenda externe : base et requêtes', () => {
       const alice = portee(d.a.userId);
       const r = creerSource(alice, nouvelle(), CLE);
       if (!r.ok) throw new Error('création attendue');
-      remplacerCreneauxImportes(alice, r.id, [PLAGE]);
+      remplacerCreneauxImportes(alice, r.id, [PLAGE], CLE);
       expect(supprimerSource(alice, r.id)).toBe(true);
       expect(lireSource(alice, r.id)).toBeUndefined();
       expect(t.sql.prepare('SELECT count(*) FROM personal_events WHERE calendar_source_id = ?').pluck().get(r.id)).toBe(0);

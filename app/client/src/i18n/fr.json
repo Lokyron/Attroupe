@@ -410,6 +410,8 @@
   "agenda_perso.champ_lieu": "Lieu (facultatif)",
   "agenda_perso.champ_description": "Description (facultatif)",
   "agenda_perso.ajouter": "Ajouter à mon agenda",
+  "agenda_perso.importe": "Importé",
+  "agenda_perso.importe_aide": "Vient d'un agenda externe : modifiez-le à la source. Vos groupes n'en voient que la plage « occupé ».",
   "agenda_perso.supprimer": "Supprimer",
   "agenda_perso.supprimer_confirmation": "Supprimer ce créneau personnel ?",
   "agenda_perso.partages_titre": "Partage par groupe :",

@@ -345,7 +345,12 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
           {creneaux.map((c) => (
             <li key={c.id} className="ligne-interactive ligne-interactive-pile">
               <div className="ligne-principale">
-                <strong>{c.title}</strong>
+                {/* `ligne-principale` est une grille : une pastille posée directement dedans s'étirerait sur
+                    toute la largeur. `ligne-badges` est la rangée flex prévue pour ça. */}
+                <span className="ligne-badges">
+                  <strong>{c.title}</strong>
+                  {c.calendar_source_id !== null && <span className="pilule pilule-neutre">{t('agenda_perso.importe')}</span>}
+                </span>
                 <span className="ligne-meta">{libelleDateHoraire(c)}</span>
                 {c.location_name !== null && <span className="ligne-meta">{t('evenement.lieu', { lieu: c.location_name })}</span>}
                 {c.description !== null && <span className="ligne-meta">{c.description}</span>}
@@ -360,7 +365,11 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
                           <select value={partage} onChange={(e) => changerPartage(c.id, g.group_id, visibilitePartage(e.target.value))}>
                             <option value="none">{t('agenda_perso.visibilite_none')}</option>
                             <option value="busy">{t('agenda_perso.visibilite_busy')}</option>
-                            <option value="details">{t('agenda_perso.visibilite_details')}</option>
+                            {/* « Avec détails » est IMPOSSIBLE sur un créneau importé (deux déclencheurs le refusent
+                                en base) : on ne propose pas un choix que le serveur rejettera. */}
+                            {c.calendar_source_id === null && (
+                              <option value="details">{t('agenda_perso.visibilite_details')}</option>
+                            )}
                           </select>
                         </label>
                       );
@@ -368,9 +377,13 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
                   </div>
                 )}
               </div>
-              <button type="button" className="bouton bouton-compact bouton-danger-discret" onClick={() => supprimer(c.id)}>
-                {t('agenda_perso.supprimer')}
-              </button>
+              {c.calendar_source_id === null ? (
+                <button type="button" className="bouton bouton-compact bouton-danger-discret" onClick={() => supprimer(c.id)}>
+                  {t('agenda_perso.supprimer')}
+                </button>
+              ) : (
+                <span className="ligne-meta">{t('agenda_perso.importe_aide')}</span>
+              )}
             </li>
           ))}
         </ul>

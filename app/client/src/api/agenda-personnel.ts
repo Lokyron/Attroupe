@@ -20,6 +20,9 @@ export interface CreneauPersonnel {
   starts_at: string;
   ends_at: string | null;
   time_zone: string;
+  /** Non nul : créneau IMPORTÉ d'un agenda externe (ADR-0013). Lecture seule, et ses textes ne sortent
+   *  jamais vers un groupe — ils sont chiffrés en base et ne sont déchiffrés que pour leur propriétaire. */
+  calendar_source_id: string | null;
   partages: PartageCreneau[];
 }
 
@@ -75,6 +78,7 @@ function creneauPersonnel(c: unknown): CreneauPersonnel {
     starts_at: texte(champ(c, 'starts_at')),
     ends_at: texteOuNul(champ(c, 'ends_at')),
     time_zone: texte(champ(c, 'time_zone')),
+    calendar_source_id: texteOuNul(champ(c, 'calendar_source_id')),
     partages: liste(champ(c, 'partages')).map(partageCreneau),
   };
 }

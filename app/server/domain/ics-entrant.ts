@@ -1,8 +1,10 @@
-// Analyseur iCalendar (RFC 5545) ENTRANT : l'agenda externe d'un utilisateur (Google Agenda, Outlook), dont on ne déduit
-// que des plages « occupé ». Logique PURE : ni base, ni Express, ni réseau.
+// Analyseur iCalendar (RFC 5545) ENTRANT : l'agenda externe d'un utilisateur (Google Agenda, Outlook), dont on déduit des
+// plages « occupé ». Logique PURE : ni base, ni Express, ni réseau.
 //
 // Principes :
-//  - on ne GARDE QUE des plages horaires. Ni titre, ni description, ni lieu ne sortent de ce module (ils ne sont même pas lus) ;
+//  - chaque VEVENT donne ses plages UNE PAR UNE (aucune fusion), avec son titre, sa description et son lieu quand il en a :
+//    le PROPRIÉTAIRE doit pouvoir relire ses rendez-vous (ADR-0013, révision du 2026-11-18). Ce module ne décide pas qui voit
+//    quoi : c'est au stockage et aux requêtes de groupe de ne montrer aux autres membres que « occupé » ;
 //  - on ne DEVINE jamais une occupation, et on ne masque jamais en silence une occupation qu'on n'a pas su lire : un VEVENT
 //    dont une propriété utile est illisible ou non prise en charge est ÉCARTÉ EN ENTIER et compté dans `ignores` ;
 //  - l'entrée vient d'un tiers potentiellement hostile : TOUTE boucle est plafonnée (voir `PLAFONDS`) et un budget de temps
@@ -15,7 +17,7 @@
 // Format de sortie : un horodaté est un instant `…Z` ; une journée entière est une DATE `AAAA-MM-JJ` et `fin` est le DERNIER
 // jour inclus (comme en base, modèle de données §« all_day » : `DTEND − 1 jour`).
 
-import { JOUR_MS, MINUTE_MS, versInstant } from './instant.js';
+import { JOUR_MS, versInstant } from './instant.js';
 
 export interface PlageOccupee {
   /** Instant `AAAA-MM-JJTHH:MM:SSZ`, ou date `AAAA-MM-JJ` si `journeeEntiere`. */
@@ -23,6 +25,12 @@ export interface PlageOccupee {
   /** Même format que `debut` ; pour une journée entière, le DERNIER jour inclus. */
   readonly fin: string;
   readonly journeeEntiere: boolean;
+  /** `SUMMARY` de l'événement, tronqué à 140 caractères. Absent si le `VEVENT` n'en a pas. */
+  readonly titre?: string;
+  /** `DESCRIPTION`, tronquée à 2000 caractères. */
+  readonly description?: string;
+  /** `LOCATION`, tronqué à 140 caractères. */
+  readonly lieu?: string;
 }
 
 export interface OptionsAnalyse {
@@ -47,10 +55,12 @@ export const PLAFONDS = {
   evenements: 5000,
   /** Occurrences d'une même règle dans la fenêtre d'horizon (et valeurs de RDATE). */
   occurrences: 1000,
-  /** Plages écrites, après fusion. */
-  plages: 2000,
-  /** Plages avant fusion, toutes règles confondues (protège la mémoire ; le budget de temps ne la borne pas assez vite). */
+  /** Plages rendues. Sans fusion, c'est la seule borne du nombre de plages. */
+  plages: 5000,
+  /** Plages brutes, toutes règles confondues (protège la mémoire ; le budget de temps ne la borne pas assez vite). */
   plagesBrutes: 200_000,
+  /** Texte cumulé (titres + descriptions + lieux, en caractères) des plages écrites : il sera stocké, chiffré, plage par plage. */
+  texte: 2_000_000,
   /** Jours candidats parcourus pour UNE règle (de `DTSTART` à la fin de l'horizon : ~270 ans). */
   iterations: 100_000,
   /** Budget de temps, en ms. */
@@ -59,8 +69,8 @@ export const PLAFONDS = {
   profondeur: 8,
 } as const;
 
-/** Deux plages horodatées espacées de moins que ça sont fusionnées. */
-const ECART_FUSION_MS = 15 * MINUTE_MS;
+/** Longueurs maximales des textes, en unités UTF-16, après déséchappement (alignées sur les créneaux saisis à la main). */
+export const LIMITES_TEXTE = { titre: 140, description: 2000, lieu: 140 } as const;
 /** On relit l'horloge toutes les N vérifications seulement. */
 const PERIODE_HORLOGE = 256;
 const ANNEE_MIN = 1900;
@@ -75,7 +85,7 @@ export class ErreurIcsIllisible extends Error {
   }
 }
 
-export type PlafondDepasse = 'evenements' | 'occurrences' | 'plages' | 'plagesBrutes' | 'iterations' | 'temps';
+export type PlafondDepasse = 'evenements' | 'occurrences' | 'plages' | 'plagesBrutes' | 'texte' | 'iterations' | 'temps';
 
 export class ErreurIcsTropGros extends Error {
   readonly plafond: PlafondDepasse;
@@ -160,6 +170,43 @@ function lireLigne(ligne: string): Ligne | null {
     if (!params.has(cle)) params.set(cle, segment.slice(egal + 1).replace(/"/g, ''));
   }
   return { nom: ligne.slice(0, finNom).trim().toUpperCase(), params, valeur: ligne.slice(deuxPoints + 1) };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Textes (SUMMARY, DESCRIPTION, LOCATION)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** Déséchappement d'une valeur TEXT (RFC 5545 §3.3.11) : `\n`/`\N` → saut de ligne ; `\\`, `\,`, `\;` → le caractère. */
+function desechapper(valeur: string): string {
+  return valeur.replace(/\\([\\;,nN])/g, (_tout, c: string) => (c === 'n' || c === 'N' ? '\n' : c));
+}
+
+/** Coupe à `max` unités UTF-16 sans scinder une paire de substitution. */
+function tronquer(texte: string, max: number): string {
+  if (texte.length <= max) return texte;
+  const dernier = texte.charCodeAt(max - 1);
+  const fin = dernier >= 0xd800 && dernier <= 0xdbff ? max - 1 : max; // le cut tomberait entre les deux moitiés
+  return texte.slice(0, fin);
+}
+
+/**
+ * Valeur TEXT → texte propre, ou `undefined` s'il est vide après nettoyage. Ordre : déséchapper, retirer les caractères de
+ * contrôle, couper les blancs, PUIS tronquer (jamais avant : un `\,` coupé en deux fausserait la longueur).
+ * Hors description, un saut de ligne devient une espace (« A\nB » ne devient pas « AB »).
+ */
+function nettoyerTexte(valeur: string | null, max: number, multiligne: boolean): string | undefined {
+  if (valeur === null) return undefined;
+  let texte = desechapper(valeur);
+  if (!multiligne) texte = texte.replace(/\n/g, ' ');
+  texte = texte.replace(/\p{Cc}/gu, (c) => (c === '\n' ? c : '')).trim(); // Cc : C0, DEL et C1 (tabulation comprise)
+  const coupe = tronquer(texte, max).trimEnd();
+  return coupe === '' ? undefined : coupe;
+}
+
+interface Textes {
+  readonly titre?: string;
+  readonly description?: string;
+  readonly lieu?: string;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -540,19 +587,25 @@ interface EvenementBrut {
   transparent: boolean;
   annule: boolean;
   libre: boolean;
+  summary: string | null;
+  description: string | null;
+  location: string | null;
 }
 
 function nouvelEvenement(): EvenementBrut {
   return {
     uid: null, dtstart: null, dtend: null, duration: null, rrules: [], exdates: [], rdates: [], recurrenceId: null,
-    transparent: false, annule: false, libre: false,
+    transparent: false, annule: false, libre: false, summary: null, description: null, location: null,
   };
 }
 
-/** Ne retient QUE les propriétés utiles : SUMMARY, DESCRIPTION, LOCATION… ne sont jamais lues. */
+/** Ne retient QUE les propriétés utiles : les textes sont gardés bruts (premier gagnant) et nettoyés à l'écriture des plages. */
 function ajouter(ev: EvenementBrut, l: Ligne): void {
   const valeur = l.valeur.trim().toUpperCase();
   switch (l.nom) {
+    case 'SUMMARY': ev.summary ??= l.valeur; break;
+    case 'DESCRIPTION': ev.description ??= l.valeur; break;
+    case 'LOCATION': ev.location ??= l.valeur; break;
     case 'UID': ev.uid = l.valeur.trim(); break;
     case 'DTSTART': ev.dtstart ??= l; break;
     case 'DTEND': ev.dtend ??= l; break;
@@ -599,7 +652,7 @@ function lireListeDates(lignes: readonly Ligne[], ctx: Contexte): ValeurDate[] |
 }
 
 /** Intervalle occupé. Horodaté : instants en ms. Journée entière : indices de jour, `fin` INCLUSE. */
-interface Intervalle {
+interface Intervalle extends Textes {
   readonly debut: number;
   readonly fin: number;
 }
@@ -651,6 +704,16 @@ function developper(ev: EvenementBrut, exclusions: Exclusions, ctx: Contexte, op
   const aExclure: Exclusions = { instants: new Set(exclusions.instants), jours: new Set(exclusions.jours) };
   for (const d of exdates) exclure(aExclure, d);
 
+  // Chaque occurrence (et chaque RDATE) hérite des textes de son VEVENT ; une exception RECURRENCE-ID est un VEVENT à part.
+  const titre = nettoyerTexte(ev.summary, LIMITES_TEXTE.titre, false);
+  const description = nettoyerTexte(ev.description, LIMITES_TEXTE.description, true);
+  const lieu = nettoyerTexte(ev.location, LIMITES_TEXTE.lieu, false);
+  const textes: Textes = {
+    ...(titre === undefined ? {} : { titre }),
+    ...(description === undefined ? {} : { description }),
+    ...(lieu === undefined ? {} : { lieu }),
+  };
+
   const hd = opt.horizonDebut.getTime();
   const hf = opt.horizonFin.getTime();
   const fuseauEvt = debut.journee ? ctx.fuseauParDefaut : debut.fuseau;
@@ -667,7 +730,7 @@ function developper(ev: EvenementBrut, exclusions: Exclusions, ctx: Contexte, op
     for (const d of rdates) tous.add(jourDe(d.mur));
     for (const j of tous) {
       if (aExclure.jours.has(j)) continue;
-      sortie.journees.push({ debut: j, fin: j + nbJours - 1 });
+      sortie.journees.push({ debut: j, fin: j + nbJours - 1, ...textes });
     }
   } else {
     const instants = new Set<number>(jours.map((j) => murVersInstant(j * JOUR_MS + heure0, fuseauEvt)));
@@ -675,7 +738,7 @@ function developper(ev: EvenementBrut, exclusions: Exclusions, ctx: Contexte, op
     for (const t of instants) {
       if (aExclure.instants.has(t)) continue;
       if (aExclure.jours.has(jourDe(t + decalage(t, fuseauEvt)))) continue; // EXDATE en date : exclut le jour mural
-      sortie.horaires.push({ debut: t, fin: t + dureeMs });
+      sortie.horaires.push({ debut: t, fin: t + dureeMs, ...textes });
     }
   }
 
@@ -688,20 +751,8 @@ function developper(ev: EvenementBrut, exclusions: Exclusions, ctx: Contexte, op
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Fusion
+// Sortie
 // ---------------------------------------------------------------------------------------------------------------------
-
-/** Trie puis fusionne les intervalles qui se chevauchent ou dont l'écart est strictement inférieur à `ecart`. */
-function fusionner(intervalles: readonly Intervalle[], ecart: number): Intervalle[] {
-  const tries = [...intervalles].sort((a, b) => a.debut - b.debut || a.fin - b.fin);
-  const sortie: Intervalle[] = [];
-  for (const p of tries) {
-    const dernier = sortie[sortie.length - 1];
-    if (dernier !== undefined && p.debut - dernier.fin < ecart) sortie[sortie.length - 1] = { debut: dernier.debut, fin: Math.max(dernier.fin, p.fin) };
-    else sortie.push(p);
-  }
-  return sortie;
-}
 
 const dateIso = (jour: number): string => new Date(jour * JOUR_MS).toISOString().slice(0, 10);
 
@@ -786,6 +837,7 @@ export function analyserIcs(texte: string, options: OptionsAnalyse): ResultatAna
 
   const horaires: Intervalle[] = [];
   const journees: Intervalle[] = [];
+  let texteTotal = 0;
   for (const ev of evenements) {
     budget.verifier();
     if (ecartes.has(ev)) {
@@ -801,14 +853,18 @@ export function analyserIcs(texte: string, options: OptionsAnalyse): ResultatAna
     horaires.push(...famille.horaires);
     journees.push(...famille.journees);
     if (horaires.length + journees.length > PLAFONDS.plagesBrutes) throw new ErreurIcsTropGros('plagesBrutes');
+    for (const p of [...famille.horaires, ...famille.journees]) {
+      texteTotal += (p.titre?.length ?? 0) + (p.description?.length ?? 0) + (p.lieu?.length ?? 0);
+    }
+    if (texteTotal > PLAFONDS.texte) throw new ErreurIcsTropGros('texte');
   }
 
-  // Les deux familles sont fusionnées SÉPARÉMENT : une journée entière n'absorbe jamais un créneau, ni l'inverse.
-  // Journées : chevauchement ou jours contigus (écart < 2 jours entre débuts d'indices) ; horaires : écart < 15 min.
+  // Aucune fusion : deux rendez-vous distincts restent deux plages. Tri par début (puis par fin, pour un ordre déterministe).
+  // Un journée entière et un créneau horodaté se trient comme des chaînes : `AAAA-MM-JJ` précède `AAAA-MM-JJTHH…`.
   const plages: PlageOccupee[] = [
-    ...fusionner(horaires, ECART_FUSION_MS).map((p) => ({ debut: versInstant(new Date(p.debut)), fin: versInstant(new Date(p.fin)), journeeEntiere: false })),
-    ...fusionner(journees, 2).map((p) => ({ debut: dateIso(p.debut), fin: dateIso(p.fin), journeeEntiere: true })),
-  ].sort((a, b) => (a.debut < b.debut ? -1 : a.debut > b.debut ? 1 : 0));
+    ...horaires.map((p) => ({ ...p, debut: versInstant(new Date(p.debut)), fin: versInstant(new Date(p.fin)), journeeEntiere: false })),
+    ...journees.map((p) => ({ ...p, debut: dateIso(p.debut), fin: dateIso(p.fin), journeeEntiere: true })),
+  ].sort((a, b) => (a.debut < b.debut ? -1 : a.debut > b.debut ? 1 : a.fin < b.fin ? -1 : a.fin > b.fin ? 1 : 0));
   if (plages.length > PLAFONDS.plages) throw new ErreurIcsTropGros('plages');
 
   return { plages, ignores, avertissements: [...ctx.avertissements].sort() };

@@ -177,3 +177,45 @@ Le lot 5 a démontré qu'aucun test automatique n'aurait trouvé le bug `webcal:
 la fonctionnalité : une URL secrète Google produit bien des créneaux ; un événement ajouté sur le
 téléphone apparaît au tour suivant ; un événement supprimé disparaît ; et **un ami du groupe voit
 « occupé » sans aucun titre**.
+
+---
+
+## Révision du 2026-11-18 — le propriétaire voit ses propres détails
+
+**Ce qui change** : la décision §3 (« on ne stocke que les plages ») est amendée. Le titre, la
+description et le lieu d'un créneau importé sont désormais conservés, et **visibles de leur
+propriétaire seul**. Les autres membres continuent de ne voir que « occupé ».
+
+**Pourquoi** : la version initiale rendait l'agenda importé illisible pour son propre propriétaire —
+des blocs anonymes dans sa propre application. L'argument « il voit déjà le détail dans son
+téléphone » revenait à importer un agenda pour n'en rien faire soi-même. Le besoin réel est
+asymétrique : *moi* je veux voir mon agenda, *les autres* ne doivent voir que ma disponibilité.
+
+**Comment, sans perdre la garantie** : les textes ne sont **pas** écrits dans `title`,
+`description` et `location_name`. Ces colonnes restent vides pour un créneau importé, et le `CHECK`
+qui l'impose ne bouge pas. Les textes vont dans deux colonnes nouvelles, `details_cipher` et
+`details_nonce`, **chiffrées en AES-256-GCM** avec `ATTROUPE_ENCRYPTION_KEY`, comme l'URL de la
+source et la clé privée VAPID.
+
+Conséquence recherchée : la requête de groupe en visibilité `details`
+(`listerDisponibilitesGroupe`) lit `p.title`, `p.description` et `p.location_name` — elle ne lit pas,
+et ne sait pas déchiffrer, les colonnes chiffrées. **Même si les deux déclencheurs disparaissaient,
+même si un partage passait en `details`, elle ne rendrait que des chaînes vides.** La garantie reste
+donc structurelle et non déclarative : on n'a pas remplacé « la colonne n'est jamais écrite » par
+« la requête ne la sélectionne pas », on a ajouté une serrure que la requête de groupe n'a pas la
+clé d'ouvrir.
+
+**Ce qu'on accepte** : des données intimes sont désormais au repos dans la base. Elles sont
+chiffrées, donc une sauvegarde volée ou un accès direct au fichier SQLite ne les rend pas lisibles —
+mais une compromission du serveur, qui donne accès à `ATTROUPE_ENCRYPTION_KEY`, les rendrait
+lisibles. C'est le même niveau de protection que la clé d'API Immich, et c'est le prix d'un agenda
+utilisable par son propriétaire.
+
+**Ce qui ne change pas** :
+
+- `details` reste **impossible** sur un créneau importé : les deux déclencheurs restent.
+- Le flux iCal sortant continue d'exclure les créneaux importés.
+- L'`UID` externe n'est toujours pas stocké.
+- La fusion des plages proches **disparaît pour les créneaux importés** : fusionner deux rendez-vous
+  distincts en un bloc les rendait anonymes, ce qui n'a plus de sens dès lors que le propriétaire
+  doit les relire. Les plages sont donc conservées une par une.

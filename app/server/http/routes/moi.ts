@@ -313,7 +313,7 @@ export function routesMoi(contexte: Contexte): Router {
   routeur.get('/agenda', (req, res) => {
     const { portee } = exigerSession(req);
     const fenetre = analyser(schemaFenetreAgendaPersonnel, req.query);
-    res.json({ creneaux: listerMonAgenda(portee, fenetre) });
+    res.json({ creneaux: listerMonAgenda(portee, fenetre, contexte.env.ATTROUPE_ENCRYPTION_KEY, contexte.journal) });
   });
 
   routeur.post('/agenda', (req, res) => {

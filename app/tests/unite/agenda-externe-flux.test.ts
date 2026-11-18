@@ -37,7 +37,7 @@ describe('flux iCal sortant : les créneaux importés n’y entrent pas', () => 
     });
     const source = creerSource(portee, { label: 'Google', url: 'https://agenda.exemple.org/a.ics', hote: 'agenda.exemple.org', prochaineTentative: '2026-11-15T12:00:00Z' }, cle);
     if (!source.ok) throw new Error('Source non créée.');
-    remplacerCreneauxImportes(portee, source.id, [plage('2026-11-21T09:00:00Z', '2026-11-21T10:00:00Z')]);
+    remplacerCreneauxImportes(portee, source.id, [plage('2026-11-21T09:00:00Z', '2026-11-21T10:00:00Z')], cle);
     return { portee, manuel, sourceId: source.id };
   }
 
@@ -55,7 +55,7 @@ describe('flux iCal sortant : les créneaux importés n’y entrent pas', () => 
     expect(avant).toContain(manuel.id);
     expect(avant).not.toContain(idsImportes()[0]);
     // Une synchronisation remplace le lot (nouveaux identifiants, nouvelles dates) : le flux, lui, ne doit pas frémir.
-    remplacerCreneauxImportes(portee, sourceId, [plage('2026-11-22T09:00:00Z', '2026-11-22T10:00:00Z'), plage('2026-11-23T09:00:00Z', '2026-11-23T10:00:00Z')]);
+    remplacerCreneauxImportes(portee, sourceId, [plage('2026-11-22T09:00:00Z', '2026-11-22T10:00:00Z'), plage('2026-11-23T09:00:00Z', '2026-11-23T10:00:00Z')], cle);
     expect(empreintePersonnelleFlux(portee, fenetre)).toBe(avant);
   });
 });

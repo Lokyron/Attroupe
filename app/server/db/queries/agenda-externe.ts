@@ -7,8 +7,9 @@ import { preparer } from '../sql.js';
 import { mesGroupes } from './transverse.js';
 
 // Synchronisation d'agenda ENTRANTE (migration 0004) : sources d'agenda externe d'un compte et créneaux importés.
-// On ne stocke QUE des plages : un créneau importé n'a ni titre, ni description, ni lieu (CHECK en base), et il n'est jamais
-// partagé en `details` (déclencheurs en base). L'URL de la source est un secret porteur : chiffrée au repos (AES-256-GCM,
+// Un créneau importé n'a ni titre, ni description, ni lieu EN CLAIR (CHECK en base), et il n'est jamais partagé en `details`
+// (déclencheurs en base). Ses textes, s'il en a (migration 0005, ADR-0013 révisé), vivent chiffrés dans `details_cipher` /
+// `details_nonce` et ne se relisent que par `lireDetailsImportes` (le propriétaire) : les requêtes de groupe ne les lisent pas. L'URL de la source est un secret porteur : chiffrée au repos (AES-256-GCM,
 // mêmes fonctions que la clé d'API Immich), jamais renvoyée par `lireSource` ni `listerMesSources`.
 
 export { sourcesAFaire, type SourceAgendaAFaire } from './transverse.js';
@@ -129,12 +130,73 @@ export function supprimerSource(portee: PorteeUtilisateur, id: string): boolean 
   return portee.supprimer('calendar_sources', { id });
 }
 
-/** Une plage importée : jamais de texte. `starts_at` / `ends_at` sont des `Instant` (ou `AAAA-MM-JJ` si `all_day`). */
+/**
+ * Une plage importée. `starts_at` / `ends_at` sont des `Instant` (ou `AAAA-MM-JJ` si `all_day`). `titre`, `description` et `lieu`
+ * ne sont jamais écrits en clair : ils partent chiffrés dans `details_cipher` / `details_nonce`.
+ */
 export interface PlageImportee {
   readonly starts_at: string;
   readonly ends_at: string | null;
   readonly all_day: boolean;
   readonly time_zone: string;
+  readonly titre?: string | undefined;
+  readonly description?: string | undefined;
+  readonly lieu?: string | undefined;
+}
+
+/** Textes d'un créneau importé, tels que le propriétaire les relit. */
+export interface DetailsImporte {
+  readonly titre?: string;
+  readonly description?: string;
+  readonly lieu?: string;
+}
+
+const schemaDetailsImporte = z.object({ titre: z.string().optional(), description: z.string().optional(), lieu: z.string().optional() });
+
+/** JSON chiffrable des textes d'une plage, ou `undefined` si elle n'en a aucun (les deux colonnes restent alors NULL). */
+function detailsDe(plage: PlageImportee): DetailsImporte | undefined {
+  const details: { titre?: string; description?: string; lieu?: string } = {};
+  if (plage.titre !== undefined && plage.titre !== '') details.titre = plage.titre;
+  if (plage.description !== undefined && plage.description !== '') details.description = plage.description;
+  if (plage.lieu !== undefined && plage.lieu !== '') details.lieu = plage.lieu;
+  return Object.keys(details).length === 0 ? undefined : details;
+}
+
+const ligneDetailsChiffres = z.object({ id: z.string(), details_cipher: z.instanceof(Buffer), details_nonce: z.instanceof(Buffer) });
+
+export interface DetailsImportesLus {
+  /** Textes déchiffrés, par identifiant de créneau. */
+  readonly details: ReadonlyMap<string, DetailsImporte>;
+  /** Nombre de blobs qui ne se déchiffrent pas (clé maîtresse changée, ligne altérée) : leurs créneaux n'ont alors aucun texte. */
+  readonly illisibles: number;
+}
+
+/**
+ * Textes déchiffrés des créneaux importés de CE compte, par identifiant. RÉSERVÉ à la lecture par le propriétaire : aucune requête de
+ * groupe ne doit appeler ceci. Ne lève jamais sur un blob illisible : il est compté dans `illisibles` et son créneau reste sans texte.
+ */
+export function lireDetailsImportes(portee: PorteeUtilisateur, cleChiffrement: string): DetailsImportesLus {
+  const lignes = preparer(
+    baseDe(portee),
+    'SELECT id, details_cipher, details_nonce FROM personal_events WHERE user_id = ? AND deleted_at IS NULL AND calendar_source_id IS NOT NULL AND details_cipher IS NOT NULL',
+  )
+    .all(portee.userId)
+    .map((ligne) => ligneDetailsChiffres.parse(ligne));
+  const details = new Map<string, DetailsImporte>();
+  let illisibles = 0;
+  for (const l of lignes) {
+    try {
+      const lu = schemaDetailsImporte.parse(JSON.parse(dechiffrerCleImmich(l.details_cipher, l.details_nonce, cleChiffrement)));
+      details.set(l.id, {
+        ...(lu.titre === undefined ? {} : { titre: lu.titre }),
+        ...(lu.description === undefined ? {} : { description: lu.description }),
+        ...(lu.lieu === undefined ? {} : { lieu: lu.lieu }),
+      });
+    } catch {
+      illisibles += 1;
+    }
+  }
+  return { details, illisibles };
 }
 
 const ligneVisibiliteMembre = z.object({ default_personal_visibility: z.enum(['none', 'busy', 'details']) });
@@ -146,7 +208,12 @@ const ligneVisibiliteMembre = z.object({ default_personal_visibility: z.enum(['n
  * Les partages suivent `default_personal_visibility` de chaque groupe, SAUF que `details` est ramené à `busy` : un créneau importé
  * n'a aucun détail à montrer, et le déclencheur de la base ferait échouer toute la synchronisation. Une visibilité `none` est respectée.
  */
-export function remplacerCreneauxImportes(portee: PorteeUtilisateur, sourceId: string, plages: readonly PlageImportee[]): number | undefined {
+export function remplacerCreneauxImportes(
+  portee: PorteeUtilisateur,
+  sourceId: string,
+  plages: readonly PlageImportee[],
+  cleChiffrement: string,
+): number | undefined {
   const base = baseDe(portee);
   return portee.transaction(() => {
     if (lireSource(portee, sourceId) === undefined) return undefined;
@@ -159,6 +226,8 @@ export function remplacerCreneauxImportes(portee: PorteeUtilisateur, sourceId: s
     });
     preparer(base, 'DELETE FROM personal_events WHERE user_id = ? AND calendar_source_id = ?').run(portee.userId, sourceId);
     for (const plage of plages) {
+      const details = detailsDe(plage);
+      const chiffres = details === undefined ? undefined : chiffrerCleImmich(JSON.stringify(details), cleChiffrement);
       const creneauId = portee.inserer('personal_events', {
         title: '',
         description: null,
@@ -168,6 +237,8 @@ export function remplacerCreneauxImportes(portee: PorteeUtilisateur, sourceId: s
         ends_at: plage.ends_at,
         time_zone: plage.time_zone,
         calendar_source_id: sourceId,
+        details_cipher: chiffres?.cipher ?? null,
+        details_nonce: chiffres?.nonce ?? null,
       });
       // Ramène-au-sûr explicite : jamais `details`, quel que soit le réglage du membre.
       for (const scope of scopes) scope.upsert('personal_event_shares', { personal_event_id: creneauId, visibility: 'busy' });

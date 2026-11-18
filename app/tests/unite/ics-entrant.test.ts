@@ -5,10 +5,12 @@ import {
   ErreurIcsTropGros,
   PLAFONDS,
   type OptionsAnalyse,
+  type PlageOccupee,
   type ResultatAnalyse,
 } from '../../server/domain/ics-entrant.js';
 
-// Analyseur iCalendar ENTRANT (RFC 5545) : on n'en tire que des plages « occupé ». Logique pure, sans base.
+// Analyseur iCalendar ENTRANT (RFC 5545) : des plages « occupé », avec titre, description et lieu pour leur propriétaire.
+// Logique pure, sans base.
 
 const OPTIONS: OptionsAnalyse = {
   horizonDebut: new Date('2027-01-01T00:00:00Z'),
@@ -50,7 +52,8 @@ describe('dépliage et découpage des lignes', () => {
     ]).toString('utf8');
     const r = analyser(texte);
     // 10:00Z → 12:00 Paris (CET, +1 : 11:00Z) : DTEND 12:00 Paris = 11:00Z.
-    expect(r.plages).toEqual([{ debut: '2027-03-08T10:00:00Z', fin: '2027-03-08T11:00:00Z', journeeEntiere: false }]);
+    // Le titre n'est pas vérifié ici : `toString('utf8')` ci-dessus a déjà remplacé les octets coupés par U+FFFD.
+    expect(r.plages).toEqual([expect.objectContaining({ debut: '2027-03-08T10:00:00Z', fin: '2027-03-08T11:00:00Z', journeeEntiere: false })]);
     expect(r.ignores).toBe(0);
   });
 
@@ -59,11 +62,10 @@ describe('dépliage et découpage des lignes', () => {
     expect(debuts(r)).toEqual(['2027-03-08T10:00:00Z']);
   });
 
-  it('un titre aux « ; » et « , » échappés ne perturbe rien et ne sort jamais', () => {
+  it('un titre aux « ; » et « , » échappés ne perturbe rien : il est lu, pas interprété comme une propriété', () => {
     const r = analyser(ics(ev('SUMMARY:Dej\\, avec Paul\\; DTSTART:20300101T000000Z', 'DTSTART:20270308T100000Z', 'DTEND:20270308T110000Z')));
     expect(debuts(r)).toEqual(['2027-03-08T10:00:00Z']);
-    expect(JSON.stringify(r)).not.toContain('Paul');
-    expect(Object.keys(r.plages[0] ?? {}).sort()).toEqual(['debut', 'fin', 'journeeEntiere']);
+    expect(r.plages[0]?.titre).toBe('Dej, avec Paul; DTSTART:20300101T000000Z');
   });
 
   it('un paramètre entre guillemets peut contenir « : », « ; » et « , »', () => {
@@ -419,26 +421,43 @@ describe('événements qui ne rendent pas occupé', () => {
   });
 });
 
-describe('fusion', () => {
-  it('fusionne les plages qui se chevauchent ou sont espacées de moins de 15 minutes', () => {
+describe('aucune fusion', () => {
+  it('les plages qui se chevauchent ou se touchent restent distinctes, triées par début', () => {
     const r = analyser(
       ics(
         ev('DTSTART:20270301T110500Z', 'DTEND:20270301T120000Z'), // hors ordre : le tri est à la charge de l'analyseur
         ev('DTSTART:20270301T100000Z', 'DTEND:20270301T110000Z'),
-        ev('DTSTART:20270301T103000Z', 'DTEND:20270301T104500Z'), // contenue
+        ev('DTSTART:20270301T103000Z', 'DTEND:20270301T104500Z'), // contenue dans la première
       ),
     );
-    expect(r.plages).toEqual([{ debut: '2027-03-01T10:00:00Z', fin: '2027-03-01T12:00:00Z', journeeEntiere: false }]);
+    expect(r.plages).toEqual([
+      { debut: '2027-03-01T10:00:00Z', fin: '2027-03-01T11:00:00Z', journeeEntiere: false },
+      { debut: '2027-03-01T10:30:00Z', fin: '2027-03-01T10:45:00Z', journeeEntiere: false },
+      { debut: '2027-03-01T11:05:00Z', fin: '2027-03-01T12:00:00Z', journeeEntiere: false },
+    ]);
   });
 
-  it('14 minutes d\'écart fusionnent, 15 minutes non', () => {
+  it('14 minutes d\'écart ne fusionnent pas, 15 minutes non plus', () => {
     const quatorze = analyser(ics(ev('DTSTART:20270301T100000Z', 'DTEND:20270301T110000Z'), ev('DTSTART:20270301T111400Z', 'DTEND:20270301T121400Z')));
-    expect(quatorze.plages).toHaveLength(1);
+    expect(quatorze.plages).toHaveLength(2);
     const quinze = analyser(ics(ev('DTSTART:20270301T100000Z', 'DTEND:20270301T110000Z'), ev('DTSTART:20270301T111500Z', 'DTEND:20270301T121500Z')));
     expect(quinze.plages).toHaveLength(2);
   });
 
-  it('ne fusionne pas une journée entière et un créneau horodaté', () => {
+  it('deux rendez-vous espacés de 5 minutes restent DEUX plages, chacune avec son titre', () => {
+    const r = analyser(
+      ics(
+        ev('SUMMARY:Dentiste', 'DTSTART:20270301T100000Z', 'DTEND:20270301T110000Z'),
+        ev('SUMMARY:Cinéma', 'DTSTART:20270301T110500Z', 'DTEND:20270301T130000Z'),
+      ),
+    );
+    expect(r.plages).toEqual([
+      { debut: '2027-03-01T10:00:00Z', fin: '2027-03-01T11:00:00Z', journeeEntiere: false, titre: 'Dentiste' },
+      { debut: '2027-03-01T11:05:00Z', fin: '2027-03-01T13:00:00Z', journeeEntiere: false, titre: 'Cinéma' },
+    ]);
+  });
+
+  it('une journée entière et un créneau horodaté restent distincts', () => {
     const r = analyser(
       ics(ev('DTSTART;VALUE=DATE:20270301', 'DTEND;VALUE=DATE:20270302'), ev('DTSTART:20270301T100000Z', 'DTEND:20270301T110000Z')),
     );
@@ -448,7 +467,7 @@ describe('fusion', () => {
     ]);
   });
 
-  it('fusionne les journées entières qui se chevauchent ou se touchent, pas celles séparées d\'un jour', () => {
+  it('les journées entières qui se chevauchent ou se touchent ne fusionnent pas', () => {
     const r = analyser(
       ics(
         ev('DTSTART;VALUE=DATE:20270301', 'DTEND;VALUE=DATE:20270303'),
@@ -457,8 +476,126 @@ describe('fusion', () => {
       ),
     );
     expect(r.plages).toEqual([
-      { debut: '2027-03-01', fin: '2027-03-03', journeeEntiere: true },
+      { debut: '2027-03-01', fin: '2027-03-02', journeeEntiere: true },
+      { debut: '2027-03-03', fin: '2027-03-03', journeeEntiere: true },
       { debut: '2027-03-05', fin: '2027-03-05', journeeEntiere: true },
+    ]);
+  });
+});
+
+describe('textes : titre, description, lieu', () => {
+  const horaire = ['DTSTART:20270301T100000Z', 'DTEND:20270301T110000Z'];
+  const titreDe = (...lignes: string[]): string | undefined => analyser(ics(ev(...lignes, ...horaire))).plages[0]?.titre;
+  const unePlage = (...lignes: string[]): PlageOccupee => {
+    const plage = analyser(ics(ev(...lignes, ...horaire))).plages[0];
+    if (plage === undefined) throw new Error('plage attendue');
+    return plage;
+  };
+
+  it.each([
+    ['\\,', 'SUMMARY:Pain\\, beurre', 'Pain, beurre'],
+    ['\\;', 'SUMMARY:Pain\\; beurre', 'Pain; beurre'],
+    ['\\\\', 'SUMMARY:C:\\\\dossier', 'C:\\dossier'],
+    ['\\n', 'SUMMARY:Haut\\nBas', 'Haut Bas'],
+    ['\\N', 'SUMMARY:Haut\\NBas', 'Haut Bas'],
+  ])('déséchappe %s dans SUMMARY', (_nom, ligne, attendu) => {
+    expect(titreDe(ligne)).toBe(attendu);
+  });
+
+  it('déséchappe en une seule passe : « \\\\n » est un antislash suivi de « n », pas un saut de ligne', () => {
+    expect(titreDe('SUMMARY:a\\\\nb')).toBe('a\\nb');
+  });
+
+  it('SUMMARY absent, vide ou rempli d\'espaces : pas de titre (la clé n\'existe pas)', () => {
+    for (const lignes of [[], ['SUMMARY:'], ['SUMMARY:    '], ['SUMMARY:\\n\\n'], ['SUMMARY:\u0001\u0002']]) {
+      const plage = unePlage(...lignes);
+      expect(plage.titre).toBeUndefined();
+      expect('titre' in plage).toBe(false);
+    }
+  });
+
+  it('coupe les blancs en tête et en queue', () => {
+    expect(titreDe('SUMMARY:   Réunion  ')).toBe('Réunion');
+  });
+
+  it('retire les caractères de contrôle', () => {
+    expect(titreDe('SUMMARY:A\u0000B\u0007C\u001bD\u007fE\u0085F')).toBe('ABCDEF');
+  });
+
+  it('tronque à la limite exacte, après déséchappement', () => {
+    const limite = 140;
+    expect(titreDe(`SUMMARY:${'a'.repeat(limite)}`)).toBe('a'.repeat(limite));
+    expect(titreDe(`SUMMARY:${'a'.repeat(limite + 1)}`)).toBe('a'.repeat(limite));
+    // 140 « \\, » = 280 caractères bruts mais 140 après déséchappement : rien n'est tronqué.
+    expect(titreDe(`SUMMARY:${'\\,'.repeat(limite)}`)).toBe(','.repeat(limite));
+    expect(titreDe(`SUMMARY:${'\\,'.repeat(limite + 1)}`)).toBe(','.repeat(limite));
+  });
+
+  it('ne coupe pas une paire de substitution (emoji) en deux', () => {
+    const limite = 140;
+    const texte = 'a'.repeat(limite - 1) + '😀' + 'b';
+    const titre = titreDe(`SUMMARY:${texte}`);
+    expect(titre).toBe('a'.repeat(limite - 1)); // l'emoji ne tient pas : il saute en entier
+    expect(titreDe(`SUMMARY:${'a'.repeat(limite - 2)}😀b`)).toBe(`${'a'.repeat(limite - 2)}😀`); // il tient pile
+  });
+
+  it('une coupure qui laisse une espace finale la retire', () => {
+    const limite = 140;
+    expect(titreDe(`SUMMARY:${'a'.repeat(limite - 1)} b`)).toBe('a'.repeat(limite - 1));
+  });
+
+  it('LOCATION : déséchappée, nettoyée et tronquée à 140', () => {
+    expect(unePlage('LOCATION:Salle 3\\, bâtiment A').lieu).toBe('Salle 3, bâtiment A');
+    expect(unePlage(`LOCATION:${'l'.repeat(140 + 5)}`).lieu).toBe('l'.repeat(140));
+    expect('lieu' in unePlage('LOCATION:  ')).toBe(false);
+  });
+
+  it('DESCRIPTION multiligne : les sauts de ligne sont conservés, les autres contrôles retirés', () => {
+    const plage = unePlage('DESCRIPTION:Ligne 1\\nLigne 2\\N\\nLigne 4\u0001\\, fin');
+    expect(plage.description).toBe('Ligne 1\nLigne 2\n\nLigne 4, fin');
+  });
+
+  it('DESCRIPTION : blancs et sauts de ligne de tête et de queue coupés, tronquée à 2000', () => {
+    expect(unePlage('DESCRIPTION:\\n  texte  \\n').description).toBe('texte');
+    expect(unePlage(`DESCRIPTION:${'d'.repeat(2000 + 1)}`).description).toBe('d'.repeat(2000));
+    expect(unePlage(`DESCRIPTION:${'d'.repeat(2000)}`).description).toBe('d'.repeat(2000));
+  });
+
+  it('un titre sur plusieurs lignes devient une seule ligne', () => {
+    expect(titreDe('SUMMARY:Haut\\n\\nBas')).toBe('Haut  Bas');
+  });
+
+  it('une journée entière porte aussi ses textes', () => {
+    const r = analyser(ics(ev('SUMMARY:Congé', 'LOCATION:Maison', 'DTSTART;VALUE=DATE:20270301')));
+    expect(r.plages).toEqual([{ debut: '2027-03-01', fin: '2027-03-01', journeeEntiere: true, titre: 'Congé', lieu: 'Maison' }]);
+  });
+
+  it('les occurrences d\'une RRULE héritent du titre, de la description et du lieu de leur master', () => {
+    const r = analyser(ics(ev('SUMMARY:Sport', 'DESCRIPTION:Salle\\nSac', 'LOCATION:Gymnase', ...horaire, 'RRULE:FREQ=DAILY;COUNT=3')));
+    expect(r.plages).toHaveLength(3);
+    for (const p of r.plages) {
+      expect(p.titre).toBe('Sport');
+      expect(p.description).toBe('Salle\nSac');
+      expect(p.lieu).toBe('Gymnase');
+    }
+  });
+
+  it('les RDATE héritent aussi des textes du master', () => {
+    const r = analyser(ics(ev('SUMMARY:Sport', ...horaire, 'RDATE:20270310T100000Z')));
+    expect(r.plages.map((p) => p.titre)).toEqual(['Sport', 'Sport']);
+  });
+
+  it('une exception RECURRENCE-ID remplace les textes du master pour son occurrence seulement', () => {
+    const serie = ev('SUMMARY:Sport', 'LOCATION:Gymnase', ...horaire, 'RRULE:FREQ=DAILY;COUNT=3');
+    const exception = [
+      'BEGIN:VEVENT', 'UID:u1@test', 'RECURRENCE-ID:20270302T100000Z', 'SUMMARY:Sport (déplacé)',
+      'DTSTART:20270302T160000Z', 'DTEND:20270302T170000Z', 'END:VEVENT',
+    ];
+    const r = analyser(ics(serie, exception));
+    expect(r.plages).toEqual([
+      { debut: '2027-03-01T10:00:00Z', fin: '2027-03-01T11:00:00Z', journeeEntiere: false, titre: 'Sport', lieu: 'Gymnase' },
+      { debut: '2027-03-02T16:00:00Z', fin: '2027-03-02T17:00:00Z', journeeEntiere: false, titre: 'Sport (déplacé)' },
+      { debut: '2027-03-03T10:00:00Z', fin: '2027-03-03T11:00:00Z', journeeEntiere: false, titre: 'Sport', lieu: 'Gymnase' },
     ]);
   });
 });
@@ -477,7 +614,8 @@ describe('plafonds', () => {
   };
 
   it(`${PLAFONDS.evenements} VEVENT passent, un de plus lève ErreurIcsTropGros`, () => {
-    const un = (): string[] => uneHeure('20270301T100000Z');
+    // Transparents : aucune plage, donc le plafond de plages n'entre pas en jeu.
+    const un = (): string[] => uneHeure('20270301T100000Z', 'TRANSP:TRANSPARENT');
     expect(plafond(evenements(PLAFONDS.evenements, un))).toBeUndefined();
     expect(plafond(evenements(PLAFONDS.evenements + 1, un))).toBe('evenements');
   });
@@ -497,19 +635,34 @@ describe('plafonds', () => {
     expect(plafond(proche, { horizonDebut: new Date('2027-01-01Z'), horizonFin: new Date('2027-01-08Z') })).toBeUndefined();
   });
 
-  it(`${PLAFONDS.plages} plages passent après fusion, une de plus lève ErreurIcsTropGros`, () => {
-    // Une plage de 10 minutes toutes les heures : jamais fusionnées.
-    const heure = (i: number): string[] => {
-      const debut = new Date(Date.UTC(2027, 0, 1) + i * 3_600_000);
-      const fin = new Date(debut.getTime() + 600_000);
-      const iso = (d: Date): string => d.toISOString().replace(/[-:]|\.\d{3}/g, '');
-      return ev(`DTSTART:${iso(debut)}`, `DTEND:${iso(fin)}`);
-    };
-    expect(plafond(evenements(PLAFONDS.plages, heure))).toBeUndefined();
-    expect(plafond(evenements(PLAFONDS.plages + 1, heure))).toBe('plages');
+  it('5000 plages passent, une de plus lève ErreurIcsTropGros (valeur figée en littéral)', () => {
+    expect(PLAFONDS.plages).toBe(5000);
+    // 5 séries quotidiennes de 1000 occurrences = 5000 plages (plus que les 5000 VEVENT permis n'en donneraient un par un).
+    const serie = (): string[] => uneHeure('20270101T100000Z', 'RRULE:FREQ=DAILY;COUNT=1000');
+    const options = { horizonFin: new Date('2030-12-31T23:59:59Z') };
+    const cinq = Array.from({ length: 5 }, serie);
+    expect(plafond(ics(...cinq), options)).toBeUndefined();
+    expect(plafond(ics(...cinq, uneHeure('20270101T120000Z')), options)).toBe('plages');
   });
 
-  it('plafond de plages avant fusion (mémoire)', () => {
+  it('2 Mo de texte cumulé passent, un caractère de plus lève ErreurIcsTropGros (valeur figée en littéral)', () => {
+    expect(PLAFONDS.texte).toBe(2_000_000);
+    const avecTexte = (n: number, longueur: number): string =>
+      evenements(n, () => uneHeure('20270301T100000Z', `DESCRIPTION:${'d'.repeat(longueur)}`));
+    expect(plafond(avecTexte(1000, 2000))).toBeUndefined(); // 1000 x 2000 = 2 000 000, pile la borne
+    expect(plafond(avecTexte(1001, 2000))).toBe('texte');
+    // Titre et lieu comptent comme la description : 140 + 140 + 1720 = 2000 par plage.
+    const melange = (n: number): string =>
+      evenements(n, () => uneHeure('20270301T100000Z', `SUMMARY:${'t'.repeat(140)}`, `LOCATION:${'l'.repeat(140)}`, `DESCRIPTION:${'d'.repeat(1720)}`));
+    expect(plafond(melange(1000))).toBeUndefined();
+    expect(plafond(melange(1001))).toBe('texte');
+    // Le texte d'une série compte une fois par occurrence (il sera stocké plage par plage).
+    const serie = ics(uneHeure('20270101T100000Z', `DESCRIPTION:${'d'.repeat(2000)}`, 'RRULE:FREQ=DAILY;COUNT=300'));
+    expect(plafond(serie)).toBeUndefined(); // 300 x 2000 = 600 000
+    expect(plafond(ics(...Array.from({ length: 4 }, () => uneHeure('20270101T100000Z', `DESCRIPTION:${'d'.repeat(2000)}`, 'RRULE:FREQ=DAILY;COUNT=300'))))).toBe('texte'); // 2 400 000
+  });
+
+  it('plafond de plages brutes (mémoire)', () => {
     const horizonFin = new Date(Date.UTC(2027, 0, 1) + 990 * 86_400_000);
     const quotidien = (): string[] => uneHeure('20270101T100000Z', 'RRULE:FREQ=DAILY');
     const n = Math.ceil(PLAFONDS.plagesBrutes / 990) + 1;
