@@ -79,7 +79,13 @@ describe('file d’e-mails et service Brevo', () => {
     expect(appel?.corps.textContent).toContain(`https://attroupe.test/verification-email#jeton=${jeton}`);
     expect(appel?.corps.textContent).not.toMatch(/\{\w+\}/); // aucune variable de gabarit restée telle quelle
     expect(appel?.corps.htmlContent).toContain('Bonjour Alice &lt;b&gt;,'); // le HTML est échappé
-    expect(appel?.corps.htmlContent).toContain(`<a href="https://attroupe.test/verification-email#jeton=${jeton}">`);
+    // Le lien est désormais un bouton (styles en ligne : un e-mail n'a pas de feuille de style), et l'adresse
+    // est rappelée en toutes lettres plus bas pour qui n'a pas le bouton.
+    const lien = `https://attroupe.test/verification-email#jeton=${jeton}`;
+    expect(appel?.corps.htmlContent).toContain(`<a href="${lien}" style="display:inline-block;`);
+    expect(appel?.corps.htmlContent).toContain('Confirmer mon adresse</a>');
+    expect(appel?.corps.htmlContent).toContain('Si le bouton ne fonctionne pas');
+    expect(appel?.corps.htmlContent).toContain('src="https://attroupe.test/icons/logo.png"');
 
     const ligne = file();
     expect(ligne.status).toBe('sent');

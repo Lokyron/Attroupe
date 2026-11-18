@@ -166,7 +166,7 @@ async function tenter(base: Base, transporteur: Transporteur, email: EmailDu, ma
       }
       complements = { lien: lienAvecJeton(baseUrl, gabarit, jeton) };
     }
-    message = rendre(email.template_key, email.payload_json, email.locale, complements);
+    message = rendre(email.template_key, email.payload_json, email.locale, complements, baseUrl);
   } catch (erreur) {
     if (erreur instanceof ErreurGabarit) return { type: 'echec', definitif: true, configuration: false, erreur: erreur.message };
     throw erreur;
