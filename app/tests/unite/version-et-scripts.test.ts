@@ -28,11 +28,11 @@ describe('lot 12 : version et dernière migration', () => {
   });
   afterAll(() => b.nettoyer());
 
-  it('derniereMigration retourne 0003_profil_et_push sur une base migrée', () => {
+  it('derniereMigration retourne la dernière migration appliquée sur une base migrée', () => {
     const derniere = derniereMigration(b.base);
     expect(derniere).toBeDefined();
-    expect(derniere?.version).toBe('0003');
-    expect(derniere?.nom).toBe('0003_profil_et_push');
+    expect(derniere?.version).toBe('0004');
+    expect(derniere?.nom).toBe('0004_agenda_externe');
   });
 
   it('routesVersion renvoie name, version, tag, migration et migration_nom', () => {
@@ -54,8 +54,8 @@ describe('lot 12 : version et dernière migration', () => {
       name: 'attroupe',
       version: '0.1.0-test',
       tag: process.env['ATTROUPE_TAG'] ?? '0.1.0-test',
-      migration: '0003',
-      migration_nom: '0003_profil_et_push',
+      migration: '0004',
+      migration_nom: '0004_agenda_externe',
     });
   });
 });

@@ -47,6 +47,7 @@ export type Ressource =
   | 'sondage'
   | 'optionSondage'
   | 'creneauPerso'
+  | 'sourceAgenda'
   | 'depense'
   | 'remboursement'
   | 'fil'
@@ -97,6 +98,7 @@ export const INTROUVABLE: Readonly<Record<Ressource, string>> = {
   sondage: 'sondage.introuvable',
   optionSondage: 'option.introuvable',
   creneauPerso: 'agenda.introuvable',
+  sourceAgenda: 'source.introuvable',
   depense: 'depense.introuvable',
   remboursement: 'remboursement.introuvable',
   fil: 'fil.introuvable',
@@ -142,6 +144,14 @@ export const REGISTRE: readonly EntreeRoute[] = [
   { methode: 'PATCH', chemin: '/api/moi/agenda/:id', exige: 'session', ressources: { id: 'creneauPerso' }, corps: { title: 'Modifié' } },
   { methode: 'DELETE', chemin: '/api/moi/agenda/:id', exige: 'session', ressources: { id: 'creneauPerso' } },
   { methode: 'PUT', chemin: '/api/moi/agenda/:id/partages', exige: 'session', ressources: { id: 'creneauPerso' }, corps: { partages: [] } },
+  // Sources d'agenda externe (ADR-0013) : relèvent du COMPTE. L'URL est un secret porteur, jamais rendue. Il n'existe pas de lecture d'UNE source par
+  // identifiant : la liste est filtrée par le compte (ses attaques sont celles de `GET /api/moi/flux-ical`) ; l'identifiant forgé s'attaque en
+  // écriture (PATCH, synchronisation à la demande) et en suppression.
+  { methode: 'GET', chemin: '/api/moi/agenda/sources', exige: 'session' },
+  { methode: 'POST', chemin: '/api/moi/agenda/sources', exige: 'session', corps: { url: 'https://agenda.exemple.org/propre-a-la-suite.ics' } },
+  { methode: 'PATCH', chemin: '/api/moi/agenda/sources/:id', exige: 'session', ressources: { id: 'sourceAgenda' }, corps: { label: 'Renommée' } },
+  { methode: 'DELETE', chemin: '/api/moi/agenda/sources/:id', exige: 'session', ressources: { id: 'sourceAgenda' } },
+  { methode: 'POST', chemin: '/api/moi/agenda/sources/:id/synchronisation', exige: 'session', ressources: { id: 'sourceAgenda' } },
   // Notifications et préférences d'e-mail (lot 10) : relèvent du COMPTE. `group_id` est `'*'` ici (Manon est membre de B).
   { methode: 'GET', chemin: '/api/moi/notifications', exige: 'session' },
   { methode: 'POST', chemin: '/api/moi/notifications/lecture', exige: 'session', corps: { tout: true } },

@@ -8,6 +8,7 @@ import {
   supprimerAvatarUtilisateur,
   validerAvatar,
 } from '../../db/queries/avatar.js';
+import { creerSource, listerMesSources, lireSource, modifierSource, supprimerSource } from '../../db/queries/agenda-externe.js';
 import { creerAbonnement, listerAbonnements, revoquerAbonnement } from '../../db/queries/flux.js';
 import {
   compterAbonnementsPush,
@@ -16,6 +17,7 @@ import {
 } from '../../db/queries/push.js';
 import { lireTableauDeBord } from '../../db/queries/tableau-de-bord.js';
 import { mesGroupes } from '../../db/queries/transverse.js';
+import { normaliserUrlSource, publierSource, synchroniserSource, type BilanSynchro } from '../../services/agenda-externe.js';
 import {
   creerDansMonAgenda,
   definirPartagesDansMonAgenda,
@@ -26,7 +28,7 @@ import {
 import { accepter, mesInvitations, refuser } from '../../services/invitations.js';
 import { listerSessions, lireProfil, modifierProfil, revoquerAutresSessions, revoquerSession } from '../../db/queries/comptes.js';
 import { dateValide, fenetreValide } from '../../domain/evenements.js';
-import { versInstant } from '../../domain/instant.js';
+import { MINUTE_MS, versInstant } from '../../domain/instant.js';
 import { empreinteJeton, nouveauJetonFlux, urlFlux, urlWebcal } from '../../domain/jetons.js';
 import { decoderBase64Url, validerEndpointPush } from '../../domain/push.js';
 import { changerMotDePasse, renvoyerVerification } from '../../services/authentification.js';
@@ -42,6 +44,7 @@ import { ErreurHttp } from '../erreurs.js';
 import { cadence } from '../middleware/cadence.js';
 import { exigerSession, gardeSession, poserCookieSession } from '../middleware/session.js';
 import { parametre } from '../parametres.js';
+import { schemaModificationSource, schemaNouvelleSource } from '../schemas/agenda-externe.js';
 import {
   schemaFenetreAgendaPersonnel,
   schemaModificationCreneauPersonnel,
@@ -55,6 +58,15 @@ import { analyser } from '../schemas/valider.js';
 
 /** Abonnements calendrier non révoqués par compte. */
 const MAX_ABONNEMENTS_ACTIFS = 20;
+/** Sources d'agenda externe par compte. */
+const MAX_SOURCES_AGENDA = 5;
+/** Une synchronisation à la demande par source et par fenêtre de cinq minutes. */
+const DELAI_SYNCHRO_MANUELLE_MS = 5 * MINUTE_MS;
+
+/** Résultat d'une synchronisation tel que l'API le rend. */
+function publierBilan(bilan: BilanSynchro): { statut: string; creneaux_importes: number; ignores: number; modifiee: boolean; desactivee: boolean } {
+  return { statut: bilan.statut, creneaux_importes: bilan.creneaux, ignores: bilan.ignores, modifiee: bilan.modifiee, desactivee: bilan.desactivee };
+}
 
 const jourOptionnel = z.string().refine(dateValide).optional();
 const schemaFenetreOptionnelle = z
@@ -219,6 +231,82 @@ export function routesMoi(contexte: Contexte): Router {
     // 404 si l'abonnement n'est pas à moi : un identifiant forgé ne se distingue pas d'un identifiant inconnu.
     if (!revoquerAbonnement(portee, parametre(req, 'fluxId'), versInstant(contexte.horloge()))) throw new ErreurHttp(404, 'flux.introuvable');
     res.json({ ok: true });
+  });
+
+  // Sources d'agenda externe (ADR-0013). L'URL est un secret porteur : elle n'est JAMAIS rendue, la liste n'expose que `url_host`.
+  // Une source d'un autre compte est introuvable (404 `source.introuvable`), comme un identifiant inconnu.
+  const synchro = (portee: Parameters<typeof synchroniserSource>[1], id: string): Promise<BilanSynchro | undefined> =>
+    synchroniserSource(
+      { cleChiffrement: contexte.env.ATTROUPE_ENCRYPTION_KEY, horloge: contexte.horloge, journal: contexte.journal, dependances: contexte.agendaExterne },
+      portee,
+      id,
+    );
+
+  routeur.get('/agenda/sources', (req, res) => {
+    const { portee } = exigerSession(req);
+    res.json({ sources: listerMesSources(portee).map(publierSource) });
+  });
+
+  // Crée PUIS synchronise immédiatement et synchroniquement : c'est le seul moyen de valider l'URL et d'annoncer le résultat à l'utilisateur.
+  // La source est créée même si cette première synchronisation échoue : le statut dit pourquoi, la suppression est à un clic.
+  routeur.post('/agenda/sources', cadence(contexte, 'import_agenda'), async (req, res) => {
+    const { portee } = exigerSession(req);
+    const corps = analyser(schemaNouvelleSource, req.body);
+    // Une seule erreur pour toute cause de forme : on ne renseigne pas sur ce qui a été reconnu ou non.
+    const url = normaliserUrlSource(corps.url);
+    if (url === undefined) throw new ErreurHttp(400, 'source.url_invalide');
+    if (listerMesSources(portee).length >= MAX_SOURCES_AGENDA) throw new ErreurHttp(409, 'source.plafond');
+    const cree = creerSource(
+      portee,
+      { label: corps.label ?? url.hote.slice(0, 60), url: url.href, hote: url.hote, prochaineTentative: versInstant(contexte.horloge()) },
+      contexte.env.ATTROUPE_ENCRYPTION_KEY,
+    );
+    if (!cree.ok) throw new ErreurHttp(409, 'source.deja_presente');
+    const bilan = await synchro(portee, cree.id);
+    const source = lireSource(portee, cree.id);
+    if (bilan === undefined || source === undefined) throw new ErreurHttp(404, 'source.introuvable');
+    res.status(201).json({ ...publierSource(source), synchronisation: publierBilan(bilan) });
+  });
+
+  routeur.patch('/agenda/sources/:id', (req, res) => {
+    const { portee } = exigerSession(req);
+    const id = parametre(req, 'id');
+    const champs = analyser(schemaModificationSource, req.body);
+    if (lireSource(portee, id) === undefined) throw new ErreurHttp(404, 'source.introuvable');
+    const maintenant = versInstant(contexte.horloge());
+    modifierSource(portee, id, {
+      label: champs.label,
+      // Réactiver repart à neuf (compteur d'échecs à zéro, essai immédiat) ; désactiver ne touche ni aux créneaux ni à l'état.
+      ...(champs.disabled === true ? { disabled_at: maintenant } : {}),
+      ...(champs.disabled === false ? { disabled_at: null, consecutive_failures: 0, next_attempt_at: maintenant } : {}),
+    });
+    const source = lireSource(portee, id);
+    if (source === undefined) throw new ErreurHttp(404, 'source.introuvable');
+    res.json(publierSource(source));
+  });
+
+  routeur.delete('/agenda/sources/:id', (req, res) => {
+    const { portee } = exigerSession(req);
+    if (!supprimerSource(portee, parametre(req, 'id'))) throw new ErreurHttp(404, 'source.introuvable');
+    res.json({ ok: true });
+  });
+
+  routeur.post('/agenda/sources/:id/synchronisation', cadence(contexte, 'import_agenda'), async (req, res) => {
+    const { portee } = exigerSession(req);
+    const id = parametre(req, 'id');
+    const avant = lireSource(portee, id);
+    if (avant === undefined) throw new ErreurHttp(404, 'source.introuvable');
+    if (avant.last_attempt_at !== null) {
+      const attenteMs = new Date(avant.last_attempt_at).getTime() + DELAI_SYNCHRO_MANUELLE_MS - contexte.horloge().getTime();
+      if (attenteMs > 0) {
+        const secondes = Math.ceil(attenteMs / 1000);
+        throw new ErreurHttp(429, 'cadence.depassee', secondes);
+      }
+    }
+    const bilan = await synchro(portee, id);
+    const source = lireSource(portee, id);
+    if (bilan === undefined || source === undefined) throw new ErreurHttp(404, 'source.introuvable');
+    res.json({ ...publierSource(source), synchronisation: publierBilan(bilan) });
   });
 
   // Agenda personnel (lot 8, modèle §3.6). Tout passe par la `PorteeUtilisateur` : le créneau d'un autre compte est introuvable (404).

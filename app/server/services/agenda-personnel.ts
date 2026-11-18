@@ -64,6 +64,7 @@ export function modifierDansMonAgenda(
   champs: ModificationCreneauPersonnel,
 ): CreneauPersonnelPublic {
   const existant = trouverCreneau(portee, creneauId);
+  if (existant.calendar_source_id !== null) throw new ErreurHttp(409, 'agenda.creneau_importe');
   const horaire = {
     all_day: champs.all_day ?? existant.all_day === 1,
     starts_at: champs.starts_at ?? existant.starts_at,
@@ -76,6 +77,8 @@ export function modifierDansMonAgenda(
 }
 
 export function supprimerDeMonAgenda(portee: PorteeUtilisateur, creneauId: string): void {
+  // Un créneau importé renaîtrait à la synchronisation suivante : on supprime la source, pas le créneau.
+  if (trouverCreneau(portee, creneauId).calendar_source_id !== null) throw new ErreurHttp(409, 'agenda.creneau_importe');
   if (!supprimerCreneauPersonnel(portee, creneauId)) throw new ErreurHttp(404, 'agenda.introuvable');
 }
 
@@ -84,6 +87,10 @@ export function definirPartagesDansMonAgenda(
   creneauId: string,
   partages: ReadonlyArray<{ readonly group_id: string; readonly visibility: VisibilitePartage }>,
 ): CreneauPersonnelPublic {
+  // Un créneau importé n'a aucun détail à montrer : la base le refuse (déclencheur), on répond proprement avant plutôt qu'une SqliteError.
+  if (trouverCreneau(portee, creneauId).calendar_source_id !== null && partages.some((p) => p.visibility === 'details')) {
+    throw new ErreurHttp(409, 'agenda.import_sans_details');
+  }
   const resultat = definirPartagesCreneau(portee, creneauId, partages);
   if (resultat === 'creneau_introuvable') throw new ErreurHttp(404, 'agenda.introuvable');
   if (resultat === 'groupe_introuvable') throw new ErreurHttp(404, 'groupe.introuvable');

@@ -27,9 +27,10 @@ const TABLES_TRANSVERSES = [
 
 /**
  * Les tables métier qui appartiennent à un compte, pas à un groupe
- * (`personal_events` : modèle §3.6 ; `push_subscriptions` : abonnements Web Push).
+ * (`personal_events` : modèle §3.6 ; `push_subscriptions` : abonnements Web Push ;
+ * `calendar_sources` : sources d'agenda externe entrant).
  */
-const EXCEPTIONS_SANS_GROUPE = ['personal_events', 'push_subscriptions'];
+const EXCEPTIONS_SANS_GROUPE = ['calendar_sources', 'personal_events', 'push_subscriptions'];
 
 /**
  * Table à `group_id` qu'aucune portée n'ouvre : `email_outbox` n'a ni `group_id` NOT NULL ni colonne
@@ -48,8 +49,8 @@ describe('schéma : cloisonnement structurel', () => {
     listerTables(t.sql).filter((n) => !TABLES_TRANSVERSES.includes(n));
   const aGroupe = (table: string): boolean => colonnesDe(t.sql, table).some((c) => c.name === 'group_id');
 
-  it('la base compte les 36 tables du modèle', () => {
-    expect(listerTables(t.sql)).toHaveLength(36);
+  it('la base compte les 37 tables du modèle', () => {
+    expect(listerTables(t.sql)).toHaveLength(37);
   });
 
   it('chaque table métier porte group_id, sauf l’exception inscrite en dur', () => {

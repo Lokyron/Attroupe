@@ -49,7 +49,7 @@
 | Comptes | `users`, `user_identities`, `sessions`, `password_reset_tokens`, `email_verification_tokens` | — (transverses) |
 | Groupes | `groups`, `memberships`, `invitations` | racine / `group_id` |
 | Planning groupe | `events`, `event_organizers`, `event_attendances` | `group_id` |
-| Planning perso | `personal_events`, `personal_event_shares` | exception encadrée (§3.6) |
+| Planning perso | `personal_events`, `personal_event_shares`, `calendar_sources` | exception encadrée (§3.6) |
 | Décision de date | `date_polls`, `date_poll_options`, `date_poll_votes` | `group_id` |
 | Préparation | `shopping_lists`, `shopping_items`, `event_tasks` | `group_id` |
 | Discussion | `threads`, `messages` | `group_id` |
@@ -324,9 +324,29 @@ le dupliquer par groupe. La cloison est reportée sur la table de partage, qui e
 | `starts_at`, `ends_at` | TEXT | NOT NULL / NULL | Mêmes règles que `events`. |
 | `time_zone` | TEXT | NOT NULL | |
 | `recurrence_rule` | TEXT | NULL | Réservé B7, inutilisé en V1. |
+| `calendar_source_id` | TEXT | NULL → `calendar_sources(id)` ON DELETE CASCADE | NULL = saisi à la main. Non nul = **importé** d'un agenda externe (ADR-0013). |
 | `created_at`, `updated_at`, `deleted_at` | TEXT | | |
 
-Index : `idx_personal_events_user (user_id, starts_at)`.
+Index : `idx_personal_events_user (user_id, starts_at)`, `idx_personal_events_source (calendar_source_id, starts_at)`.
+
+Un créneau **importé n'a aucun texte** : un `CHECK` porté par `calendar_source_id` impose
+`title = ''`, `description IS NULL`, `location_name IS NULL` et `recurrence_rule IS NULL`. La
+visibilité `details` n'y est donc pas « refusée par défaut », elle est **sans objet** — et deux
+déclencheurs sur `personal_event_shares` la refusent en insertion comme en mise à jour
+(`partage.import_sans_details`). La raison est écrite dans l'ADR-0013 : une donnée intime stockée
+finit par sortir d'une manière qu'on n'avait pas prévue, alors qu'une colonne jamais écrite ne sort
+jamais.
+
+Un troisième déclencheur impose la **suppression douce** aux créneaux saisis à la main
+(`creneau.suppression_douce_seulement`) : seul un lot importé se supprime réellement, parce qu'il est
+remplacé en entier à chaque synchronisation.
+
+**`calendar_sources`** — une ligne = un agenda externe abonné (ADR-0013). L'URL est un **secret
+porteur** (l'« adresse secrète » de Google donne le calendrier complet, détails compris) : elle est
+chiffrée au repos en AES-256-GCM, et ne ressort jamais par l'API — seul `url_host` est lisible.
+`UNIQUE (user_id, url_fingerprint)` interdit le doublon sans conserver le clair. La table est
+déclarée dans `PORTEE_TABLES` par `user_id`, sans quoi la garde du SQL brut l'ignorerait purement
+et simplement.
 
 **`personal_event_shares`** — une ligne = « ce créneau est visible du groupe X, à ce niveau ».
 

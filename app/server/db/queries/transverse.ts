@@ -160,3 +160,19 @@ const PURGER_ABONNEMENTS_REVOQUES = `DELETE FROM calendar_feed_tokens WHERE revo
 export function purgerAbonnementsRevoques(base: Base, avant: string): number {
   return Number(preparerTransverse(base, PURGER_ABONNEMENTS_REVOQUES).run(avant).changes);
 }
+
+const SOURCES_AGENDA_A_FAIRE = `SELECT id, user_id FROM calendar_sources WHERE disabled_at IS NULL AND next_attempt_at <= ? ORDER BY next_attempt_at LIMIT ?`;
+
+const ligneSourceAFaire = z.object({ id: z.string(), user_id: z.string() });
+
+export type SourceAgendaAFaire = z.infer<typeof ligneSourceAFaire>;
+
+/**
+ * Synchronisation d'agenda entrante : sources actives dont l'échéance (`next_attempt_at`) est atteinte, les plus en retard d'abord.
+ * Transverse car la tâche de fond traverse les comptes ; elle rouvre ensuite chaque source avec la portée de son propriétaire.
+ */
+export function sourcesAFaire(base: Base, maintenant: string, limite: number): SourceAgendaAFaire[] {
+  return preparerTransverse(base, SOURCES_AGENDA_A_FAIRE)
+    .all(maintenant, limite)
+    .map((ligne) => ligneSourceAFaire.parse(ligne));
+}

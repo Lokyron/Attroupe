@@ -4,6 +4,7 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import type { Env } from '../config/env.js';
 import type { Base } from '../db/base.js';
 import { LimiteurCadence, REGLES_PAR_DEFAUT, type Horloge, type ReglesCadence } from '../services/cadence.js';
+import type { DependancesAgenda } from '../services/agenda-externe.js';
 import type { DnsLookupImmich, FetchImmich } from '../services/immich-client.js';
 import { empreinteLeurre, PARAMETRES_PRODUCTION, type ParametresScrypt } from '../services/mot-de-passe.js';
 import { DiffuseurTempsReel } from '../services/temps-reel.js';
@@ -44,6 +45,7 @@ export interface OptionsApp {
   delaiMinimalOubliMs?: number;
   fetchImmich?: FetchImmich;
   dnsLookupImmich?: DnsLookupImmich;
+  agendaExterne?: DependancesAgenda;
 }
 
 /** Durée minimale d'une réponse à « mot de passe oublié » : bien au-dessus de l'écart entre adresse connue et inconnue. */
@@ -110,6 +112,7 @@ export function creerApp(options: OptionsApp): Express {
       diffuseur: options.diffuseur ?? new DiffuseurTempsReel({ horloge, journal, plafondGlobal: env.ATTROUPE_SSE_MAX_CONNECTIONS }),
       ...(options.fetchImmich !== undefined ? { fetchImmich: options.fetchImmich } : {}),
       ...(options.dnsLookupImmich !== undefined ? { dnsLookupImmich: options.dnsLookupImmich } : {}),
+      ...(options.agendaExterne !== undefined ? { agendaExterne: options.agendaExterne } : {}),
     };
     // Empreinte leurre chauffée au démarrage : la première connexion sur une adresse inconnue ne doit pas durer deux fois plus.
     empreinteLeurre(parametresScrypt).catch((erreur: unknown) => {

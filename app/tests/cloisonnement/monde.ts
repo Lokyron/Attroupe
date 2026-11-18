@@ -1,5 +1,6 @@
 import type { Decor } from '../fixtures/comptes.js';
 import { decor, groupe, membreDe, personne, type GroupeAmorce, type Personne } from '../fixtures/groupes.js';
+import { agendaEnMemoire } from '../fixtures/faux-agenda.js';
 import type { Ressource } from './registre.js';
 
 // Le décor de la suite de cloisonnement : DEUX groupes étanches, chacun avec son administrateur, ses membres et un
@@ -123,7 +124,7 @@ export async function monde(): Promise<Monde> {
   };
   const dnsLookupImmich = async () => [{ address: '93.184.216.34', family: 4 }] as const;
 
-  const d = decor({ fetchImmich, dnsLookupImmich });
+  const d = decor({ fetchImmich, dnsLookupImmich, agendaExterne: agendaEnMemoire() });
   const alice = await personne(d, 'alice_m');
   const bob = await personne(d, 'bob_m');
   const carole = await personne(d, 'carole_m');
@@ -216,6 +217,14 @@ export async function monde(): Promise<Monde> {
     if (r.statut !== 201) throw new Error(`Créneau personnel refusé : ${JSON.stringify(r.corps)}`);
     return r.corps['id'] as string;
   };
+  // Source d'agenda externe (ADR-0013) : un exemplaire par monde, synchronisé depuis un ICS en mémoire (aucun réseau).
+  const sourceAgenda = async (auteur: Personne, hote: string): Promise<string> => {
+    const r = await auteur.client.post('/api/moi/agenda/sources', { url: `https://${hote}/secret.ics`, label: `Agenda de ${hote}` });
+    if (r.statut !== 201) throw new Error(`Source d'agenda refusée : ${JSON.stringify(r.corps)}`);
+    return r.corps['id'] as string;
+  };
+  const sourceAgendaA = await sourceAgenda(alice, 'agenda-alice.exemple.org');
+  const sourceAgendaB = await sourceAgenda(bob, 'agenda-bob-confidentiel.exemple.org');
   const creneauPersoA = await creneauPerso(alice, 'Rendez-vous privé Alice');
   const creneauPersoB = await creneauPerso(bob, 'Consultation secrète de Bob');
   const depenseEtRemboursement = async (
@@ -316,8 +325,8 @@ export async function monde(): Promise<Monde> {
     manonRestreintB: await creerFlux(manon, { group_id: b.groupId }),
   };
   const ressources = {
-    a: { membre: membreDe(a, carole), membreAutre: membreDe(a, erin), evenement: evenementA, invitation: invitationA, session: await idSession(alice), abonnement: abonnementAlice.id, jetonFlux: flux.erin.jeton, sondage: sondageA.sondage, optionSondage: sondageA.optionSondage, creneauPerso: creneauPersoA, ...coursesA, ...financeA, ...filA, ...photosA, ...recueA, utilisateur: alice.userId },
-    b: { membre: membreDe(b, dave), membreAutre: membreDe(b, manon), evenement: evenementB, invitation: invitationB, session: await idSession(bob), abonnement: abonnementBob.id, jetonFlux: flux.dave.jeton, sondage: sondageB.sondage, optionSondage: sondageB.optionSondage, creneauPerso: creneauPersoB, ...coursesB, ...financeB, ...filB, ...photosB, ...recueB, utilisateur: bob.userId },
+    a: { membre: membreDe(a, carole), membreAutre: membreDe(a, erin), evenement: evenementA, invitation: invitationA, session: await idSession(alice), abonnement: abonnementAlice.id, jetonFlux: flux.erin.jeton, sondage: sondageA.sondage, optionSondage: sondageA.optionSondage, creneauPerso: creneauPersoA, sourceAgenda: sourceAgendaA, ...coursesA, ...financeA, ...filA, ...photosA, ...recueA, utilisateur: alice.userId },
+    b: { membre: membreDe(b, dave), membreAutre: membreDe(b, manon), evenement: evenementB, invitation: invitationB, session: await idSession(bob), abonnement: abonnementBob.id, jetonFlux: flux.dave.jeton, sondage: sondageB.sondage, optionSondage: sondageB.optionSondage, creneauPerso: creneauPersoB, sourceAgenda: sourceAgendaB, ...coursesB, ...financeB, ...filB, ...photosB, ...recueB, utilisateur: bob.userId },
   };
   const marquesDeB = [
     b.groupId,

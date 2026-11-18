@@ -19,6 +19,8 @@ const AVEC_ID = { avecId: true, auteur: null, auteurFacultatif: null, cle: ['id'
 const TABLES = {
   // Révocation par `revoked_at` (modèle §4.4) : pas de suppression.
   calendar_feed_tokens: { ...AVEC_ID, supprimable: false, suppressionReelle: false, creeLe: true, majLe: false },
+  // Sources d'agenda externe : l'URL chiffrée est un secret porteur ; supprimer une source emporte ses créneaux importés (cascade).
+  calendar_sources: { ...AVEC_ID, supprimable: false, suppressionReelle: true, creeLe: true, majLe: true },
   // Purge périodique des lues (modèle §4.4).
   notifications: { ...AVEC_ID, supprimable: false, suppressionReelle: true, creeLe: true, majLe: false },
   // Clé (user_id, group_id) : `group_id` est un identifiant de groupe ou '*' (réglage global).

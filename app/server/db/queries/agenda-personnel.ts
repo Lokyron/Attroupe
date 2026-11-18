@@ -31,6 +31,8 @@ const ligneCreneauPersonnel = z.object({
   starts_at: z.string(),
   ends_at: z.string().nullable(),
   time_zone: z.string(),
+  /** Source d'agenda externe qui a importé ce créneau ; `null` pour un créneau saisi à la main. */
+  calendar_source_id: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });

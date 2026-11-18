@@ -31,7 +31,7 @@ function demarrer(): void {
   if (transporteur === undefined) {
     journal.warn('email.non_configure', { detail: "BREVO_API_KEY absente : les e-mails restent en file d'attente et ne partiront pas." });
   }
-  const taches = demarrerTaches({ base, transporteur, journal, baseUrl: env.ATTROUPE_BASE_URL });
+  const taches = demarrerTaches({ base, transporteur, journal, baseUrl: env.ATTROUPE_BASE_URL, cleChiffrement: env.ATTROUPE_ENCRYPTION_KEY });
 
   // Créé ici pour pouvoir fermer les flux à l'arrêt : un flux SSE ne se termine jamais de lui-même.
   const diffuseur = new DiffuseurTempsReel({ journal, plafondGlobal: env.ATTROUPE_SSE_MAX_CONNECTIONS });

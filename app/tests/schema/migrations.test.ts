@@ -22,21 +22,21 @@ describe('migrations', () => {
   });
   afterEach(() => rmSync(dossier, { recursive: true, force: true }));
 
-  it('le schéma initial donne 36 tables STRICT et 42 index', () => {
+  it('le schéma initial donne 37 tables STRICT et 45 index', () => {
     const base = ouvrirEtMigrer(chemin, { dossierMigrations: migrations });
     const sql = brut(base);
     try {
-      expect(listerTables(sql)).toHaveLength(36);
+      expect(listerTables(sql)).toHaveLength(37);
       const strictes = sql
         .prepare("SELECT count(*) FROM pragma_table_list WHERE schema = 'main' AND name NOT LIKE 'sqlite_%' AND strict = 1")
         .pluck()
         .get();
-      expect(strictes).toBe(36);
+      expect(strictes).toBe(37);
       const index = sql
         .prepare("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'")
         .pluck()
         .get();
-      expect(index).toBe(42);
+      expect(index).toBe(45);
       expect(sql.pragma('integrity_check', { simple: true })).toBe('ok');
     } finally {
       fermer(base);
@@ -48,7 +48,7 @@ describe('migrations', () => {
     const sql = brut(base);
     try {
       const avant = sql.prepare('SELECT version, applied_at, checksum FROM schema_migrations').all();
-      expect(avant).toHaveLength(3);
+      expect(avant).toHaveLength(4);
       const second = migrer(base, chemin, { dossierMigrations: migrations });
       expect(second).toEqual({ appliquees: [], sauvegarde: undefined });
       expect(sql.prepare('SELECT version, applied_at, checksum FROM schema_migrations').all()).toEqual(avant);
@@ -81,7 +81,7 @@ describe('migrations', () => {
   it('une migration jouée dont le fichier a disparu fait échouer le démarrage', () => {
     fermer(ouvrirEtMigrer(chemin, { dossierMigrations: migrations }));
     rmSync(join(migrations, '0001_socle.sql'));
-    writeFileSync(join(migrations, '0004_autre.sql'), 'CREATE TABLE autre (id TEXT NOT NULL PRIMARY KEY) STRICT;');
+    writeFileSync(join(migrations, '0005_autre.sql'), 'CREATE TABLE autre (id TEXT NOT NULL PRIMARY KEY) STRICT;');
     expect(() => ouvrirEtMigrer(chemin, { dossierMigrations: migrations })).toThrow(/fichier a disparu/);
   });
 
@@ -92,28 +92,28 @@ describe('migrations', () => {
 
   it('une nouvelle migration est jouée dans l’ordre, après une sauvegarde cohérente de l’état précédent', () => {
     fermer(ouvrirEtMigrer(chemin, { dossierMigrations: migrations }));
-    writeFileSync(join(migrations, '0004_ajout.sql'), 'CREATE TABLE ajout (id TEXT NOT NULL PRIMARY KEY) STRICT;');
+    writeFileSync(join(migrations, '0005_ajout.sql'), 'CREATE TABLE ajout (id TEXT NOT NULL PRIMARY KEY) STRICT;');
 
     const base = ouvrirEtMigrer(chemin, { dossierMigrations: migrations });
     const sql = brut(base);
     try {
       const versions = sql.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all();
-      expect(versions).toEqual(['0001_socle', '0002_verification_email', '0003_profil_et_push', '0004_ajout']);
+      expect(versions).toEqual(['0001_socle', '0002_verification_email', '0003_profil_et_push', '0004_agenda_externe', '0005_ajout']);
       expect(listerTables(sql)).toContain('ajout');
 
       const sauvegardes = readdirSync(join(dossier, 'sauvegardes'));
       expect(sauvegardes).toHaveLength(1);
-      expect(sauvegardes[0]).toMatch(/^avant-0004_ajout-.*-\d+-[0-9a-f]{6}\.sqlite$/);
+      expect(sauvegardes[0]).toMatch(/^avant-0005_ajout-.*-\d+-[0-9a-f]{6}\.sqlite$/);
 
-      // La sauvegarde est l'état d'AVANT : complète (36 tables) et sans la table de la migration 0004.
+      // La sauvegarde est l'état d'AVANT : complète (37 tables) et sans la table de la migration 0005.
       sql.prepare('ATTACH DATABASE ? AS sauvegarde').run(join(dossier, 'sauvegardes', sauvegardes[0] ?? ''));
       const tablesSauvegardees = sql
         .prepare("SELECT name FROM sauvegarde.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
         .pluck()
         .all();
-      expect(tablesSauvegardees).toHaveLength(36);
+      expect(tablesSauvegardees).toHaveLength(37);
       expect(tablesSauvegardees).not.toContain('ajout');
-      expect(sql.prepare('SELECT version FROM sauvegarde.schema_migrations').pluck().all()).toEqual(['0001_socle', '0002_verification_email', '0003_profil_et_push']);
+      expect(sql.prepare('SELECT version FROM sauvegarde.schema_migrations').pluck().all()).toEqual(['0001_socle', '0002_verification_email', '0003_profil_et_push', '0004_agenda_externe']);
     } finally {
       fermer(base);
     }
@@ -122,11 +122,11 @@ describe('migrations', () => {
   it('une migration qui échoue est annulée en entier', () => {
     fermer(ouvrirEtMigrer(chemin, { dossierMigrations: migrations }));
     writeFileSync(
-      join(migrations, '0004_cassee.sql'),
+      join(migrations, '0005_cassee.sql'),
       'CREATE TABLE moitie (id TEXT NOT NULL PRIMARY KEY) STRICT;\nCREATE TABLE moitie (id TEXT) STRICT;',
     );
     expect(() => ouvrirEtMigrer(chemin, { dossierMigrations: migrations })).toThrow();
-    writeFileSync(join(migrations, '0004_cassee.sql'), 'SELECT 1;');
+    writeFileSync(join(migrations, '0005_cassee.sql'), 'SELECT 1;');
     const base = ouvrirEtMigrer(chemin, { dossierMigrations: migrations });
     const sql = brut(base);
     try {

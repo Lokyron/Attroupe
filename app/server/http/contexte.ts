@@ -4,6 +4,7 @@ import type { Horloge, LimiteurCadence, ReglesCadence } from '../services/cadenc
 import type { DiffuseurTempsReel } from '../services/temps-reel.js';
 import type { ParametresScrypt } from '../services/mot-de-passe.js';
 import type { DnsLookupImmich, FetchImmich } from '../services/immich-client.js';
+import type { DependancesAgenda } from '../services/agenda-externe.js';
 import type { Journal } from './middleware/journal.js';
 
 /** Tout ce dont les routes et intergiciels ont besoin, assemblé une fois dans `creerApp` (rien n'est global : les tests injectent). */
@@ -24,4 +25,6 @@ export interface Contexte {
   /** Doubles injectables en test pour les appels sortants vers Immich. */
   readonly fetchImmich?: FetchImmich;
   readonly dnsLookupImmich?: DnsLookupImmich;
+  /** Doubles injectables en test pour la récupération des agendas externes (ADR-0013). */
+  readonly agendaExterne?: DependancesAgenda;
 }

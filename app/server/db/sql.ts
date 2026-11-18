@@ -30,6 +30,7 @@ export const PORTEE_TABLES: Readonly<Record<string, ColonnePortee>> = {
   album_assets: 'group_id',
   albums: 'group_id',
   calendar_feed_tokens: 'user_id',
+  calendar_sources: 'user_id',
   date_poll_options: 'group_id',
   date_poll_votes: 'group_id',
   date_polls: 'group_id',
@@ -632,6 +633,8 @@ export const TEXTES_TRANSVERSES: readonly string[] = Object.freeze([
    ORDER BY n.user_id, n.group_id, n.created_at`,
   // Purge des abonnements iCal révoqués (entretien périodique) : global par nature, sans compte ni groupe.
   `DELETE FROM calendar_feed_tokens WHERE revoked_at < ?`,
+  // Synchronisation d'agenda entrante : la tâche de fond choisit les sources à rafraîchir, tous comptes confondus.
+  `SELECT id, user_id FROM calendar_sources WHERE disabled_at IS NULL AND next_attempt_at <= ? ORDER BY next_attempt_at LIMIT ?`,
 ]);
 
 /** Prépare un texte de `TEXTES_TRANSVERSES`, et rien d'autre. */

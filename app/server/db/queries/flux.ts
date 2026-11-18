@@ -186,7 +186,10 @@ export function evenementsFlux(scope: GroupScope, fenetre: FenetreFlux): Eveneme
 
 // --- Lecture des créneaux personnels du compte (include_personal = 1, lot 8) -----------------------------------------
 
-const CORPS_ENSEMBLE_PERSONNEL = `FROM personal_events AS p WHERE p.user_id = ? AND p.deleted_at IS NULL`;
+// Les créneaux importés d'un agenda externe (`calendar_source_id` non nul) sont EXCLUS : ils repartiraient dans le flux sortant et le
+// téléphone de l'utilisateur afficherait en double ses propres rendez-vous (boucle de rétroaction, ADR-0013 §5). La lecture et l'empreinte
+// ETag dérivent de cette même constante.
+const CORPS_ENSEMBLE_PERSONNEL = `FROM personal_events AS p WHERE p.user_id = ? AND p.deleted_at IS NULL AND p.calendar_source_id IS NULL`;
 const ENSEMBLE_PERSONNEL_MODIFIES = `${CORPS_ENSEMBLE_PERSONNEL} AND p.updated_at >= ?`;
 const ENSEMBLE_PERSONNEL_FENETRE = `${CORPS_ENSEMBLE_PERSONNEL} AND p.updated_at < ? AND p.starts_at >= ? AND p.starts_at <= ?`;
 

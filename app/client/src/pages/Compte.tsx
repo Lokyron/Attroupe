@@ -20,6 +20,7 @@ import {
   type Moi,
 } from '../api/groupes';
 import { CarteNotificationsPush } from '../components/CarteNotificationsPush';
+import { CarteSourcesAgenda } from '../components/CarteSourcesAgenda';
 import { Erreur, messageDe } from '../components/Erreur';
 import { t } from '../i18n';
 
@@ -550,6 +551,7 @@ export function Compte({
       <CartePhotoProfil moi={moi} onProfilChange={onProfilChange} />
       <CarteNotificationsPush />
       <MonAgendaPersonnel groupes={groupes} />
+      <CarteSourcesAgenda />
 
       <section className="carte">
         <div className="carte-entete">
