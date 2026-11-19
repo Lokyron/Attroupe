@@ -461,8 +461,37 @@ ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
   calculées en local et non en UTC dans les dépenses ; les `aria-label` qui nomment leur cible ; les
   libellés nus et le vocabulaire unifié ; l'orthotypographie française de `fr.json` (195 valeurs) ;
   environ 130 lignes de CSS mort et 6 clés mortes supprimées, ainsi que `pages/Accueil.tsx`.
-- **Restent les phases 2 et 3**, c'est-à-dire les chantiers structurants : garde de double
-  soumission sur les 14 chemins d'écriture, modale de confirmation en remplacement des 8
-  `window.confirm`, hook de chargement partagé avec squelettes, contexte de groupe et flux SSE
-  unique, traitement central du 401, validation champ par champ des dépenses, pagination des listes
-  non bornées, écrans de compte manquants, et notifications autres que les messages.
+- **Phase 2 de l'audit appliquée : trois briques partagées, puis leur diffusion.** Les briques sont
+  les points d'entrée à connaître avant d'écrire une vue :
+  - `app/client/src/hooks/useSoumission.ts` — garde de double soumission. La garde EST une `ref`
+    posée avant l'appel, pas un `useState` : une mise à jour d'état est asynchrone et ne bloque pas
+    un second clic survenu dans le même tick. `disabled={enCours}` seul ne protège donc de rien.
+    Appliquée aux chemins d'écriture, dont la création d'une dépense, qui créait deux dettes.
+  - `app/client/src/hooks/useLecture.ts` — lecture à trois états (`chargement`/`erreur`/`pret`) avec
+    garde d'annulation par compteur de génération, en remplacement du schéma recopié 56 fois.
+    `recharger()` repart de zéro ; `rafraichir()` relit SANS vider l'écran, et c'est lui qu'il faut
+    après une action de l'utilisateur. **Il ne remplace pas `api/rechargement.ts` (`useRechargement`)
+    pour le SSE** : chaque message temps réel ferait clignoter le squelette.
+  - `app/client/src/components/DialogueConfirmation.tsx` — modale sur l'élément natif `<dialog>` +
+    `showModal()`, qui fournit le piège à focus, Échap et `aria-modal`. Le focus arrive sur
+    « Annuler », jamais sur le bouton destructeur. Elle remplace les 8 `window.confirm` et le
+    `window.prompt`, et couvre les destructions qui n'avaient aucun garde-fou : une dépense, un
+    créneau de sondage et ses votes, la conversion d'un sondage, un article de liste, la promotion
+    d'un membre en administrateur. Les textes vivent dans `fr.json` sous `confirm.<domaine>.<action>.
+    {titre,consequence,action}` : un titre qui pose la question, une conséquence qui dit ce qui sera
+    perdu, et un libellé de bouton en verbe + objet.
+  - Aussi : traitement central du 401 (`api/client.ts` émet `SESSION_EXPIREE`, la coque écoute et ne
+    bascule que si elle se croyait connectée), réponse de présence enregistrée au clic, fusion des
+    messages de discussion par `id` au lieu d'un remplacement qui perdait l'historique chargé,
+    visionneuse photo sur `<dialog>`, et `loading="lazy"` sur les vignettes.
+- **Restent les phases 2 bis et 3** : découpage de `TableauDeBord.tsx` (971 lignes, 10 blocs),
+  contexte de groupe partagé et flux SSE unique par groupe (`lireGroupe` est appelé à neuf
+  endroits), gouvernance des tokens du design system, mode sombre, écrans de compte manquants (mot
+  de passe, sessions, profil — quatre endpoints sans interface), validation champ par champ des
+  dépenses, pagination des six listes non bornées, suppression de groupe, sortie du type de liste
+  hors du titre, et **les notifications autres que les messages** : `services/fils.ts` reste le seul
+  appelant de `notifierMembresGroupe`.
+- **Fragilité de test confirmée** : sur ce même lot, un `npm test` lancé juste après un
+  `npm run typecheck` a donné 42 échecs sur 2 fichiers, puis deux runs espacés ont été entièrement
+  verts (1659 tests). C'est l'épuisement de ports éphémères déjà décrit plus haut — espacer les
+  lancements, et ne pas conclure sur un seul run rouge.

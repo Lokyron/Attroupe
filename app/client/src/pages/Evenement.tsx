@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ajouterOrganisateur,
   annulerEvenement,
@@ -12,12 +12,16 @@ import {
 } from '../api/evenements';
 import { lireGroupe, listerMembres, type Membre } from '../api/groupes';
 import { libelleDateHoraire } from '../agenda/format';
+import { ChargementPage, SqueletteCarte } from '../components/ChargementPage';
+import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { FilDiscussion } from '../components/FilDiscussion';
 import { FormulaireEvenement } from '../components/FormulaireEvenement';
 import { IconeCalendrier, IconeLieu, IconeMessage } from '../components/Icones';
 import { TachesEvenement } from '../components/TachesEvenement';
+import { useLecture } from '../hooks/useLecture';
+import { useSoumission } from '../hooks/useSoumission';
 import { SectionDepenses } from './Depenses';
 import { t } from '../i18n';
 
@@ -25,15 +29,8 @@ const REPONSES: readonly ReponsePresence[] = ['yes', 'maybe', 'no'];
 
 /** Création d'un événement : le formulaire, puis le détail du nouvel événement. */
 export function NouvelEvenement({ groupId }: { groupId: string }) {
-  const [fuseau, setFuseau] = useState<string | null>(null);
-  const [erreur, setErreur] = useState<string | null>(null);
-  useEffect(() => {
-    lireGroupe(groupId)
-      .then((g) => setFuseau(g.time_zone))
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId]);
+  const { donnees: fuseau, etat, erreur, recharger } = useLecture(() => lireGroupe(groupId).then((g) => g.time_zone), [groupId]);
   const agenda = `#/groupe/${encodeURIComponent(groupId)}/agenda`;
-  if (fuseau === null) return <Erreur message={erreur} />;
   return (
     <section className="page-groupe-pile">
       <EnteteGroupe
@@ -42,6 +39,8 @@ export function NouvelEvenement({ groupId }: { groupId: string }) {
         titre={t('evenement_form.titre_creation')}
         lienRetour={{ href: agenda, libelle: t('evenement.retour_agenda') }}
       />
+      <ChargementPage etat={etat} erreur={erreur} onReessayer={recharger} squelette={<SqueletteCarte />}>
+        {fuseau !== null && (
       <div className="carte">
         <FormulaireEvenement
           groupId={groupId}
@@ -54,53 +53,118 @@ export function NouvelEvenement({ groupId }: { groupId: string }) {
           }}
         />
       </div>
+        )}
+      </ChargementPage>
     </section>
   );
 }
 
-/** Détail d'un événement : 2 colonnes sur desktop (détails, RSVP, tâches, dépenses d'un côté ; discussion de l'autre). */
+interface DonneesEvenement {
+  evenement: DetailEvenement;
+  presences: Presences;
+  membres: Membre[];
+}
+
+/** Détail d'un événement : lecture initiale à trois états (squelette, erreur avec reprise, contenu) ; le contenu vit dans `CorpsEvenement`. */
 export function Evenement({ groupId, evenementId }: { groupId: string; evenementId: string }) {
-  const [evenement, setEvenement] = useState<DetailEvenement | null>(null);
-  const [presences, setPresences] = useState<Presences | null>(null);
-  const [membres, setMembres] = useState<Membre[]>([]);
+  const { donnees, etat, erreur, recharger } = useLecture<DonneesEvenement>(
+    () =>
+      Promise.all([lireEvenement(groupId, evenementId), lirePresences(groupId, evenementId), listerMembres(groupId)]).then(
+        ([evenement, presences, membres]) => ({ evenement, presences, membres }),
+      ),
+    [groupId, evenementId],
+  );
+  if (etat !== 'pret' || donnees === null) {
+    return (
+      <section className="page-groupe-pile">
+        <EnteteGroupe
+          groupId={groupId}
+          ongletActif="agenda"
+          lienRetour={{ href: `#/groupe/${encodeURIComponent(groupId)}/agenda`, libelle: t('evenement.retour_agenda') }}
+        />
+        <ChargementPage etat={etat} erreur={erreur} onReessayer={recharger} squelette={<SqueletteCarte />}>
+          {null}
+        </ChargementPage>
+      </section>
+    );
+  }
+  return <CorpsEvenement groupId={groupId} initial={donnees} />;
+}
+
+/** Contenu d'un événement : 2 colonnes sur desktop (détails, RSVP, tâches, dépenses d'un côté ; discussion de l'autre). */
+function CorpsEvenement({ groupId, initial }: { groupId: string; initial: DonneesEvenement }) {
+  const [evenement, setEvenement] = useState<DetailEvenement>(initial.evenement);
+  const [presences, setPresences] = useState<Presences>(initial.presences);
+  const membres = initial.membres;
   const [edition, setEdition] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
-  const [choix, setChoix] = useState<ReponsePresence | null>(null);
-  const [invites, setInvites] = useState(0);
-  const [commentaire, setCommentaire] = useState('');
+  const [choix, setChoix] = useState<ReponsePresence | null>(initial.evenement.ma_presence?.status ?? null);
+  // `invites` reste une chaîne : effacer le champ ne doit pas le forcer à 0 sous les doigts de l'utilisateur.
+  const [invites, setInvites] = useState(String(initial.evenement.ma_presence?.guests_count ?? 0));
+  const [commentaire, setCommentaire] = useState(initial.evenement.ma_presence?.comment ?? '');
   const [aAjouter, setAAjouter] = useState('');
+  const [annulationOuverte, setAnnulationOuverte] = useState(false);
+  const [aRetirer, setARetirer] = useState<{ id: string; nom: string } | null>(null);
+  const [reponseEnregistree, setReponseEnregistree] = useState(false);
+  // UNE SEULE garde pour les boutons de statut ET le bouton « Enregistrer » du bloc dépliable :
+  // deux instances laissaient partir deux requêtes concurrentes, et c'est la dernière réponse
+  // arrivée qui gagnait à l'écran, pas la dernière demandée.
+  const reponse = useSoumission();
+  const action = useSoumission();
+  const evenementId = evenement.id;
 
   const adopter = useCallback((e: DetailEvenement): void => {
     setEvenement(e);
     setChoix(e.ma_presence?.status ?? null);
-    setInvites(e.ma_presence?.guests_count ?? 0);
+    setInvites(String(e.ma_presence?.guests_count ?? 0));
     setCommentaire(e.ma_presence?.comment ?? '');
   }, []);
 
-  const charger = useCallback((): void => {
+  /** Applique une écriture sur l'événement (annulation, organisateurs) puis relit les présences ; l'erreur remonte à l'appelant. */
+  const agir = (ecriture: () => Promise<DetailEvenement>): Promise<void> => {
     setErreur(null);
-    Promise.all([lireEvenement(groupId, evenementId), lirePresences(groupId, evenementId), listerMembres(groupId)])
-      .then(([e, p, m]) => {
-        adopter(e);
-        setPresences(p);
-        setMembres(m);
-      })
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId, evenementId, adopter]);
-  useEffect(charger, [charger]);
+    return ecriture().then(async (e) => {
+      adopter(e);
+      setPresences(await lirePresences(groupId, evenementId));
+    });
+  };
 
-  const agir = (action: Promise<DetailEvenement>): void => {
-    setErreur(null);
-    action
-      .then((e) => {
+  /**
+   * Enregistre la réponse. Le nouveau statut s'affiche tout de suite (optimiste) et revient en arrière si le serveur refuse.
+   * L'état n'est touché qu'une fois la garde de double soumission franchie : un clic ignoré ne doit rien changer.
+   */
+  const enregistrerReponse = (soumission: ReturnType<typeof useSoumission>, statut: ReponsePresence, nombreInvites: string, texteCommentaire: string): void => {
+    const avant = { choix, invites, commentaire };
+    const guests = statut === 'no' ? 0 : Math.max(0, Math.min(20, Number(nombreInvites) || 0));
+    soumission
+      .lancer(async () => {
+        setErreur(null);
+        setReponseEnregistree(false);
+        setChoix(statut);
+        setInvites(String(guests));
+        // Seul l'ÉCHEC DE L'ENVOI justifie un retour arrière. La relecture de la liste des présences
+        // est en dehors du `try` pour cette raison : si elle échouait alors que `repondre` a réussi,
+        // remettre l'ancien choix afficherait « Je ne viens pas » là où le serveur a « Je viens ».
+        let e;
+        try {
+          e = await repondre(groupId, evenementId, {
+            status: statut,
+            guests_count: guests,
+            comment: texteCommentaire.trim() === '' ? null : texteCommentaire.trim(),
+          });
+        } catch (err: unknown) {
+          setChoix(avant.choix);
+          setInvites(avant.invites);
+          setCommentaire(avant.commentaire);
+          throw err;
+        }
         adopter(e);
-        return lirePresences(groupId, evenementId);
+        setReponseEnregistree(true);
+        setPresences(await lirePresences(groupId, evenementId));
       })
-      .then(setPresences)
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  if (evenement === null) return <Erreur message={erreur} />;
   const annule = evenement.status === 'cancelled';
   const agenda = `#/groupe/${encodeURIComponent(groupId)}/agenda`;
   const dejaOrganisateurs = new Set(evenement.organisateurs.map((o) => o.membership_id));
@@ -161,7 +225,7 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
                 <button
                   type="button"
                   className="bouton-compact bouton-danger-discret"
-                  onClick={() => window.confirm(t('evenement.annuler_confirmation')) && agir(annulerEvenement(groupId, evenement.id))}
+                  onClick={() => setAnnulationOuverte(true)}
                 >
                   {t('evenement.annuler')}
                 </button>
@@ -226,50 +290,54 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
                       type="button"
                       className={`vote-btn vote-btn-${r}`}
                       aria-pressed={choix === r}
-                      onClick={() => {
-                        setChoix(r);
-                        if (r === 'no') setInvites(0);
-                      }}
+                      disabled={reponse.enCours}
+                      onClick={() => enregistrerReponse(reponse, r, invites, commentaire)}
                     >
                       {t(`presence.${r}` as const)}
                     </button>
                   ))}
                 </div>
-                <div className="grille-champs-2">
-                  <label>
-                    {t('presence.invites')}
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      max={20}
-                      value={invites}
-                      disabled={choix === 'no'}
-                      onChange={(e) => setInvites(Math.max(0, Math.min(20, Number(e.target.value) || 0)))}
-                    />
-                  </label>
-                  <label>
-                    {t('presence.commentaire')}
-                    <input type="text" value={commentaire} maxLength={500} onChange={(e) => setCommentaire(e.target.value)} />
-                  </label>
-                </div>
-                <button
-                  type="button"
-                  className="bouton-primaire"
-                  disabled={choix === null}
-                  onClick={() =>
-                    choix !== null &&
-                    agir(
-                      repondre(groupId, evenement.id, {
-                        status: choix,
-                        guests_count: invites,
-                        comment: commentaire.trim() === '' ? null : commentaire.trim(),
-                      }),
-                    )
-                  }
-                >
-                  {t('presence.enregistrer')}
-                </button>
+                <p role="status" className="discret">
+                  {reponse.enCours
+                    ? t('commun.enregistrement')
+                    : reponseEnregistree && choix !== null
+                      ? `${t('presence.titre')} : ${t(`presence.${choix}` as const)}`
+                      : ''}
+                </p>
+                <details>
+                  <summary>{`${t('presence.invites')} · ${t('presence.commentaire')}`}</summary>
+                  <div className="grille-champs-2">
+                    <label>
+                      {t('presence.invites')}
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={20}
+                        value={choix === 'no' ? '0' : invites}
+                        disabled={choix === 'no'}
+                        aria-describedby="aide-invites"
+                        onChange={(e) => setInvites(e.target.value)}
+                      />
+                      {/* La contrainte et la raison du champ grisé sont dites AVANT l'erreur. */}
+                      <small id="aide-invites" className="texte-doux">
+                        {choix === 'no' ? t('presence.invites_hors_sujet') : t('presence.invites_max')}
+                      </small>
+                    </label>
+                    <label>
+                      {t('presence.commentaire')}
+                      <input type="text" value={commentaire} maxLength={500} onChange={(e) => setCommentaire(e.target.value)} />
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    className="bouton-primaire"
+                    disabled={choix === null || reponse.enCours}
+                    onClick={() => choix !== null && enregistrerReponse(reponse, choix, invites, commentaire)}
+                  >
+                    {reponse.enCours ? t('commun.enregistrement') : t('presence.enregistrer')}
+                  </button>
+                </details>
               </div>
             )}
 
@@ -329,7 +397,7 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
                       <button
                         type="button"
                         className="bouton-compact bouton-danger-discret"
-                        onClick={() => agir(retirerOrganisateur(groupId, evenement.id, o.membership_id))}
+                        onClick={() => setARetirer({ id: o.membership_id, nom: o.display_name })}
                       >
                         {t('organisateurs.retirer')}
                       </button>
@@ -350,10 +418,11 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
                 </select>
                 <button
                   type="button"
-                  disabled={aAjouter === ''}
+                  disabled={aAjouter === '' || action.enCours}
                   onClick={() => {
-                    agir(ajouterOrganisateur(groupId, evenement.id, aAjouter));
-                    setAAjouter('');
+                    action
+                      .lancer(() => agir(() => ajouterOrganisateur(groupId, evenement.id, aAjouter)).then(() => setAAjouter('')))
+                      .catch((err: unknown) => setErreur(messageDe(err)));
                   }}
                 >
                   {t('organisateurs.ajouter')}
@@ -372,11 +441,43 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
                   <span>{t('evenement.discussion')}</span>
                 </h3>
               </div>
-              <FilDiscussion groupId={groupId} filId={evenement.thread_id} />
+              <FilDiscussion key={`${groupId}/${evenement.thread_id}`} groupId={groupId} filId={evenement.thread_id} />
             </div>
           </div>
         )}
       </div>
+
+      <DialogueConfirmation
+        ouvert={annulationOuverte}
+        titre={t('confirm.evenement.annuler.titre')}
+        consequence={t('confirm.evenement.annuler.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.evenement.annuler.action')}
+        // Sans ce libellé, le bouton de refus s'appelle « Annuler » dans un dialogue qui demande
+        // d'annuler un événement : cliquer « Annuler » signifierait alors « ne pas annuler ».
+        libelleAnnuler={t('confirm.evenement.annuler.garder')}
+        danger
+        onConfirmer={() => {
+          setAnnulationOuverte(false);
+          action.lancer(() => agir(() => annulerEvenement(groupId, evenement.id))).catch((err: unknown) => setErreur(messageDe(err)));
+        }}
+        onAnnuler={() => setAnnulationOuverte(false)}
+      />
+      <DialogueConfirmation
+        ouvert={aRetirer !== null}
+        titre={t('confirm.organisateurs.retirer.titre', { nom: aRetirer?.nom ?? '' })}
+        consequence={t('confirm.organisateurs.retirer.consequence')}
+        reversible
+        libelleConfirmer={t('confirm.organisateurs.retirer.action')}
+        danger={false}
+        onConfirmer={() => {
+          const cible = aRetirer;
+          setARetirer(null);
+          if (cible === null) return;
+          action.lancer(() => agir(() => retirerOrganisateur(groupId, evenement.id, cible.id))).catch((err: unknown) => setErreur(messageDe(err)));
+        }}
+        onAnnuler={() => setARetirer(null)}
+      />
     </section>
   );
 }

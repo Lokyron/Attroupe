@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { accepterLien, apercuLien, type Apercu } from '../api/groupes';
 import { Erreur, messageDe } from '../components/Erreur';
+import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
 import { jetonDuFragment } from '../lien';
 
@@ -10,22 +11,25 @@ export function InvitationLien({ connecte, onAcceptee }: { connecte: boolean; on
   const [apercu, setApercu] = useState<Apercu | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [acceptee, setAcceptee] = useState(false);
+  const { enCours, lancer } = useSoumission();
 
   useEffect(() => {
     if (jeton === null) return;
-    apercuLien(jeton).then(setApercu).catch((err: unknown) => setErreur(messageDe(err)));
+    apercuLien(jeton)
+      .then(setApercu)
+      .catch((err: unknown) => setErreur(messageDe(err)));
   }, [jeton]);
 
   if (jeton === null) return <p role="alert">{t('lien.absent')}</p>;
 
   const accepter = (): void => {
     setErreur(null);
-    accepterLien(jeton)
-      .then(() => {
+    lancer(() =>
+      accepterLien(jeton).then(() => {
         setAcceptee(true);
         onAcceptee();
-      })
-      .catch((err: unknown) => setErreur(messageDe(err)));
+      }),
+    ).catch((err: unknown) => setErreur(messageDe(err)));
   };
 
   return (
@@ -33,12 +37,18 @@ export function InvitationLien({ connecte, onAcceptee }: { connecte: boolean; on
       <h2>{t('lien.titre')}</h2>
       <Erreur message={erreur} />
       {apercu !== null && (
-        <p>{t('lien.texte', { invitant: apercu.invited_by_name, groupe: apercu.group_name, role: t(apercu.role === 'admin' ? 'membres.role_admin' : 'membres.role_member') })}</p>
+        <p>
+          {t('lien.texte', {
+            invitant: apercu.invited_by_name,
+            groupe: apercu.group_name,
+            role: t(apercu.role === 'admin' ? 'membres.role_admin' : 'membres.role_member'),
+          })}
+        </p>
       )}
       {apercu !== null && !connecte && <p>{t('lien.connexion_requise')}</p>}
       {apercu !== null && connecte && !acceptee && (
-        <button type="button" onClick={accepter}>
-          {t('lien.accepter')}
+        <button type="button" disabled={enCours} onClick={accepter}>
+          {enCours ? t('commun.envoi') : t('lien.accepter')}
         </button>
       )}
       {acceptee && (

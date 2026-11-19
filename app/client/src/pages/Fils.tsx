@@ -1,35 +1,30 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { creerFilLibre, listerFils, type Fil } from '../api/fils';
+import { ChargementPage } from '../components/ChargementPage';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconeMessage } from '../components/Icones';
+import { useLecture } from '../hooks/useLecture';
+import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
 
 /** Liste des fils de discussion du groupe (libres et d'événements) + création d'un fil libre. */
 export function Fils({ groupId }: { groupId: string }) {
-  const [fils, setFils] = useState<Fil[]>([]);
+  const { donnees: fils, etat, erreur: erreurLecture, recharger } = useLecture<Fil[]>(() => listerFils(groupId), [groupId]);
   const [titre, setTitre] = useState('');
   const [erreur, setErreur] = useState<string | null>(null);
-
-  const charger = useCallback((): void => {
-    setErreur(null);
-    listerFils(groupId)
-      .then(setFils)
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId]);
-
-  useEffect(charger, [charger]);
+  const { enCours, lancer } = useSoumission();
 
   const soumettre = (e: FormEvent): void => {
     e.preventDefault();
     if (titre.trim() === '') return;
     setErreur(null);
-    creerFilLibre(groupId, titre.trim())
-      .then((cree) => {
+    lancer(() =>
+      creerFilLibre(groupId, titre.trim()).then((cree) => {
         setTitre('');
         window.location.hash = `#/groupe/${encodeURIComponent(groupId)}/fil/${encodeURIComponent(cree.id)}`;
-      })
-      .catch((err: unknown) => setErreur(messageDe(err)));
+      }),
+    ).catch((err: unknown) => setErreur(messageDe(err)));
   };
 
   return (
@@ -46,13 +41,14 @@ export function Fils({ groupId }: { groupId: string }) {
           onChange={(e) => setTitre(e.target.value)}
           required
         />
-        <button type="submit" disabled={titre.trim() === ''}>
-          {t('fils.creer_court')}
+        <button type="submit" disabled={titre.trim() === '' || enCours}>
+          {enCours ? t('commun.creation') : t('fils.creer_court')}
         </button>
       </form>
 
+      <ChargementPage etat={etat} erreur={erreurLecture} onReessayer={recharger}>
       <div className="carte">
-        {fils.length === 0 ? (
+        {fils === null || fils.length === 0 ? (
           <p className="discret">{t('fils.aucun')}</p>
         ) : (
           <ul className="liste-elements">
@@ -79,6 +75,7 @@ export function Fils({ groupId }: { groupId: string }) {
           </ul>
         )}
       </div>
+      </ChargementPage>
     </section>
   );
 }

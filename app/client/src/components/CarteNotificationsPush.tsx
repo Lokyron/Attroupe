@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ErreurApi, ErreurLocale } from '../api/client';
+import { useSoumission } from '../hooks/useSoumission';
 import {
   enregistrerAbonnementPush,
   lireClePush,
@@ -46,7 +48,10 @@ export function CarteNotificationsPush() {
   const [etat, setEtat] = useState<EtatPush>('chargement');
   const [abonnement, setAbonnement] = useState<PushSubscription | null>(null);
   const [nbAppareils, setNbAppareils] = useState<number | null>(null);
-  const [enCours, setEnCours] = useState(false);
+  const activation = useSoumission();
+  const desactivation = useSoumission();
+  const test = useSoumission();
+  const enCours = activation.enCours || desactivation.enCours || test.enCours;
   const [info, setInfo] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
 
@@ -66,108 +71,128 @@ export function CarteNotificationsPush() {
 
     try {
       const [cle, registration] = await Promise.all([
-        lireClePush().catch(() => null),
+        lireClePush().catch((err: unknown) => {
+          console.error('Push : lecture de la clé publique impossible', err);
+          return null;
+        }),
         navigator.serviceWorker.getRegistration(),
       ]);
       if (cle !== null) setNbAppareils(cle.nb_appareils);
       const sub = registration !== undefined ? await registration.pushManager.getSubscription() : null;
       setAbonnement(sub);
       setEtat(sub !== null && Notification.permission === 'granted' ? 'active' : 'inactive');
-    } catch {
+    } catch (err: unknown) {
+      // Service worker absent ou injoignable : on journalise, sinon le bouton d'activation échouerait sans explication.
+      console.error('Push : état de l\'abonnement illisible', err);
       setEtat('inactive');
     }
   }, []);
+
+  // Le compteur est secondaire : son échec est journalisé mais ne remet pas en cause l'action qui vient de réussir.
+  const rafraichirNbAppareils = async (): Promise<void> => {
+    try {
+      const cle = await lireClePush();
+      setNbAppareils(cle.nb_appareils);
+    } catch (err: unknown) {
+      console.error('Push : nombre d\'appareils illisible', err);
+    }
+  };
 
   useEffect(() => {
     void verifierEtat();
   }, [verifierEtat]);
 
-  const activer = async (): Promise<void> => {
+  const activer = (): void => {
     setErreur(null);
     setInfo(null);
-    setEnCours(true);
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        setEtat(permission === 'denied' ? 'bloquee' : 'inactive');
-        setErreur(t('push.permission_refusee'));
-        return;
-      }
+    activation
+      .lancer(async () => {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          setEtat(permission === 'denied' ? 'bloquee' : 'inactive');
+          setErreur(t('push.permission_refusee'));
+          return;
+        }
 
-      const registration = await navigator.serviceWorker.ready;
-      const { cle_publique } = await lireClePush();
-      const applicationServerKey = base64UrlVersUint8Array(cle_publique);
+        const registration = await navigator.serviceWorker.ready;
+        const { cle_publique } = await lireClePush();
+        const applicationServerKey = base64UrlVersUint8Array(cle_publique);
 
-      const existant = await registration.pushManager.getSubscription();
-      const sub =
-        existant ??
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey,
-        }));
+        const existant = await registration.pushManager.getSubscription();
+        const sub =
+          existant ??
+          (await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey,
+          }));
 
-      const json = sub.toJSON();
-      const p256dh = json.keys?.['p256dh'] ?? arrayBufferVersBase64Url(sub.getKey('p256dh'));
-      const auth = json.keys?.['auth'] ?? arrayBufferVersBase64Url(sub.getKey('auth'));
-      if (p256dh === '' || auth === '') {
-        throw new Error(t('push.erreur_abonnement'));
-      }
+        const json = sub.toJSON();
+        const p256dh = json.keys?.['p256dh'] ?? arrayBufferVersBase64Url(sub.getKey('p256dh'));
+        const auth = json.keys?.['auth'] ?? arrayBufferVersBase64Url(sub.getKey('auth'));
+        if (p256dh === '' || auth === '') {
+          throw new Error(t('push.erreur_abonnement'));
+        }
 
-      await enregistrerAbonnementPush({
-        endpoint: sub.endpoint,
-        keys: { p256dh, auth },
+        await enregistrerAbonnementPush({
+          endpoint: sub.endpoint,
+          keys: { p256dh, auth },
+        });
+
+        setAbonnement(sub);
+        setEtat('active');
+        setInfo(t('push.activee'));
+        await rafraichirNbAppareils();
+      })
+      .catch((err: unknown) => {
+        console.error('Push : activation impossible', err);
+        // `messageDe` ne connaît que les erreurs de l'API : toute autre erreur (navigateur, clés vides) reçoit le message générique.
+        setErreur(err instanceof ErreurApi || err instanceof ErreurLocale ? messageDe(err) : t('push.erreur_abonnement'));
       });
-
-      setAbonnement(sub);
-      setEtat('active');
-      setInfo(t('push.activee'));
-      const cleMaj = await lireClePush().catch(() => null);
-      if (cleMaj !== null) setNbAppareils(cleMaj.nb_appareils);
-    } catch (err: unknown) {
-      setErreur(err instanceof Error && err.message !== '' ? messageDe(err) : t('push.erreur_abonnement'));
-    } finally {
-      setEnCours(false);
-    }
   };
 
-  const tester = async (): Promise<void> => {
+  const tester = (): void => {
     setErreur(null);
     setInfo(null);
-    setEnCours(true);
-    try {
-      const res = await testerNotificationPush();
-      if (res.appareils > 0) {
-        setInfo(t('push.test_demande', { n: String(res.appareils) }));
-      } else {
-        setErreur(t('push.test_aucun_appareil'));
-      }
-    } catch (err: unknown) {
-      setErreur(messageDe(err));
-    } finally {
-      setEnCours(false);
-    }
+    test
+      .lancer(async () => {
+        const res = await testerNotificationPush();
+        if (res.appareils > 0) {
+          setInfo(t('push.test_demande', { n: String(res.appareils) }));
+        } else {
+          setErreur(t('push.test_aucun_appareil'));
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('Push : notification de test impossible', err);
+        setErreur(messageDe(err));
+      });
   };
 
-  const desactiver = async (): Promise<void> => {
+  // Le serveur d'abord : s'il échoue, rien n'a bougé et l'interface reste « Activées », ce qui est vrai. Dans l'ordre
+  // inverse, l'abonnement du navigateur serait déjà perdu alors que l'interface annoncerait encore des notifications.
+  const desactiver = (): void => {
     setErreur(null);
     setInfo(null);
-    setEnCours(true);
-    try {
-      const endpoint = abonnement?.endpoint;
-      if (abonnement !== null) {
-        await abonnement.unsubscribe();
-      }
-      await supprimerAbonnementPush(endpoint);
-      setAbonnement(null);
-      setEtat('inactive');
-      setInfo(t('push.desactivee'));
-      const cleMaj = await lireClePush().catch(() => null);
-      if (cleMaj !== null) setNbAppareils(cleMaj.nb_appareils);
-    } catch (err: unknown) {
-      setErreur(messageDe(err));
-    } finally {
-      setEnCours(false);
-    }
+    desactivation
+      .lancer(async () => {
+        await supprimerAbonnementPush(abonnement?.endpoint);
+        // Le serveur n'enverra plus rien : l'état devient « inactif » même si le navigateur refuse de se désabonner.
+        setAbonnement(null);
+        setEtat('inactive');
+        setInfo(t('push.desactivee'));
+        if (abonnement !== null) {
+          try {
+            await abonnement.unsubscribe();
+          } catch (err: unknown) {
+            console.error('Push : désabonnement du navigateur impossible', err);
+          }
+        }
+        await rafraichirNbAppareils();
+      })
+      .catch((err: unknown) => {
+        console.error('Push : désactivation impossible', err);
+        setErreur(messageDe(err));
+      });
   };
 
   const libelleEtat = (() => {
@@ -216,20 +241,20 @@ export function CarteNotificationsPush() {
       )}
       <div className="barre-compacte">
         {etat === 'inactive' && (
-          <button type="button" className="bouton bouton-primaire" disabled={enCours} onClick={() => void activer()}>
+          <button type="button" className="bouton bouton-primaire" disabled={enCours} onClick={activer}>
             {t('push.activer')}
           </button>
         )}
         {etat === 'active' && (
           <>
-            <button type="button" className="bouton bouton-primaire" disabled={enCours} onClick={() => void tester()}>
+            <button type="button" className="bouton bouton-primaire" disabled={enCours} onClick={tester}>
               {t('push.tester')}
             </button>
             <button
               type="button"
               className="bouton bouton-danger-discret"
               disabled={enCours}
-              onClick={() => void desactiver()}
+              onClick={desactiver}
             >
               {t('push.desactiver')}
             </button>

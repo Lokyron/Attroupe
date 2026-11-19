@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { instantDepuisHeureLocale } from '../agenda/dates';
 import { libelleDateHoraire } from '../agenda/format';
 import { lireGroupe } from '../api/groupes';
@@ -16,16 +16,35 @@ import {
   type ValeurVote,
 } from '../api/sondages';
 import { useTempsReel } from '../api/tempsReel';
+import { ChargementPage } from '../components/ChargementPage';
+import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconeEtincelles, IconePoubelle } from '../components/Icones';
+import { useLecture } from '../hooks/useLecture';
+import { useSoumission } from '../hooks/useSoumission';
 import { t, type CleTexte } from '../i18n';
 
 const VOTES: readonly ValeurVote[] = ['yes', 'maybe', 'no'];
 
 /** Détail d'un sondage de dates : jauge visuelle des votes, boutons segmentés tactiles et conversion en événement. */
 export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: string }) {
-  const [sondage, setSondage] = useState<DetailSondage | null>(null);
+  // Lecture initiale (trois états) ; `sondage` en est la copie locale, rafraîchie par le temps réel sans repasser par le squelette.
+  const lecture = useLecture(() => lireSondage(groupId, sondageId), [groupId, sondageId]);
+  const [source, setSource] = useState(lecture.donnees);
+  const [sondage, setSondage] = useState<DetailSondage | null>(lecture.donnees);
+  if (source !== lecture.donnees) {
+    setSource(lecture.donnees);
+    setSondage(lecture.donnees);
+  }
+  // Une garde par famille d'écriture : un vote en vol ne bloque pas une clôture, mais deux votes ne partent jamais ensemble.
+  const vote = useSoumission();
+  const action = useSoumission();
+  const ajoutCreneau = useSoumission();
+  const champDebut = useRef<HTMLInputElement>(null);
+  const [conversion, setConversion] = useState<{ readonly optionId: string | null } | null>(null);
+  const [optionARetirer, setOptionARetirer] = useState<string | null>(null);
+  const [annulation, setAnnulation] = useState(false);
   const [fuseau, setFuseau] = useState('Europe/Paris');
   const [journee, setJournee] = useState(false);
   const [debut, setDebut] = useState('');
@@ -42,11 +61,10 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
   );
 
   useEffect(() => {
-    recharger();
     lireGroupe(groupId)
       .then((g) => setFuseau(g.time_zone))
       .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId, recharger]);
+  }, [groupId]);
 
   useTempsReel(groupId, {
     onOuvert: recharger,
@@ -55,19 +73,41 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
     },
   });
 
-  const agir = (action: Promise<DetailSondage>): void => {
+  /** Lance une écriture qui renvoie le sondage à jour, sous la garde `garde` (une seule en vol à la fois). */
+  const agir = (garde: ReturnType<typeof useSoumission>, fabrique: () => Promise<DetailSondage>): void => {
     setErreur(null);
-    action.then(setSondage).catch((err: unknown) => setErreur(messageDe(err)));
+    garde
+      .lancer(() => fabrique().then(setSondage))
+      .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  const convertir = (optionId?: string): void => {
+  const confirmerConversion = (): void => {
+    const cible = conversion;
+    setConversion(null);
+    if (cible === null) return;
     setErreur(null);
-    convertirSondage(groupId, sondageId, optionId === undefined ? {} : { option_id: optionId })
-      .then(({ sondage: maj, evenementId }) => {
-        setSondage(maj);
-        window.location.hash = `#/groupe/${encodeURIComponent(groupId)}/evenement/${encodeURIComponent(evenementId)}`;
-      })
+    action
+      .lancer(() =>
+        convertirSondage(groupId, sondageId, cible.optionId === null ? {} : { option_id: cible.optionId }).then(
+          ({ sondage: maj, evenementId }) => {
+            setSondage(maj);
+            window.location.hash = `#/groupe/${encodeURIComponent(groupId)}/evenement/${encodeURIComponent(evenementId)}`;
+          },
+        ),
+      )
       .catch((err: unknown) => setErreur(messageDe(err)));
+  };
+
+  const confirmerRetraitOption = (): void => {
+    const optionId = optionARetirer;
+    setOptionARetirer(null);
+    if (optionId === null) return;
+    agir(action, () => retirerOptionSondage(groupId, sondageId, optionId));
+  };
+
+  const confirmerAnnulation = (): void => {
+    setAnnulation(false);
+    agir(action, () => annulerSondage(groupId, sondageId));
   };
 
   const soumettreOption = (e: FormEvent): void => {
@@ -76,22 +116,36 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
     try {
       const startsAt = journee ? debut : instantDepuisHeureLocale(debut, fuseau);
       const endsAt = fin === '' ? null : journee ? fin : instantDepuisHeureLocale(fin, fuseau);
-      ajouterOptionSondage(groupId, sondageId, { all_day: journee, starts_at: startsAt, ends_at: endsAt })
-        .then((maj) => {
-          setSondage(maj);
-          setDebut('');
-          setFin('');
-        })
+      ajoutCreneau
+        .lancer(() =>
+          ajouterOptionSondage(groupId, sondageId, { all_day: journee, starts_at: startsAt, ends_at: endsAt }).then((maj) => {
+            setSondage(maj);
+            setDebut('');
+            setFin('');
+          }),
+        )
         .catch((err: unknown) => setErreur(messageDe(err)));
     } catch {
       setErreur(t('evenement_form.fuseau_invalide'));
     }
   };
 
-  if (sondage === null) return <Erreur message={erreur} />;
+  const retour = `#/groupe/${encodeURIComponent(groupId)}/sondages`;
+  if (sondage === null) {
+    return (
+      <section className="page-groupe-pile">
+        <EnteteGroupe groupId={groupId} ongletActif="sondages" lienRetour={{ href: retour, libelle: t('sondage.retour') }} />
+        <ChargementPage etat={lecture.etat} erreur={lecture.erreur} onReessayer={lecture.recharger}>
+          {null}
+        </ChargementPage>
+      </section>
+    );
+  }
   const ouvert = sondage.status === 'open' && (sondage.closes_at === null || new Date(sondage.closes_at).getTime() > Date.now());
   const convertible = sondage.status === 'open' || sondage.status === 'closed';
-  const retour = `#/groupe/${encodeURIComponent(groupId)}/sondages`;
+  // Date limite passée : le sondage est encore « ouvert » côté serveur mais on n'y vote plus.
+  const delaiDepasse = sondage.status === 'open' && !ouvert;
+  const aDesVoix = sondage.options.some((o) => o.compteurs.yes + o.compteurs.maybe + o.compteurs.no > 0);
 
   const libelleOption = (o: OptionSondage): string =>
     libelleDateHoraire({ all_day: o.all_day, starts_at: o.starts_at, ends_at: o.ends_at, time_zone: fuseau });
@@ -142,29 +196,43 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
       {(sondage.description !== null || convertible || sondage.status === 'open' || sondage.status === 'closed') && (
         <div className="carte">
           {sondage.description !== null && <p className="description">{sondage.description}</p>}
+          {delaiDepasse && (
+            <p className="discret" role="status">
+              {t('erreur.sondage.ferme')}
+            </p>
+          )}
           {(sondage.status === 'open' || sondage.status === 'closed' || convertible) && (
             <div className="barre">
               {convertible && sondage.options.length > 0 && (
-                <button type="button" className="bouton-primaire" onClick={() => convertir()}>
-                  {t('sondage.convertir_gagnant')}
+                <button
+                  type="button"
+                  className="bouton-primaire"
+                  disabled={!aDesVoix || action.enCours}
+                  onClick={() => setConversion({ optionId: null })}
+                >
+                  {t('confirm.sondage.convertir.action')}
                 </button>
               )}
-              {sondage.status === 'open' && (
-                <button type="button" onClick={() => agir(modifierSondage(groupId, sondage.id, { status: 'closed' }))}>
+              {sondage.status === 'open' && ouvert && (
+                <button
+                  type="button"
+                  disabled={action.enCours}
+                  onClick={() => agir(action, () => modifierSondage(groupId, sondage.id, { status: 'closed' }))}
+                >
                   {t('sondage.cloturer')}
                 </button>
               )}
               {sondage.status === 'closed' && (
-                <button type="button" onClick={() => agir(modifierSondage(groupId, sondage.id, { status: 'open' }))}>
+                <button
+                  type="button"
+                  disabled={action.enCours}
+                  onClick={() => agir(action, () => modifierSondage(groupId, sondage.id, { status: 'open' }))}
+                >
                   {t('sondage.rouvrir')}
                 </button>
               )}
               {convertible && (
-                <button
-                  type="button"
-                  className="bouton-danger-discret"
-                  onClick={() => window.confirm(t('sondage.annuler_confirmation')) && agir(annulerSondage(groupId, sondage.id))}
-                >
+                <button type="button" className="bouton-danger-discret" disabled={action.enCours} onClick={() => setAnnulation(true)}>
                   {t('sondage.annuler')}
                 </button>
               )}
@@ -176,7 +244,14 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
       <div className="liste-creneaux-sondage">
         {sondage.options.length === 0 ? (
           <div className="carte">
-            <p className="discret">{t('sondage.aucune_option')}</p>
+            <div className="etat-vide">
+              <p>{t('sondage.aucune_option')}</p>
+              {ouvert && (
+                <button type="button" onClick={() => champDebut.current?.focus()}>
+                  {t('sondage.ajouter_option')}
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           sondage.options.map((o) => {
@@ -200,8 +275,14 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
                   </div>
                   <div className="creneau-actions-haut">
                     {convertible && (
-                      <button type="button" className="bouton-compact" onClick={() => convertir(o.id)}>
-                        {t('sondage.convertir_option')}
+                      <button
+                        type="button"
+                        className="bouton-compact"
+                        disabled={action.enCours}
+                        aria-label={`${t('confirm.sondage.convertir.action')} : ${libelleOption(o)}`}
+                        onClick={() => setConversion({ optionId: o.id })}
+                      >
+                        {t('confirm.sondage.convertir.action')}
                       </button>
                     )}
                     {ouvert && (
@@ -209,7 +290,8 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
                         type="button"
                         className="bouton-icone-discret"
                         aria-label={t('sondage.retirer_option')}
-                        onClick={() => agir(retirerOptionSondage(groupId, sondage.id, o.id))}
+                        disabled={action.enCours}
+                        onClick={() => setOptionARetirer(o.id)}
                       >
                         <IconePoubelle className="icone-mini" />
                       </button>
@@ -248,9 +330,9 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
                       key={v}
                       type="button"
                       className={`vote-btn vote-btn-${v}`}
-                      disabled={!ouvert}
+                      disabled={!ouvert || vote.enCours}
                       aria-pressed={o.mon_vote === v}
-                      onClick={() => agir(voterOptionSondage(groupId, sondage.id, o.id, v))}
+                      onClick={() => agir(vote, () => voterOptionSondage(groupId, sondage.id, o.id, v))}
                     >
                       {t(`sondage.vote_${v}` as const)}
                     </button>
@@ -284,6 +366,7 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
               <label>
                 {t('sondages.creneau_debut')}
                 <input
+                  ref={champDebut}
                   type={journee ? 'date' : 'datetime-local'}
                   value={debut}
                   onChange={(e) => setDebut(e.target.value)}
@@ -300,12 +383,44 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
                 />
               </label>
             </div>
-            <button type="submit" disabled={debut === ''}>
-              {t('sondage.ajouter_option')}
+            <button type="submit" disabled={debut === '' || ajoutCreneau.enCours}>
+              {ajoutCreneau.enCours ? t('commun.envoi') : t('sondage.ajouter_option')}
             </button>
           </form>
         </div>
       )}
+
+      {/* Toujours montés (le focus revient à l'élément ouvrant). */}
+      <DialogueConfirmation
+        ouvert={optionARetirer !== null}
+        titre={t('confirm.sondage.retirer_creneau.titre')}
+        consequence={t('confirm.sondage.retirer_creneau.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.sondage.retirer_creneau.action')}
+        danger
+        onConfirmer={confirmerRetraitOption}
+        onAnnuler={() => setOptionARetirer(null)}
+      />
+      <DialogueConfirmation
+        ouvert={conversion !== null}
+        titre={t('confirm.sondage.convertir.titre')}
+        consequence={t('confirm.sondage.convertir.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.sondage.convertir.action')}
+        danger={false}
+        onConfirmer={confirmerConversion}
+        onAnnuler={() => setConversion(null)}
+      />
+      <DialogueConfirmation
+        ouvert={annulation}
+        titre={t('confirm.sondage.annuler.titre')}
+        consequence={t('confirm.sondage.annuler.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.sondage.annuler.action')}
+        danger
+        onConfirmer={confirmerAnnulation}
+        onAnnuler={() => setAnnulation(false)}
+      />
     </section>
   );
 }

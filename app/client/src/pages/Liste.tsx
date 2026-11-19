@@ -17,9 +17,13 @@ import {
 } from '../api/listes';
 import { useRechargement } from '../api/rechargement';
 import { useTempsReel, type EtatFlux } from '../api/tempsReel';
+import { ChargementPage } from '../components/ChargementPage';
+import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconePoubelle } from '../components/Icones';
+import { useLecture } from '../hooks/useLecture';
+import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
 
 /**
@@ -27,7 +31,22 @@ import { t } from '../i18n';
  * attribution en un clic et synchronisation temps réel.
  */
 export function Liste({ groupId, listeId }: { groupId: string; listeId: string }) {
-  const [liste, setListe] = useState<DetailListe | null>(null);
+  // Lecture initiale (trois états) ; `liste` en est la copie locale, que le temps réel et les actions optimistes modifient
+  // sans repasser par le squelette.
+  const lecture = useLecture(
+    () =>
+      lireListe(groupId, listeId).catch((err: unknown) => {
+        if (err instanceof ErreurApi && err.statut === 404) setDisparue(true);
+        throw err;
+      }),
+    [groupId, listeId],
+  );
+  const [source, setSource] = useState(lecture.donnees);
+  const [liste, setListe] = useState<DetailListe | null>(lecture.donnees);
+  if (source !== lecture.donnees) {
+    setSource(lecture.donnees);
+    setListe(lecture.donnees);
+  }
   const [moi, setMoi] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [disparue, setDisparue] = useState(false);
@@ -37,6 +56,12 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
   const [quantite, setQuantite] = useState('');
   const champSaisie = useRef<HTMLInputElement>(null);
   const erreurDeLecture = useRef(false);
+  const champRenommage = useRef<HTMLInputElement>(null);
+  const [renommage, setRenommage] = useState<string | null>(null);
+  const [articleARetirer, setArticleARetirer] = useState<Article | null>(null);
+  const [suppressionOuverte, setSuppressionOuverte] = useState(false);
+  const ajout = useSoumission();
+  const ecriture = useSoumission();
 
   const { recharger, planifier } = useRechargement(
     () => lireListe(groupId, listeId),
@@ -59,11 +84,14 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
   );
 
   useEffect(() => {
-    recharger();
     lireGroupe(groupId)
       .then((g) => setMoi(g.mon_appartenance_id))
       .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId, recharger]);
+  }, [groupId]);
+
+  useEffect(() => {
+    if (renommage !== null) champRenommage.current?.focus();
+  }, [renommage === null]);
 
   useTempsReel(groupId, {
     onOuvert: recharger,
@@ -126,14 +154,17 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
     const label = saisie.trim();
     if (label === '') return;
     const qte = quantite.trim() === '' ? null : quantite.trim();
-    debutAction();
-    setSaisie('');
-    setQuantite('');
-    champSaisie.current?.focus();
-    ajouterArticle(groupId, listeId, label, qte)
-      .then((a) =>
-        setListe((l) => (l === null || l.articles.some((x) => x.id === a.id) ? l : { ...l, articles: [...l.articles, a] })),
-      )
+    // Un second « Entrée » en vol est ignoré par `lancer` : les champs restent alors intacts, rien n'est perdu.
+    ajout
+      .lancer(() => {
+        debutAction();
+        setSaisie('');
+        setQuantite('');
+        champSaisie.current?.focus();
+        return ajouterArticle(groupId, listeId, label, qte).then((a) =>
+          setListe((l) => (l === null || l.articles.some((x) => x.id === a.id) ? l : { ...l, articles: [...l.articles, a] })),
+        );
+      })
       // Le texte tapé est rendu à l'utilisateur, sauf s'il a déjà commencé à en saisir un autre.
       .catch((err: unknown) =>
         echec(err, () => {
@@ -143,15 +174,53 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
       );
   };
 
-  const retirer = (a: Article): void => {
+  const retirer = (a: Article): Promise<void> => {
     const avant = liste;
     debutAction();
     setListe((l) => (l === null ? l : { ...l, articles: l.articles.filter((x) => x.id !== a.id) }));
-    retirerArticle(groupId, listeId, a.id).catch((err: unknown) =>
+    return retirerArticle(groupId, listeId, a.id).catch((err: unknown) =>
       echec(err, () => {
         if (avant !== null) setListe(avant);
       }),
     );
+  };
+
+  const confirmerRetrait = (): void => {
+    const a = articleARetirer;
+    setArticleARetirer(null);
+    if (a === null) return;
+    // `retirer` traite déjà ses échecs (restauration + message) : le rejet ne peut venir que d'une erreur de programmation.
+    ecriture.lancer(() => retirer(a)).catch((err: unknown) => setErreur(messageDe(err)));
+  };
+
+  const confirmerSuppression = (): void => {
+    setSuppressionOuverte(false);
+    debutAction();
+    ecriture
+      .lancer(() =>
+        supprimerListe(groupId, listeId).then(() => {
+          window.location.hash = retourListes;
+        }),
+      )
+      .catch((err: unknown) => echec(err));
+  };
+
+  const validerRenommage = (evt: FormEvent): void => {
+    evt.preventDefault();
+    const titre = (renommage ?? '').trim();
+    if (titre === '' || titre === liste?.title) {
+      setRenommage(null);
+      return;
+    }
+    debutAction();
+    ecriture
+      .lancer(() =>
+        renommerListe(groupId, listeId, titre).then((maj) => {
+          setListe(maj);
+          setRenommage(null);
+        }),
+      )
+      .catch((err: unknown) => echec(err));
   };
 
   const retourListes = `#/groupe/${encodeURIComponent(groupId)}/listes`;
@@ -169,10 +238,10 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
       </section>
     );
   }
-  if (liste === null) return <Erreur message={erreur} onReessayer={recharger} />;
 
-  const aFaire = liste.articles.filter((a) => !a.is_done);
-  const coches = liste.articles.filter((a) => a.is_done);
+  const articles = liste?.articles ?? [];
+  const aFaire = articles.filter((a) => !a.is_done);
+  const coches = articles.filter((a) => a.is_done);
 
   const rendreLigne = (a: Article, indexGlobal: number): ReactNode => {
     const aMoi = a.claimed_by_membership_id !== null && a.claimed_by_membership_id === moi;
@@ -200,7 +269,7 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
             <button
               type="button"
               className="bouton-compact"
-              disabled={indexGlobal === liste.articles.length - 1}
+              disabled={indexGlobal === articles.length - 1}
               aria-label={`${t('liste.descendre')} ${a.label}`}
               onClick={() => deplacer(a, 1)}
             >
@@ -210,7 +279,8 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
               type="button"
               className="bouton-compact bouton-danger-discret"
               aria-label={`${t('liste.retirer')} ${a.label}`}
-              onClick={() => retirer(a)}
+              disabled={ecriture.enCours}
+              onClick={() => setArticleARetirer(a)}
             >
               <IconePoubelle className="icone-mini" />
             </button>
@@ -237,7 +307,8 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
               type="button"
               className="bouton-icone-discret"
               aria-label={`${t('liste.retirer')} ${a.label}`}
-              onClick={() => retirer(a)}
+              disabled={ecriture.enCours}
+              onClick={() => setArticleARetirer(a)}
             >
               <IconePoubelle className="icone-mini" />
             </button>
@@ -252,114 +323,153 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
       <EnteteGroupe
         groupId={groupId}
         ongletActif="listes"
-        titre={liste.title}
+        titre={liste?.title}
         lienRetour={{ href: retourListes, libelle: t('liste.retour') }}
         meta={
-          <>
-            <span className="pilule">
-              {t('liste.progression', { faits: String(coches.length), total: String(liste.articles.length) })}
-            </span>
-            {flux === 'reconnexion' && <span className="pilule pilule-statut-maybe">{t('liste.reconnexion')}</span>}
-          </>
+          liste === null ? undefined : (
+            <>
+              <span className="pilule">
+                {t('liste.progression', { faits: String(coches.length), total: String(articles.length) })}
+              </span>
+              {flux === 'reconnexion' && <span className="pilule pilule-statut-maybe">{t('liste.reconnexion')}</span>}
+            </>
+          )
         }
         actions={
-          <div className="barre-compacte">
-            <button type="button" className="bouton-compact" aria-pressed={reordonner} onClick={() => setReordonner(!reordonner)}>
-              {t('liste.reordonner')}
-            </button>
-            <button
-              type="button"
-              className="bouton-compact"
-              onClick={() => {
-                const titre = window.prompt(t('liste.renommer_invite'), liste.title);
-                if (titre !== null && titre.trim() !== '') {
-                  debutAction();
-                  renommerListe(groupId, listeId, titre.trim()).then(setListe).catch((err: unknown) => echec(err));
-                }
-              }}
-            >
-              {t('liste.renommer')}
-            </button>
-            <button
-              type="button"
-              className="bouton-compact bouton-danger-discret"
-              onClick={() => {
-                if (window.confirm(t('liste.supprimer_confirmation'))) {
-                  debutAction();
-                  supprimerListe(groupId, listeId)
-                    .then(() => {
-                      window.location.hash = retourListes;
-                    })
-                    .catch((err: unknown) => echec(err));
-                }
-              }}
-            >
-              {t('liste.supprimer')}
-            </button>
-          </div>
+          liste === null ? undefined : (
+            <div className="barre-compacte">
+              <button type="button" className="bouton-compact" aria-pressed={reordonner} onClick={() => setReordonner(!reordonner)}>
+                {t('liste.reordonner')}
+              </button>
+              {renommage === null ? (
+                <button type="button" className="bouton-compact" onClick={() => setRenommage(liste.title)}>
+                  {t('liste.renommer')}
+                </button>
+              ) : (
+                // Entrée valide, Échap abandonne : pas de confirmation pour une action réversible.
+                <form onSubmit={validerRenommage}>
+                  <input
+                    ref={champRenommage}
+                    type="text"
+                    value={renommage}
+                    maxLength={120}
+                    autoComplete="off"
+                    enterKeyHint="done"
+                    aria-label={t('liste.renommer_invite')}
+                    onChange={(e) => setRenommage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setRenommage(null);
+                    }}
+                  />
+                </form>
+              )}
+              <button
+                type="button"
+                className="bouton-compact bouton-danger-discret"
+                disabled={ecriture.enCours}
+                onClick={() => setSuppressionOuverte(true)}
+              >
+                {t('liste.supprimer')}
+              </button>
+            </div>
+          )
         }
       />
 
       <Erreur message={erreur} />
 
-      <form className="carte barre-ajout-article" onSubmit={ajouter}>
-        <input
-          ref={champSaisie}
-          type="text"
-          className="champ-article-nom"
-          value={saisie}
-          maxLength={120}
-          enterKeyHint="send"
-          autoComplete="off"
-          aria-label={t('liste.nouvel_article')}
-          placeholder={t('liste.nouvel_article')}
-          onChange={(e) => setSaisie(e.target.value)}
-        />
-        <input
-          type="text"
-          className="champ-article-quantite"
-          value={quantite}
-          maxLength={40}
-          autoComplete="off"
-          aria-label={t('liste.quantite_label')}
-          placeholder={t('liste.quantite_champ')}
-          onChange={(e) => setQuantite(e.target.value)}
-        />
-        {/* Presser le bouton ne doit pas retirer le focus du champ (sinon le clavier mobile se ferme). */}
-        <button type="submit" onPointerDown={(e) => e.preventDefault()}>
-          {t('liste.ajouter_court')}
-        </button>
-      </form>
+      <ChargementPage etat={lecture.etat} erreur={lecture.erreur} onReessayer={lecture.recharger}>
+        {liste !== null && (
+          <>
+            <form className="carte barre-ajout-article" onSubmit={ajouter}>
+              <input
+                ref={champSaisie}
+                type="text"
+                className="champ-article-nom"
+                value={saisie}
+                maxLength={120}
+                enterKeyHint="send"
+                autoComplete="off"
+                aria-label={t('liste.nouvel_article')}
+                placeholder={t('liste.nouvel_article')}
+                onChange={(e) => setSaisie(e.target.value)}
+              />
+              <input
+                type="text"
+                className="champ-article-quantite"
+                value={quantite}
+                maxLength={40}
+                autoComplete="off"
+                aria-label={t('liste.quantite_label')}
+                placeholder={t('liste.quantite_champ')}
+                onChange={(e) => setQuantite(e.target.value)}
+              />
+              {/* Presser le bouton ne doit pas retirer le focus du champ (sinon le clavier mobile se ferme). Pas de `disabled` pendant
+                  l'envoi : un bouton de validation grisé bloquerait « Entrée » dans le champ, alors que `lancer` ignore déjà le doublon. */}
+              <button type="submit" onPointerDown={(e) => e.preventDefault()}>
+                {t('liste.ajouter_court')}
+              </button>
+            </form>
 
-      {liste.articles.length === 0 ? (
-        <div className="carte">
-          <p className="discret">{t('liste.vide')}</p>
-        </div>
-      ) : reordonner ? (
-        <div className="carte">
-          <ul className="articles">{liste.articles.map((a, i) => rendreLigne(a, i))}</ul>
-        </div>
-      ) : (
-        <>
-          {aFaire.length > 0 && (
-            <div className="carte">
-              <div className="carte-entete">
-                <h3>{t('liste.section_a_faire', { n: String(aFaire.length) })}</h3>
+            {articles.length === 0 ? (
+              <div className="carte">
+                <div className="etat-vide">
+                  <p>{t('liste.vide')}</p>
+                  <button type="button" onClick={() => champSaisie.current?.focus()}>
+                    {t('liste.nouvel_article')}
+                  </button>
+                </div>
               </div>
-              <ul className="articles">{aFaire.map((a, i) => rendreLigne(a, i))}</ul>
-            </div>
-          )}
+            ) : reordonner ? (
+              <div className="carte">
+                <ul className="articles">{articles.map((a, i) => rendreLigne(a, i))}</ul>
+              </div>
+            ) : (
+              <>
+                {aFaire.length > 0 && (
+                  <div className="carte">
+                    <div className="carte-entete">
+                      <h3>{t('liste.section_a_faire', { n: String(aFaire.length) })}</h3>
+                    </div>
+                    <ul className="articles">{aFaire.map((a, i) => rendreLigne(a, i))}</ul>
+                  </div>
+                )}
 
-          {coches.length > 0 && (
-            <div className="carte carte-coches">
-              <div className="carte-entete">
-                <h3 className="discret">{t('liste.section_coches', { n: String(coches.length) })}</h3>
-              </div>
-              <ul className="articles">{coches.map((a, i) => rendreLigne(a, i))}</ul>
-            </div>
-          )}
-        </>
-      )}
+                {coches.length > 0 && (
+                  <div className="carte carte-coches">
+                    <div className="carte-entete">
+                      <h3 className="discret">{t('liste.section_coches', { n: String(coches.length) })}</h3>
+                    </div>
+                    <ul className="articles">{coches.map((a, i) => rendreLigne(a, i))}</ul>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </ChargementPage>
+
+      {/* Toujours monté (le focus revient à l'élément ouvrant) : les titres restent sûrs quand la cible est nulle. */}
+      <DialogueConfirmation
+        ouvert={articleARetirer !== null}
+        titre={t('confirm.liste.retirer_article.titre', { libelle: articleARetirer?.label ?? '' })}
+        consequence={t('confirm.liste.retirer_article.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.liste.retirer_article.action')}
+        danger
+        onConfirmer={confirmerRetrait}
+        onAnnuler={() => setArticleARetirer(null)}
+      />
+      <DialogueConfirmation
+        ouvert={suppressionOuverte}
+        titre={t('confirm.liste.supprimer.titre', { titre: liste?.title ?? '' })}
+        consequence={t('confirm.liste.supprimer.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.liste.supprimer.action')}
+        danger
+        onConfirmer={confirmerSuppression}
+        onAnnuler={() => setSuppressionOuverte(false)}
+      />
     </section>
   );
 }

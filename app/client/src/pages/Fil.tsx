@@ -1,26 +1,21 @@
-import { useEffect, useState } from 'react';
 import { listerFils, type Fil as FilType } from '../api/fils';
+import { ChargementPage } from '../components/ChargementPage';
 import { EnteteGroupe } from '../components/EnteteGroupe';
-import { Erreur, messageDe } from '../components/Erreur';
+import { Erreur } from '../components/Erreur';
 import { FilDiscussion } from '../components/FilDiscussion';
-import { t } from '../i18n';
+import { useLecture } from '../hooks/useLecture';
+import { t, texteErreur } from '../i18n';
 
 /** Page dédiée à un fil de discussion libre. */
 export function Fil({ groupId, filId }: { groupId: string; filId: string }) {
-  const [fil, setFil] = useState<FilType | null>(null);
-  const [erreur, setErreur] = useState<string | null>(null);
+  // Il n'existe pas de route « un seul fil » : on lit la liste du groupe (déjà cloisonnée) et on y cherche le fil.
+  // `null` = lecture réussie mais fil absent, distinct de l'état `chargement` / `erreur`.
+  const { donnees: trouve, etat, erreur, recharger } = useLecture<FilType | null>(
+    () => listerFils(groupId).then((liste) => liste.find((f) => f.id === filId) ?? null),
+    [groupId, filId],
+  );
 
-  useEffect(() => {
-    setErreur(null);
-    listerFils(groupId)
-      .then((liste) => {
-        const trouve = liste.find((f) => f.id === filId);
-        setFil(trouve ?? null);
-      })
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId, filId]);
-
-  const titre = fil === null ? t('fil.titre_defaut') : (fil.title ?? fil.event_title ?? t('fil.titre_defaut'));
+  const titre = trouve === null ? t('fil.titre_defaut') : (trouve.title ?? trouve.event_title ?? t('fil.titre_defaut'));
   const retour = `#/groupe/${encodeURIComponent(groupId)}/fils`;
 
   return (
@@ -31,10 +26,18 @@ export function Fil({ groupId, filId }: { groupId: string; filId: string }) {
         titre={titre}
         lienRetour={{ href: retour, libelle: t('fil.retour_fils') }}
       />
-      <Erreur message={erreur} />
-      <div className="carte">
-        <FilDiscussion groupId={groupId} filId={filId} />
-      </div>
+      <ChargementPage etat={etat} erreur={erreur} onReessayer={recharger}>
+        {trouve === null ? (
+          <div className="carte">
+            <Erreur message={texteErreur('fil.introuvable')} />
+            <a href={retour}>{t('fil.retour_fils')}</a>
+          </div>
+        ) : (
+          <div className="carte">
+            <FilDiscussion key={`${groupId}/${filId}`} groupId={groupId} filId={filId} />
+          </div>
+        )}
+      </ChargementPage>
     </section>
   );
 }

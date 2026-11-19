@@ -1,12 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { lireGroupe, type Membre } from '../api/groupes';
 import { creerListe, listerListes, type ResumeListe } from '../api/listes';
 import { assigner, changerStatut, creerTache, listerTaches, supprimerTache, type Tache } from '../api/taches';
 import { useRechargement } from '../api/rechargement';
 import { useTempsReel } from '../api/tempsReel';
+import { useLecture } from '../hooks/useLecture';
+import { useSoumission } from '../hooks/useSoumission';
 import { lienListe } from '../pages/Listes';
 import { t } from '../i18n';
+import { ChargementPage } from './ChargementPage';
+import { DialogueConfirmation } from './DialogueConfirmation';
 import { Erreur, messageDe } from './Erreur';
 
 /**
@@ -14,11 +18,39 @@ import { Erreur, messageDe } from './Erreur';
  * Le serveur reste juge : réassigner la tâche de quelqu'un d'autre est un droit, l'interface n'est qu'un confort.
  */
 export function TachesEvenement({ groupId, evenementId, titreEvenement, membres }: { groupId: string; evenementId: string; titreEvenement: string; membres: Membre[] }) {
-  const [taches, setTaches] = useState<Tache[]>([]);
-  const [listes, setListes] = useState<ResumeListe[]>([]);
-  const [moi, setMoi] = useState<string | null>(null);
+  // Lecture initiale à trois états ; les rafraîchissements du flux temps réel se font ensuite dans `CorpsTaches` (`useRechargement`), sans repasser par le squelette.
+  const { donnees, etat, erreur, recharger } = useLecture<LecturesTaches>(
+    () =>
+      Promise.all([listerTaches(groupId, evenementId), listerListes(groupId, evenementId), lireGroupe(groupId)]).then(([taches, listes, groupe]) => ({
+        taches,
+        listes,
+        moi: groupe.mon_appartenance_id,
+      })),
+    [groupId, evenementId],
+  );
+  return (
+    <ChargementPage etat={etat} erreur={erreur} onReessayer={recharger}>
+      {donnees !== null && <CorpsTaches groupId={groupId} evenementId={evenementId} titreEvenement={titreEvenement} membres={membres} initial={donnees} />}
+    </ChargementPage>
+  );
+}
+
+interface LecturesTaches {
+  taches: Tache[];
+  listes: ResumeListe[];
+  moi: string | null;
+}
+
+function CorpsTaches({ groupId, evenementId, titreEvenement, membres, initial }: { groupId: string; evenementId: string; titreEvenement: string; membres: Membre[]; initial: LecturesTaches }) {
+  const [taches, setTaches] = useState<Tache[]>(initial.taches);
+  const [listes, setListes] = useState<ResumeListe[]>(initial.listes);
+  const moi = initial.moi;
   const [titre, setTitre] = useState('');
   const [erreur, setErreur] = useState<string | null>(null);
+  const [aSupprimer, setASupprimer] = useState<Tache | null>(null);
+  const ajout = useSoumission();
+  const creationListe = useSoumission();
+  const suppression = useSoumission();
 
   const { recharger, planifier } = useRechargement(
     () => Promise.all([listerTaches(groupId, evenementId), listerListes(groupId, evenementId)] as const),
@@ -31,12 +63,6 @@ export function TachesEvenement({ groupId, evenementId, titreEvenement, membres 
   // Les listes de CET événement : un message d'article ne nous concerne que s'il vient de l'une d'elles.
   const idsListes = useRef<ReadonlySet<string>>(new Set());
   idsListes.current = new Set(listes.map((l) => l.id));
-  useEffect(() => {
-    recharger();
-    lireGroupe(groupId)
-      .then((g) => setMoi(g.mon_appartenance_id))
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId, recharger]);
   useTempsReel(groupId, {
     onOuvert: recharger,
     onEvenement: (e) => {
@@ -59,8 +85,19 @@ export function TachesEvenement({ groupId, evenementId, titreEvenement, membres 
   const ajouter = (evt: FormEvent): void => {
     evt.preventDefault();
     if (titre.trim() === '') return;
-    agir(creerTache(groupId, titre.trim(), evenementId));
-    setTitre('');
+    setErreur(null);
+    // Le champ n'est vidé qu'une fois la tâche créée : un échec laisse le texte à l'utilisateur.
+    ajout
+      .lancer(() =>
+        creerTache(groupId, titre.trim(), evenementId).then(() => {
+          setTitre('');
+          recharger();
+        }),
+      )
+      .catch((err: unknown) => {
+        setErreur(messageDe(err));
+        recharger();
+      });
   };
 
   const actifs = membres.filter((m) => m.status === 'active');
@@ -100,7 +137,7 @@ export function TachesEvenement({ groupId, evenementId, titreEvenement, membres 
                     </option>
                   ))}
                 </select>
-                <button type="button" aria-label={`${t('taches.supprimer')} ${tache.title}`} onClick={() => window.confirm(t('taches.supprimer_confirmation')) && agir(supprimerTache(groupId, tache.id))}>
+                <button type="button" aria-label={`${t('taches.supprimer')} ${tache.title}`} onClick={() => setASupprimer(tache)}>
                   {t('liste.croix')}
                 </button>
               </span>
@@ -110,8 +147,8 @@ export function TachesEvenement({ groupId, evenementId, titreEvenement, membres 
       </ul>
       <form className="ajout-rapide" onSubmit={ajouter}>
         <input type="text" value={titre} maxLength={140} enterKeyHint="send" autoComplete="off" aria-label={t('taches.nouvelle')} placeholder={t('taches.nouvelle')} onChange={(e) => setTitre(e.target.value)} />
-        <button type="submit" onPointerDown={(e) => e.preventDefault()}>
-          {t('taches.ajouter')}
+        <button type="submit" disabled={ajout.enCours} onPointerDown={(e) => e.preventDefault()}>
+          {ajout.enCours ? t('commun.envoi') : t('taches.ajouter')}
         </button>
       </form>
 
@@ -126,16 +163,40 @@ export function TachesEvenement({ groupId, evenementId, titreEvenement, membres 
       </ul>
       <button
         type="button"
+        disabled={creationListe.enCours}
         onClick={() =>
-          creerListe(groupId, t('listes.titre_evenement', { titre: titreEvenement }).slice(0, 120), evenementId)
-            .then((l) => {
-              window.location.hash = lienListe(groupId, l.id);
-            })
+          creationListe
+            .lancer(() =>
+              creerListe(groupId, t('listes.titre_evenement', { titre: titreEvenement }).slice(0, 120), evenementId).then((l) => {
+                window.location.hash = lienListe(groupId, l.id);
+              }),
+            )
             .catch((err: unknown) => setErreur(messageDe(err)))
         }
       >
-        {t('listes.creer_pour_evenement')}
+        {creationListe.enCours ? t('commun.creation') : t('listes.creer_pour_evenement')}
       </button>
+      <DialogueConfirmation
+        ouvert={aSupprimer !== null}
+        titre={t('confirm.taches.supprimer.titre', { titre: aSupprimer?.title ?? '' })}
+        consequence={t('confirm.taches.supprimer.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.taches.supprimer.action')}
+        danger
+        onConfirmer={() => {
+          const cible = aSupprimer;
+          setASupprimer(null);
+          if (cible === null) return;
+          setErreur(null);
+          suppression
+            .lancer(() => supprimerTache(groupId, cible.id).then(recharger))
+            .catch((err: unknown) => {
+              setErreur(messageDe(err));
+              recharger();
+            });
+        }}
+        onAnnuler={() => setASupprimer(null)}
+      />
     </>
   );
 }

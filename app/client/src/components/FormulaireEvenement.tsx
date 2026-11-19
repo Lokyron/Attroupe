@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { creerEvenement, modifierEvenement, type ChampsEvenement, type DetailEvenement } from '../api/evenements';
 import { heureLocaleDepuisInstant, instantDepuisHeureLocale } from '../agenda/dates';
+import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
 import { Erreur, messageDe } from './Erreur';
 
@@ -37,6 +38,7 @@ export function FormulaireEvenement({
   const [arrivee, setArrivee] = useState(initial?.arrival_note ?? '');
   const [capacite, setCapacite] = useState(initial?.capacity === null || initial === undefined ? '' : String(initial.capacity));
   const [erreur, setErreur] = useState<string | null>(null);
+  const { enCours, lancer } = useSoumission();
 
   // Passer de « journée entière » à une heure change le format des champs : on les vide plutôt que d'en deviner la conversion.
   const basculerJournee = (valeur: boolean): void => {
@@ -72,8 +74,8 @@ export function FormulaireEvenement({
       setErreur(t('evenement_form.fuseau_invalide'));
       return;
     }
-    const envoi = initial === undefined ? creerEvenement(groupId, champs) : modifierEvenement(groupId, initial.id, champs);
-    envoi.then(onEnregistre).catch((err: unknown) => setErreur(messageDe(err)));
+    const envoi = (): Promise<DetailEvenement> => (initial === undefined ? creerEvenement(groupId, champs) : modifierEvenement(groupId, initial.id, champs));
+    lancer(() => envoi().then(onEnregistre)).catch((err: unknown) => setErreur(messageDe(err)));
   };
 
   return (
@@ -120,7 +122,9 @@ export function FormulaireEvenement({
       </label>
       <Erreur message={erreur} />
       <div className="barre">
-        <button type="submit">{t('commun.enregistrer')}</button>
+        <button type="submit" disabled={enCours}>
+          {enCours ? t('commun.enregistrement') : t('commun.enregistrer')}
+        </button>
         <button type="button" onClick={onAnnule}>
           {t('commun.annuler')}
         </button>

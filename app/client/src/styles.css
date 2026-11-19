@@ -1508,6 +1508,131 @@ a.kpi-tuile:hover {
   margin: 0;
 }
 
+/* État vide générique : message + bouton d'action éventuel (généralise `.etat-vide-widget`). */
+.etat-vide {
+  display: grid;
+  justify-items: start;
+  gap: 0.6rem;
+  padding: 1rem 0;
+  color: var(--texte-doux);
+}
+
+.etat-vide p {
+  margin: 0;
+}
+
+/* Texte réservé aux lecteurs d'écran : masqué à l'œil, mais pas retiré de l'arbre d'accessibilité. */
+.visuellement-cache {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Squelettes de chargement : bloc gris animé en balayage (animation neutralisée en « réduire les animations »). */
+.squelette {
+  border-radius: 0.6rem;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.18) 25%, rgba(148, 163, 184, 0.34) 50%, rgba(148, 163, 184, 0.18) 75%);
+  background-size: 200% 100%;
+  animation: squelette-balayage 1.4s ease-in-out infinite;
+}
+
+@keyframes squelette-balayage {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.squelette-liste,
+.squelette-carte {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.squelette-ligne {
+  height: 3rem;
+}
+
+.squelette-titre {
+  height: 1.4rem;
+  width: 55%;
+}
+
+.squelette-court {
+  width: 70%;
+}
+
+/* Bouton destructeur : blanc sur #e11d48, 4,70:1 (WCAG AA). */
+.bouton-danger {
+  background: var(--accent-negatif);
+  border-color: var(--accent-negatif);
+  color: #fff;
+}
+
+button.bouton-danger:where(:not(:disabled)):hover {
+  background: #be123c;
+  border-color: #be123c;
+  color: #fff;
+}
+
+/* Dialogue de confirmation (<dialog>.showModal()) */
+dialog.dialogue-confirmation {
+  width: min(26rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  margin: auto;
+  padding: 1.25rem;
+  color: var(--texte);
+  background: var(--verre-fond-fort);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--verre-bordure);
+  border-radius: var(--rayon);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+}
+
+dialog.dialogue-confirmation::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+dialog.dialogue-confirmation h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+}
+
+dialog.dialogue-confirmation p {
+  margin: 0 0 1.25rem;
+  color: var(--texte-doux);
+}
+
+dialog.dialogue-confirmation .dialogue-definitif {
+  color: var(--accent-negatif-texte);
+}
+
+/* Actions empilées sur téléphone (pleine largeur, au pouce), côte à côte dès que la place le permet. */
+.dialogue-actions {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.6rem;
+}
+
+@media (min-width: 480px) {
+  .dialogue-actions {
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+}
+
 /* Widget Événements à venir */
 .liste-tuiles-evenements {
   display: grid;
@@ -3166,6 +3291,23 @@ a.kpi-tuile:hover {
   color: #fff;
 }
 
+/* Le `<dialog>` de la visionneuse n'est qu'un cadre : tout le fond et la mise en page viennent de
+   `.visionneuse-modale`, à l'intérieur. On ne peut pas poser cette classe-là sur le dialogue lui-même,
+   car son `display: flex` écraserait le `display: none` d'un dialogue fermé, qui resterait visible. */
+dialog.visionneuse {
+  background: transparent;
+  border: none;
+  padding: 0;
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+}
+
+dialog.visionneuse::backdrop {
+  background: rgba(15, 23, 42, 0.9);
+}
+
 .visionneuse-modale {
   position: fixed;
   inset: 0;
@@ -3391,6 +3533,10 @@ a.kpi-tuile:hover {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+  }
+
+  .squelette {
+    animation: none;
   }
 
   .avatar-lien:hover,

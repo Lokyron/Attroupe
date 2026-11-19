@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { champ, texte, texteOuNul } from './client';
+import { champ, SESSION_EXPIREE, texte, texteOuNul } from './client';
 
 // Le flux temps réel du groupe (SSE, architecture §3.2) : descendant seulement. Le message est MINIMAL (type, identifiant, parent) :
 // il dit « ceci a changé », jamais « voici la nouvelle valeur ». Le client recharge ce qu'il a le droit de voir par les routes
@@ -73,7 +73,10 @@ export function ouvrirTempsReel(
       // EventSource ne montre pas le statut du refus : un 401 (session échue ou révoquée) se reconnaît par une lecture du compte, et ramène à la connexion.
       fetch('/api/moi', { credentials: 'same-origin' })
         .then((r) => {
-          if (r.status === 401 && !ferme) window.location.reload();
+          // Un rechargement complet de la page jetait au passage tout ce que l'utilisateur était en
+          // train de saisir. On emprunte désormais le même chemin que les appels d'API : la coque
+          // repasse à l'écran de connexion sans démonter brutalement le navigateur.
+          if (r.status === 401 && !ferme) window.dispatchEvent(new Event(SESSION_EXPIREE));
         })
         .catch(() => undefined); // réseau coupé : la nouvelle tentative ci-dessous s'en chargera
       minuterie = setTimeout(ouvrir, RETENTES_MS[Math.min(echecs, RETENTES_MS.length - 1)]);

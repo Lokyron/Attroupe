@@ -21,7 +21,9 @@ import {
 } from '../api/groupes';
 import { CarteNotificationsPush } from '../components/CarteNotificationsPush';
 import { CarteSourcesAgenda } from '../components/CarteSourcesAgenda';
+import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { Erreur, messageDe } from '../components/Erreur';
+import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
 
 const LOCALE = 'fr-FR';
@@ -30,7 +32,13 @@ function dateCourte(instant: string): string {
   return new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(instant));
 }
 
-/** État d'un chargement distant : on ne déduit pas « en cours » de `null`, sinon un échec reste « Chargement… » à jamais. */
+/**
+ * État d'un chargement distant : on ne déduit pas « en cours » de `null`, sinon un échec reste « Chargement… » à jamais.
+ *
+ * Gardé à la place de `useLecture` : `useLecture` vide `donnees` à chaque rechargement. Or ici la liste est rechargée après
+ * chaque écriture, et pour les abonnements `NouvelAbonnement` a besoin de la liste pour ne pas être démonté pendant
+ * l'affichage de l'adresse secrète, qu'on ne reverra jamais. Ce type conserve la liste affichée pendant le rechargement.
+ */
 type EtatChargement = 'chargement' | 'erreur' | 'pret';
 
 /**
@@ -95,6 +103,7 @@ function NouvelAbonnement({
   const [cree, setCree] = useState<AbonnementCree | null>(null);
   const [copie, setCopie] = useState<{ cible: 'webcal' | 'https'; ok: boolean } | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
+  const creation = useSoumission();
 
   const champWebcal = useRef<HTMLInputElement>(null);
   const champHttps = useRef<HTMLInputElement>(null);
@@ -112,18 +121,20 @@ function NouvelAbonnement({
   const soumettre = (e: FormEvent): void => {
     e.preventDefault();
     setErreur(null);
-    creerAbonnement({
-      label: nom.trim() === '' ? null : nom.trim(),
-      group_id: groupeId === '' ? null : groupeId,
-      include_personal: inclurePerso,
-      include_declined: refuses,
-    })
-      .then((a) => {
-        setCree(a);
-        setCopie(null);
-        setNom('');
-        onCree();
-      })
+    creation
+      .lancer(() =>
+        creerAbonnement({
+          label: nom.trim() === '' ? null : nom.trim(),
+          group_id: groupeId === '' ? null : groupeId,
+          include_personal: inclurePerso,
+          include_declined: refuses,
+        }).then((a) => {
+          setCree(a);
+          setCopie(null);
+          setNom('');
+          onCree();
+        }),
+      )
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
@@ -254,7 +265,9 @@ function NouvelAbonnement({
         <input type="checkbox" checked={refuses} onChange={(e) => setRefuses(e.target.checked)} />
         {t('flux.refuses')}
       </label>
-      <button type="submit" className="bouton bouton-primaire">{t('flux.creer')}</button>
+      <button type="submit" className="bouton bouton-primaire" disabled={creation.enCours}>
+        {creation.enCours ? t('commun.creation') : t('flux.creer')}
+      </button>
     </form>
   );
 }
@@ -272,6 +285,9 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
   const [description, setDescription] = useState('');
   const [ouvert, setOuvert] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
+  const [cible, setCible] = useState<CreneauPersonnel | null>(null);
+  const creation = useSoumission();
+  const suppression = useSoumission();
 
   const charger = useCallback((): void => {
     setEtat('chargement');
@@ -301,32 +317,36 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
       setErreur(t('evenement_form.fuseau_invalide'));
       return;
     }
-    creerCreneauPersonnel({
-      title: titre.trim(),
-      description: description.trim() === '' ? null : description.trim(),
-      location_name: lieu.trim() === '' ? null : lieu.trim(),
-      all_day: journeeEntiere,
-      starts_at: startsAt,
-      ends_at: endsAt,
-      time_zone: fuseauNet,
-    })
-      .then(() => {
-        setTitre('');
-        setDebut('');
-        setFin('');
-        setLieu('');
-        setDescription('');
-        setOuvert(false);
-        charger();
-      })
+    creation
+      .lancer(() =>
+        creerCreneauPersonnel({
+          title: titre.trim(),
+          description: description.trim() === '' ? null : description.trim(),
+          location_name: lieu.trim() === '' ? null : lieu.trim(),
+          all_day: journeeEntiere,
+          starts_at: startsAt,
+          ends_at: endsAt,
+          time_zone: fuseauNet,
+        }).then(() => {
+          setTitre('');
+          setDebut('');
+          setFin('');
+          setLieu('');
+          setDescription('');
+          setOuvert(false);
+          charger();
+        }),
+      )
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  const supprimer = (id: string): void => {
-    if (!window.confirm(t('agenda_perso.supprimer_confirmation'))) return;
+  const confirmerSuppression = (): void => {
+    if (cible === null) return;
+    const id = cible.id;
+    setCible(null);
     setErreur(null);
-    supprimerCreneauPersonnel(id)
-      .then(charger)
+    suppression
+      .lancer(() => supprimerCreneauPersonnel(id).then(charger))
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
@@ -405,8 +425,8 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
             {t('agenda_perso.champ_description')}
             <textarea value={description} maxLength={5000} rows={2} onChange={(e) => setDescription(e.target.value)} />
           </label>
-          <button type="submit" className="bouton bouton-primaire" disabled={titre.trim() === '' || debut === ''}>
-            {t('agenda_perso.ajouter')}
+          <button type="submit" className="bouton bouton-primaire" disabled={creation.enCours || titre.trim() === '' || debut === ''}>
+            {creation.enCours ? t('commun.creation') : t('agenda_perso.ajouter')}
           </button>
         </form>
       )}
@@ -455,8 +475,8 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
                 )}
               </div>
               {c.calendar_source_id === null ? (
-                <button type="button" className="bouton bouton-compact bouton-danger-discret" aria-label={`${t('agenda_perso.supprimer')} ${c.title}`} onClick={() => supprimer(c.id)}>
-                  {t('agenda_perso.supprimer')}
+                <button type="button" className="bouton bouton-compact bouton-danger-discret" aria-label={`${t('agenda_perso.supprimer')} ${c.title}`} disabled={suppression.enCours} onClick={() => setCible(c)}>
+                  {suppression.enCours ? t('commun.suppression') : t('agenda_perso.supprimer')}
                 </button>
               ) : (
                 <span className="ligne-meta">{t('agenda_perso.importe_aide')}</span>
@@ -465,6 +485,17 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
           ))}
         </ul>
       )}
+
+      <DialogueConfirmation
+        ouvert={cible !== null}
+        titre={t('confirm.agenda_perso.supprimer.titre')}
+        consequence={t('confirm.agenda_perso.supprimer.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.agenda_perso.supprimer.action')}
+        danger
+        onConfirmer={confirmerSuppression}
+        onAnnuler={() => setCible(null)}
+      />
     </section>
   );
 }
@@ -621,6 +652,8 @@ export function Compte({
   const [ouvert, setOuvert] = useState(false);
   const [adresseVisible, setAdresseVisible] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
+  const [cibleId, setCibleId] = useState<string | null>(null);
+  const revocation = useSoumission();
 
   const charger = useCallback((): void => {
     setEtat('chargement');
@@ -637,10 +670,14 @@ export function Compte({
   }, []);
   useEffect(charger, [charger]);
 
-  const revoquer = (id: string): void => {
-    if (!window.confirm(t('flux.revoquer_confirmation'))) return;
+  const confirmerRevocation = (): void => {
+    if (cibleId === null) return;
+    const id = cibleId;
+    setCibleId(null);
     setErreur(null);
-    revoquerAbonnement(id).then(charger).catch((err: unknown) => setErreur(messageDe(err)));
+    revocation
+      .lancer(() => revoquerAbonnement(id).then(charger))
+      .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
   // Un abonnement révoqué n'est plus actionnable : il ne sert qu'à se souvenir qu'on l'a coupé. Il reste
@@ -698,7 +735,7 @@ export function Compte({
         {actifs !== null && actifs.length > 0 && (
           <ul className="liste-elements">
             {actifs.map((a) => (
-              <LigneAbonnement key={a.id} abonnement={a} onRevoquer={revoquer} />
+              <LigneAbonnement key={a.id} abonnement={a} onRevoquer={setCibleId} />
             ))}
           </ul>
         )}
@@ -708,11 +745,22 @@ export function Compte({
             <p className="texte-doux">{t('flux.revoques_aide')}</p>
             <ul className="liste-elements">
               {revoques.map((a) => (
-                <LigneAbonnement key={a.id} abonnement={a} onRevoquer={revoquer} />
+                <LigneAbonnement key={a.id} abonnement={a} onRevoquer={setCibleId} />
               ))}
             </ul>
           </details>
         )}
+
+        <DialogueConfirmation
+          ouvert={cibleId !== null}
+          titre={t('confirm.flux.revoquer.titre')}
+          consequence={t('confirm.flux.revoquer.consequence')}
+          reversible={false}
+          libelleConfirmer={t('confirm.flux.revoquer.action')}
+          danger
+          onConfirmer={confirmerRevocation}
+          onAnnuler={() => setCibleId(null)}
+        />
       </section>
     </section>
   );

@@ -4,9 +4,12 @@ import { lireGroupe } from '../api/groupes';
 import { useRechargement } from '../api/rechargement';
 import { creerSondage, listerSondages, type NouvelleOptionSondage, type ResumeSondage } from '../api/sondages';
 import { useTempsReel } from '../api/tempsReel';
+import { ChargementPage } from '../components/ChargementPage';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconeSondage } from '../components/Icones';
+import { useLecture } from '../hooks/useLecture';
+import { useSoumission } from '../hooks/useSoumission';
 import { t, type CleTexte } from '../i18n';
 
 interface CreneauSaisi {
@@ -28,7 +31,15 @@ function classeStatutSondage(statut: ResumeSondage['status']): string {
 
 /** Liste des sondages de dates du groupe et formulaire de création multi-créneaux repliable. */
 export function Sondages({ groupId }: { groupId: string }) {
-  const [sondages, setSondages] = useState<ResumeSondage[] | null>(null);
+  // Lecture initiale (trois états) ; `sondages` en est la copie locale, rafraîchie par le temps réel sans repasser par le squelette.
+  const lecture = useLecture(() => listerSondages(groupId), [groupId]);
+  const [source, setSource] = useState(lecture.donnees);
+  const [sondages, setSondages] = useState<ResumeSondage[] | null>(lecture.donnees);
+  if (source !== lecture.donnees) {
+    setSource(lecture.donnees);
+    setSondages(lecture.donnees);
+  }
+  const { enCours, lancer } = useSoumission();
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   const [fuseau, setFuseau] = useState('Europe/Paris');
   const [titre, setTitre] = useState('');
@@ -45,11 +56,10 @@ export function Sondages({ groupId }: { groupId: string }) {
   );
 
   useEffect(() => {
-    recharger();
     lireGroupe(groupId)
       .then((g) => setFuseau(g.time_zone))
       .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId, recharger]);
+  }, [groupId]);
 
   useTempsReel(groupId, {
     onOuvert: recharger,
@@ -88,16 +98,16 @@ export function Sondages({ groupId }: { groupId: string }) {
       setErreur(t('evenement_form.fuseau_invalide'));
       return;
     }
-    creerSondage(groupId, {
-      title: titre.trim(),
-      description: description.trim() === '' ? null : description.trim(),
-      closes_at: closesAt,
-      options,
-    })
-      .then((cree) => {
+    lancer(() =>
+      creerSondage(groupId, {
+        title: titre.trim(),
+        description: description.trim() === '' ? null : description.trim(),
+        closes_at: closesAt,
+        options,
+      }).then((cree) => {
         window.location.hash = lienSondage(groupId, cree.id);
-      })
-      .catch((err: unknown) => setErreur(messageDe(err)));
+      }),
+    ).catch((err: unknown) => setErreur(messageDe(err)));
   };
 
   return (
@@ -188,34 +198,43 @@ export function Sondages({ groupId }: { groupId: string }) {
               <button type="button" onClick={ajouterLigneCreneau}>
                 {t('sondages.ajouter_creneau')}
               </button>
-              <button type="submit" disabled={titre.trim() === '' || creneaux.some((c) => c.starts_at === '')}>
-                {t('sondages.creer')}
+              <button type="submit" disabled={titre.trim() === '' || creneaux.some((c) => c.starts_at === '') || enCours}>
+                {enCours ? t('commun.creation') : t('sondages.creer')}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {sondages !== null && sondages.length === 0 ? (
-        <div className="carte">
-          <p className="discret">{t('sondages.aucun')}</p>
-        </div>
-      ) : (
-        <div className="grille-cartes-module">
-          {(sondages ?? []).map((s) => (
-            <a key={s.id} className="carte carte-lien-module" href={lienSondage(groupId, s.id)}>
-              <div className="carte-module-haut">
-                <span className="kpi-icone-badge module-icone-badge kpi-badge-ambre">
-                  <IconeSondage className="icone" />
-                </span>
-                <span className={classeStatutSondage(s.status)}>{t(`sondages.statut_${s.status}` as CleTexte)}</span>
-              </div>
-              <strong className="carte-module-titre">{s.title}</strong>
-              <span className="discret ligne-meta">{t('sondages.nb_creneaux', { n: String(s.options_count) })}</span>
-            </a>
-          ))}
-        </div>
-      )}
+      <ChargementPage etat={lecture.etat} erreur={lecture.erreur} onReessayer={lecture.recharger}>
+        {sondages !== null && sondages.length === 0 ? (
+          <div className="carte">
+            <div className="etat-vide">
+              <p>{t('sondages.aucun')}</p>
+              {!formulaireOuvert && (
+                <button type="button" className="bouton-primaire" onClick={() => setFormulaireOuvert(true)}>
+                  {t('sondages.nouveau_bouton')}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="grille-cartes-module">
+            {(sondages ?? []).map((s) => (
+              <a key={s.id} className="carte carte-lien-module" href={lienSondage(groupId, s.id)}>
+                <div className="carte-module-haut">
+                  <span className="kpi-icone-badge module-icone-badge kpi-badge-ambre">
+                    <IconeSondage className="icone" />
+                  </span>
+                  <span className={classeStatutSondage(s.status)}>{t(`sondages.statut_${s.status}` as CleTexte)}</span>
+                </div>
+                <strong className="carte-module-titre">{s.title}</strong>
+                <span className="discret ligne-meta">{t('sondages.nb_creneaux', { n: String(s.options_count) })}</span>
+              </a>
+            ))}
+          </div>
+        )}
+      </ChargementPage>
     </section>
   );
 }

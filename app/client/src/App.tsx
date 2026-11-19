@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ErreurApi } from './api/client';
+import { ErreurApi, SESSION_EXPIREE } from './api/client';
 import { deconnecter, lireMoi, type Moi } from './api/groupes';
 import { listerNotifications } from './api/notifications';
 import { lireVersion, type InfoVersion } from './api/version';
@@ -152,6 +152,17 @@ export function App() {
   }, [rafraichirNotifications]);
 
   useEffect(recharger, [recharger]);
+
+  // Session expirée pendant l'usage : `api/client.ts` émet l'événement sur n'importe quel 401, et
+  // la coque est le seul endroit qui sait quoi en faire. La garde `connecte` est essentielle : un
+  // 401 sur `lireMoi` au démarrage, ou sur une connexion au mauvais mot de passe, est un refus
+  // normal que cet écouteur ne doit pas transformer en déconnexion.
+  useEffect(() => {
+    const surExpiration = (): void =>
+      setEtat((actuel): Etat => (actuel.type === 'connecte' ? { type: 'anonyme' } : actuel));
+    window.addEventListener(SESSION_EXPIREE, surExpiration);
+    return () => window.removeEventListener(SESSION_EXPIREE, surExpiration);
+  }, []);
 
   useEffect(() => {
     const surChangement = (): void => setRoute(lireRoute());

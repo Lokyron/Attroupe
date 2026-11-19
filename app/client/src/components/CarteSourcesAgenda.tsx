@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import {
   ajouterSource,
   listerSources,
@@ -8,7 +8,11 @@ import {
   type SourceAgenda,
   type StatutSource,
 } from '../api/agenda-externe';
+import { ChargementPage } from '../components/ChargementPage';
+import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { Erreur, messageDe } from '../components/Erreur';
+import { useLecture } from '../hooks/useLecture';
+import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
 
 // Sources d'agenda externe (ADR-0013). Deux choses que cet écran doit dire, et qu'il dit AVANT le champ d'URL :
@@ -36,13 +40,21 @@ function libelleStatut(s: StatutSource): string {
   return t(cles[s]);
 }
 
+/** Pastille COURTE (état seul) : `.pilule` ne passe pas à la ligne, une phrase entière déborderait sur téléphone. */
 function pilulteStatut(source: SourceAgenda): { classe: string; texte: string } {
   if (source.disabled_at !== null) return { classe: 'pilule pilule-neutre', texte: t('source.desactivee') };
   if (source.last_status === null) return { classe: 'pilule pilule-neutre', texte: t('source.jamais_synchronisee') };
   if (source.last_status === 'ok' || source.last_status === 'vide') {
     return { classe: 'pilule pilule-positif', texte: libelleStatut(source.last_status) };
   }
-  return { classe: 'pilule pilule-negatif', texte: libelleStatut(source.last_status) };
+  return { classe: 'pilule pilule-negatif', texte: t('source.statut_echec') };
+}
+
+/** Explication longue d'un échec, à afficher dans un paragraphe sous la pastille ; `null` quand tout va bien. */
+function explicationStatut(source: SourceAgenda): string | null {
+  if (source.disabled_at !== null || source.last_status === null) return null;
+  if (source.last_status === 'ok' || source.last_status === 'vide') return null;
+  return libelleStatut(source.last_status);
 }
 
 function FormulaireSource({ onAjoutee, onAnnuler }: { onAjoutee: (message: string) => void; onAnnuler: () => void }) {
@@ -121,18 +133,13 @@ function FormulaireSource({ onAjoutee, onAnnuler }: { onAjoutee: (message: strin
 
 /** Mes agendas externes : ajout, état, relance, désactivation et suppression. */
 export function CarteSourcesAgenda() {
-  const [sources, setSources] = useState<SourceAgenda[] | null>(null);
+  const { donnees: sources, etat, erreur: erreurLecture, recharger, rafraichir } = useLecture(() => listerSources(), []);
+  const [cible, setCible] = useState<SourceAgenda | null>(null);
+  const suppression = useSoumission();
   const [ouvert, setOuvert] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [occupe, setOccupe] = useState<string | null>(null);
-
-  const charger = useCallback((): void => {
-    listerSources()
-      .then(setSources)
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, []);
-  useEffect(charger, [charger]);
 
   const vide = sources !== null && sources.length === 0;
   const formulaireVisible = ouvert || vide;
@@ -144,7 +151,7 @@ export function CarteSourcesAgenda() {
     action
       .then(() => {
         if (succes !== undefined) setInfo(succes);
-        charger();
+        rafraichir();
       })
       .catch((err: unknown) => setErreur(messageDe(err)))
       .finally(() => setOccupe(null));
@@ -161,15 +168,28 @@ export function CarteSourcesAgenda() {
             ? t('source.synchronisee', { nombre: String(maj.synchronisation.creneaux_importes) })
             : t('source.synchro_echec', { raison: libelleStatut(maj.synchronisation.statut) }),
         );
-        charger();
+        rafraichir();
       })
       .catch((err: unknown) => setErreur(messageDe(err)))
       .finally(() => setOccupe(null));
   };
 
-  const retirer = (s: SourceAgenda): void => {
-    if (!window.confirm(t('source.supprimer_confirmation', { label: s.label }))) return;
-    agir(s.id, supprimerSource(s.id), t('source.supprimee'));
+  const confirmerSuppression = (): void => {
+    if (cible === null) return;
+    const s = cible;
+    setCible(null);
+    setErreur(null);
+    setInfo(null);
+    setOccupe(s.id);
+    suppression
+      .lancer(() =>
+        supprimerSource(s.id).then(() => {
+          setInfo(t('source.supprimee'));
+          rafraichir();
+        }),
+      )
+      .catch((err: unknown) => setErreur(messageDe(err)))
+      .finally(() => setOccupe(null));
   };
 
   return (
@@ -189,7 +209,7 @@ export function CarteSourcesAgenda() {
           onAjoutee={(message) => {
             setInfo(message);
             setOuvert(false);
-            charger();
+            rafraichir();
           }}
           onAnnuler={() => setOuvert(false)}
         />
@@ -202,12 +222,16 @@ export function CarteSourcesAgenda() {
       )}
       <Erreur message={erreur} />
 
-      {sources === null && <p className="texte-doux">{t('commun.chargement')}</p>}
+      <ChargementPage etat={etat} erreur={erreurLecture} onReessayer={recharger}>
+      {/* Une relecture ratée garde l'écran intact (`rafraichir`), donc `ChargementPage` n'affiche
+          rien : sans cette ligne, la liste resterait périmée en silence après une action. */}
+      {etat === 'pret' && <Erreur message={erreurLecture} onReessayer={rafraichir} />}
       {vide && <p className="texte-doux">{t('source.aucune')}</p>}
       {sources !== null && sources.length > 0 && (
         <ul className="liste-elements">
           {sources.map((s) => {
             const pilule = pilulteStatut(s);
+            const explication = explicationStatut(s);
             const enCours = occupe === s.id;
             return (
               <li key={s.id} className="ligne ligne-pile">
@@ -226,6 +250,7 @@ export function CarteSourcesAgenda() {
                   {s.slots_skipped > 0 && (
                     <span className="ligne-meta">{t('source.ignores', { nombre: String(s.slots_skipped) })}</span>
                   )}
+                  {explication !== null && <span className="ligne-meta">{explication}</span>}
                   {s.disabled_at !== null && <span className="ligne-meta">{t('source.desactivee_aide')}</span>}
                 </div>
                 <div className="barre-compacte">
@@ -258,7 +283,7 @@ export function CarteSourcesAgenda() {
                     className="bouton bouton-compact bouton-danger-discret"
                     disabled={enCours}
                     aria-label={`${t('source.supprimer')} ${s.label}`}
-                    onClick={() => retirer(s)}
+                    onClick={() => setCible(s)}
                   >
                     {t('source.supprimer')}
                   </button>
@@ -268,6 +293,18 @@ export function CarteSourcesAgenda() {
           })}
         </ul>
       )}
+      </ChargementPage>
+
+      <DialogueConfirmation
+        ouvert={cible !== null}
+        titre={t('confirm.source.supprimer.titre', { label: cible?.label ?? '' })}
+        consequence={t('confirm.source.supprimer.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.source.supprimer.action')}
+        danger
+        onConfirmer={confirmerSuppression}
+        onAnnuler={() => setCible(null)}
+      />
     </section>
   );
 }

@@ -27,6 +27,13 @@ export class ErreurLocale extends Error {
   }
 }
 
+/**
+ * Émis sur `window` dès qu'une réponse 401 arrive, quel que soit l'appel. Seule la coque y réagit,
+ * et seulement si elle se croyait connectée : un 401 sur `lireMoi` au démarrage, ou sur une tentative
+ * de connexion au mauvais mot de passe, est un refus normal et ne doit rien déclencher.
+ */
+export const SESSION_EXPIREE = 'attroupe:session-expiree';
+
 function estObjet(valeur: unknown): valeur is Record<string, unknown> {
   return typeof valeur === 'object' && valeur !== null;
 }
@@ -39,6 +46,11 @@ export async function appeler(methode: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELET
   });
   const json: unknown = await reponse.json().catch(() => null);
   if (!reponse.ok) {
+    // Une session expirée en cours d'usage se signale ici, une fois pour toutes. Sans ce point
+    // central, chaque page affichait « Vous devez vous connecter. » dans un coin pendant que la
+    // coque restait en état connecté, barre latérale et groupes compris : l'utilisateur voyait une
+    // application vivante qui refusait tout. La coque écoute et bascule sur l'écran de connexion.
+    if (reponse.status === 401) window.dispatchEvent(new Event(SESSION_EXPIREE));
     const cle = estObjet(json) && typeof json['error'] === 'string' ? json['error'] : 'erreur.interne';
     throw new ErreurApi(reponse.status, cle, json);
   }

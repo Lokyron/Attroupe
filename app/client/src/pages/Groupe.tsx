@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import {
   changerRole,
   inviter,
@@ -19,6 +19,8 @@ import {
   testerConfigImmich,
   type EtatImmich,
 } from '../api/immich';
+import { ChargementPage, SqueletteCarte } from '../components/ChargementPage';
+import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import {
@@ -32,6 +34,8 @@ import {
   IconeRecu,
   IconeSondage,
 } from '../components/Icones';
+import { useLecture } from '../hooks/useLecture';
+import { useSoumission } from '../hooks/useSoumission';
 import { t, type CleTexte } from '../i18n';
 
 /** La cible affichée d'une invitation émise (courriel ou nom d'utilisateur), vide si le serveur n'en donne aucune. */
@@ -46,56 +50,117 @@ function initialesMembre(nom: string): string {
   return `${morceaux[0]?.[0] ?? ''}${morceaux[morceaux.length - 1]?.[0] ?? ''}`.toUpperCase();
 }
 
+/** Tout ce que la page affiche. `immich` est `null` hors admin, ou quand sa lecture a échoué (`erreurImmich`). */
+interface DonneesGroupe {
+  readonly groupe: DetailGroupe;
+  readonly membres: Membre[];
+  readonly invitations: InvitationEmise[];
+  readonly immich: EtatImmich | null;
+  readonly erreurImmich: string | null;
+}
+
+/** Lit le groupe, puis ses membres, invitations et configuration Immich en parallèle. */
+async function lireTout(groupId: string): Promise<DonneesGroupe> {
+  const groupe = await lireGroupe(groupId);
+  if (groupe.mon_role !== 'admin') {
+    return { groupe, membres: await listerMembres(groupId), invitations: [], immich: null, erreurImmich: null };
+  }
+  const [membres, invitations, immich] = await Promise.allSettled([
+    listerMembres(groupId),
+    listerInvitationsEmises(groupId),
+    lireConfigImmich(groupId),
+  ]);
+  // Membres et invitations sont indispensables à la page ; Immich échoue dans sa seule carte.
+  if (membres.status === 'rejected') throw membres.reason;
+  if (invitations.status === 'rejected') throw invitations.reason;
+  return {
+    groupe,
+    membres: membres.value,
+    invitations: invitations.value,
+    immich: immich.status === 'fulfilled' ? immich.value : null,
+    erreurImmich: immich.status === 'rejected' ? messageDe(immich.reason) : null,
+  };
+}
+
 /** Un groupe : en-tête, raccourcis Bento, membres, invitations (admin), Immich (admin) et paramètres. */
 export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () => void }) {
-  const [groupe, setGroupe] = useState<DetailGroupe | null>(null);
-  const [membres, setMembres] = useState<Membre[]>([]);
-  const [invitations, setInvitations] = useState<InvitationEmise[]>([]);
+  const { donnees, etat, erreur: erreurLecture, recharger } = useLecture(() => lireTout(groupId), [groupId]);
+  // Relecture silencieuse après une action : la page reste affichée, sans repasser par le squelette.
+  const [fraiches, setFraiches] = useState<DonneesGroupe | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [mode, setMode] = useState<'email' | 'username'>('email');
   const [cible, setCible] = useState('');
-  const [immich, setImmich] = useState<EtatImmich | null>(null);
   const [immichUrl, setImmichUrl] = useState('');
   const [immichCle, setImmichCle] = useState('');
   const [editionImmich, setEditionImmich] = useState(false);
+  const [aPromouvoir, setAPromouvoir] = useState<Membre | null>(null);
+  const [aRetirer, setARetirer] = useState<Membre | null>(null);
+  const [aRevoquer, setARevoquer] = useState<InvitationEmise | null>(null);
+  const [quitterOuvert, setQuitterOuvert] = useState(false);
+  const [debrancherOuvert, setDebrancherOuvert] = useState(false);
+  // Une garde par action indépendante : inviter ne grise pas « Quitter », etc.
+  const invitation = useSoumission();
+  const membre = useSoumission();
+  const revocation = useSoumission();
+  const immichAction = useSoumission();
+  const sortie = useSoumission();
 
-  const charger = useCallback((): void => {
-    setErreur(null);
-    lireGroupe(groupId)
-      .then(async (g) => {
-        setGroupe(g);
-        setMembres(await listerMembres(groupId));
-        if (g.mon_role === 'admin') {
-          setInvitations(await listerInvitationsEmises(groupId));
-          const cfg = await lireConfigImmich(groupId);
-          setImmich(cfg);
-          if (cfg.configure) setImmichUrl(cfg.base_url);
-        } else {
-          setInvitations([]);
-          setImmich(null);
-        }
-      })
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId]);
-  useEffect(charger, [charger]);
+  const rafraichir = async (): Promise<void> => {
+    setFraiches(await lireTout(groupId));
+  };
+  const relire = (): void => {
+    setFraiches(null);
+    recharger();
+  };
 
-  const agir = (action: Promise<void>, apres: () => void = charger): void => {
+  const agir = (
+    garde: ReturnType<typeof useSoumission>,
+    action: () => Promise<void>,
+    apres: () => void = () => undefined,
+  ): void => {
     setErreur(null);
     setInfo(null);
-    action.then(apres).catch((err: unknown) => setErreur(messageDe(err)));
+    garde
+      .lancer(async () => {
+        await action();
+        apres();
+      })
+      .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
   const soumettreInvitation = (e: FormEvent): void => {
     e.preventDefault();
-    agir(inviter(groupId, mode === 'email' ? { email: cible } : { username: cible }, 'member'), () => {
-      setCible('');
-      setInfo(t('invitations_emises.envoyee'));
-      charger();
-    });
+    agir(
+      invitation,
+      async () => {
+        await inviter(groupId, mode === 'email' ? { email: cible } : { username: cible }, 'member');
+        await rafraichir();
+      },
+      () => {
+        setCible('');
+        setInfo(t('invitations_emises.envoyee'));
+      },
+    );
   };
 
-  if (groupe === null) return <Erreur message={erreur} />;
+  const courantes = fraiches ?? donnees;
+  if (courantes === null) {
+    return (
+      <section className="page-groupe-pile">
+        <ChargementPage etat={etat} erreur={erreurLecture} onReessayer={relire} squelette={<SqueletteCarte />}>
+          {null}
+        </ChargementPage>
+        {etat === 'erreur' && <a href="#/">{t('lien.retour')}</a>}
+      </section>
+    );
+  }
+  const { groupe, membres, invitations, immich, erreurImmich } = courantes;
+  const changerLeRole = (m: Membre): void =>
+    agir(membre, async () => {
+      await changerRole(groupId, m.id, m.role === 'admin' ? 'member' : 'admin');
+      await rafraichir();
+    });
   const admin = groupe.mon_role === 'admin';
   const base = `#/groupe/${encodeURIComponent(groupId)}`;
   const nbActifs = membres.filter((m) => m.status === 'active').length;
@@ -255,7 +320,8 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                           type="button"
                           className="bouton-compact"
                           aria-label={`${t(m.role === 'admin' ? 'membres.retrograder' : 'membres.promouvoir')} ${m.display_name}`}
-                          onClick={() => agir(changerRole(groupId, m.id, m.role === 'admin' ? 'member' : 'admin'))}
+                          disabled={membre.enCours}
+                          onClick={() => (m.role === 'admin' ? changerLeRole(m) : setAPromouvoir(m))}
                         >
                           {t(m.role === 'admin' ? 'membres.retrograder' : 'membres.promouvoir')}
                         </button>
@@ -263,7 +329,8 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                           type="button"
                           className="bouton-compact bouton-danger-discret"
                           aria-label={`${t('membres.retirer')} ${m.display_name}`}
-                          onClick={() => window.confirm(t('membres.retirer_confirmation')) && agir(retirerMembre(groupId, m.id))}
+                          disabled={membre.enCours}
+                          onClick={() => setARetirer(m)}
                         >
                           {t('membres.retirer')}
                         </button>
@@ -300,10 +367,14 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                     value={cible}
                     onChange={(e) => setCible(e.target.value)}
                     aria-label={t(mode === 'email' ? 'invitations_emises.cible_email' : 'invitations_emises.cible_nom')}
-                    placeholder={t(mode === 'email' ? 'invitations_emises.cible_email' : 'invitations_emises.cible_nom')}
+                    placeholder={t(
+                      mode === 'email' ? 'invitations_emises.cible_email' : 'invitations_emises.cible_nom',
+                    )}
                     required
                   />
-                  <button type="submit">{t('invitations_emises.inviter')}</button>
+                  <button type="submit" disabled={invitation.enCours}>
+                    {invitation.enCours ? t('commun.envoi') : t('invitations_emises.inviter')}
+                  </button>
                 </div>
               </form>
               {info !== null && (
@@ -318,15 +389,20 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                   {invitations.map((i) => (
                     <li key={i.id} className="ligne">
                       <div className="ligne-principale">
-                        <span className="ligne-titre">{i.email ?? i.username ?? ''}</span>
+                        <span className="ligne-titre">{cibleInvitation(i)}</span>
                         <span className="ligne-meta">{t(`invitations_emises.statut_${i.status}` as CleTexte)}</span>
                       </div>
                       {i.status === 'pending' && (
                         <button
                           type="button"
                           className="bouton-compact"
-                          aria-label={cibleInvitation(i) === '' ? undefined : `${t('invitations_emises.revoquer')} ${cibleInvitation(i)}`}
-                          onClick={() => agir(revoquerInvitation(groupId, i.id))}
+                          aria-label={
+                            cibleInvitation(i) === ''
+                              ? undefined
+                              : `${t('invitations_emises.revoquer')} ${cibleInvitation(i)}`
+                          }
+                          disabled={revocation.enCours}
+                          onClick={() => setARevoquer(i)}
                         >
                           {t('invitations_emises.revoquer')}
                         </button>
@@ -363,36 +439,41 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                     <button
                       type="button"
                       className="bouton-compact"
+                      disabled={immichAction.enCours}
                       onClick={() =>
-                        agir(
-                          testerConfigImmich(groupId).then((etat) => {
-                            setImmich(etat);
-                          }),
-                        )
+                        agir(immichAction, async () => {
+                          await testerConfigImmich(groupId);
+                          await rafraichir();
+                        })
                       }
                     >
                       {t('immich.tester')}
                     </button>
-                    <button type="button" className="bouton-compact" onClick={() => setEditionImmich(!editionImmich)}>
+                    <button
+                      type="button"
+                      className="bouton-compact"
+                      onClick={() => {
+                        if (!editionImmich && immichUrl === '') setImmichUrl(immich.base_url);
+                        setEditionImmich(!editionImmich);
+                      }}
+                    >
                       {t(editionImmich ? 'groupe.immich_masquer' : 'groupe.immich_modifier')}
                     </button>
                     <button
                       type="button"
                       className="bouton-compact bouton-danger-discret"
-                      onClick={() =>
-                        window.confirm(t('immich.debrancher_confirmation')) &&
-                        agir(supprimerConfigImmich(groupId), () => {
-                          setImmichUrl('');
-                          setImmichCle('');
-                          setEditionImmich(false);
-                          charger();
-                        })
-                      }
+                      disabled={immichAction.enCours}
+                      onClick={() => setDebrancherOuvert(true)}
                     >
                       {t('immich.debrancher')}
                     </button>
                   </div>
                 </div>
+              ) : erreurImmich !== null ? (
+                <Erreur
+                  message={erreurImmich}
+                  onReessayer={() => void rafraichir().catch((err: unknown) => setErreur(messageDe(err)))}
+                />
               ) : (
                 <div className="bloc-immich-resume">
                   <p className="discret">{t('immich.non_configure')}</p>
@@ -408,12 +489,15 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                   onSubmit={(e) => {
                     e.preventDefault();
                     agir(
-                      configurerImmich(groupId, immichUrl, immichCle).then((etat) => {
-                        setImmich(etat);
+                      immichAction,
+                      async () => {
+                        await configurerImmich(groupId, immichUrl, immichCle);
+                        await rafraichir();
+                      },
+                      () => {
                         setImmichCle('');
                         setEditionImmich(false);
-                      }),
-                      charger,
+                      },
                     );
                   }}
                   className="formulaire liste-compacte-haut"
@@ -426,7 +510,9 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                     {t('immich.cle')}
                     <input type="password" value={immichCle} onChange={(e) => setImmichCle(e.target.value)} required />
                   </label>
-                  <button type="submit">{t('immich.enregistrer')}</button>
+                  <button type="submit" disabled={immichAction.enCours}>
+                    {immichAction.enCours ? t('commun.enregistrement') : t('immich.enregistrer')}
+                  </button>
                 </form>
               )}
             </div>
@@ -447,7 +533,8 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
               <button
                 type="button"
                 className="bouton-danger-discret"
-                onClick={() => window.confirm(t('groupe.quitter_confirmation')) && agir(quitterGroupe(groupId), onQuitte)}
+                disabled={sortie.enCours}
+                onClick={() => setQuitterOuvert(true)}
               >
                 {t('groupe.quitter')}
               </button>
@@ -455,6 +542,97 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
           </div>
         </div>
       </div>
+
+      <DialogueConfirmation
+        ouvert={aPromouvoir !== null}
+        titre={t('confirm.membres.promouvoir.titre', { nom: aPromouvoir?.display_name ?? '' })}
+        consequence={t('confirm.membres.promouvoir.consequence')}
+        reversible={true}
+        libelleConfirmer={t('confirm.membres.promouvoir.action')}
+        danger={false}
+        onConfirmer={() => {
+          if (aPromouvoir !== null) changerLeRole(aPromouvoir);
+          setAPromouvoir(null);
+        }}
+        onAnnuler={() => setAPromouvoir(null)}
+      />
+      <DialogueConfirmation
+        ouvert={aRetirer !== null}
+        titre={t('confirm.membres.retirer.titre', { nom: aRetirer?.display_name ?? '' })}
+        consequence={t('confirm.membres.retirer.consequence')}
+        reversible={true}
+        libelleConfirmer={t('confirm.membres.retirer.action')}
+        danger
+        onConfirmer={() => {
+          if (aRetirer !== null) {
+            const m = aRetirer;
+            agir(membre, async () => {
+              await retirerMembre(groupId, m.id);
+              await rafraichir();
+            });
+          }
+          setARetirer(null);
+        }}
+        onAnnuler={() => setARetirer(null)}
+      />
+      <DialogueConfirmation
+        ouvert={aRevoquer !== null}
+        titre={t('confirm.invitations_emises.revoquer.titre', {
+          cible: aRevoquer === null ? '' : cibleInvitation(aRevoquer),
+        })}
+        consequence={t('confirm.invitations_emises.revoquer.consequence')}
+        reversible={true}
+        libelleConfirmer={t('confirm.invitations_emises.revoquer.action')}
+        danger
+        onConfirmer={() => {
+          if (aRevoquer !== null) {
+            const i = aRevoquer;
+            agir(revocation, async () => {
+              await revoquerInvitation(groupId, i.id);
+              await rafraichir();
+            });
+          }
+          setARevoquer(null);
+        }}
+        onAnnuler={() => setARevoquer(null)}
+      />
+      <DialogueConfirmation
+        ouvert={quitterOuvert}
+        titre={t('confirm.groupe.quitter.titre', { groupe: groupe.name })}
+        consequence={t('confirm.groupe.quitter.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.groupe.quitter.action')}
+        danger
+        onConfirmer={() => {
+          setQuitterOuvert(false);
+          agir(sortie, () => quitterGroupe(groupId), onQuitte);
+        }}
+        onAnnuler={() => setQuitterOuvert(false)}
+      />
+      <DialogueConfirmation
+        ouvert={debrancherOuvert}
+        titre={t('confirm.immich.debrancher.titre')}
+        consequence={t('confirm.immich.debrancher.consequence')}
+        reversible={true}
+        libelleConfirmer={t('confirm.immich.debrancher.action')}
+        danger={false}
+        onConfirmer={() => {
+          setDebrancherOuvert(false);
+          agir(
+            immichAction,
+            async () => {
+              await supprimerConfigImmich(groupId);
+              await rafraichir();
+            },
+            () => {
+              setImmichUrl('');
+              setImmichCle('');
+              setEditionImmich(false);
+            },
+          );
+        }}
+        onAnnuler={() => setDebrancherOuvert(false)}
+      />
     </section>
   );
 }
