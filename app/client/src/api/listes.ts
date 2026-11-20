@@ -12,9 +12,12 @@ export interface Article {
   position: number;
 }
 
+export type TypeListe = 'courses' | 'affaires' | 'taches';
+
 export interface ResumeListe {
   id: string;
   title: string;
+  kind: TypeListe;
   event_id: string | null;
   articles_total: number;
   articles_faits: number;
@@ -23,6 +26,7 @@ export interface ResumeListe {
 export interface DetailListe {
   id: string;
   title: string;
+  kind: TypeListe;
   event_id: string | null;
   articles: Article[];
 }
@@ -39,10 +43,15 @@ function article(a: unknown): Article {
   };
 }
 
+function lireTypeListe(v: unknown): TypeListe {
+  return v === 'affaires' || v === 'taches' ? v : 'courses';
+}
+
 function detail(l: unknown): DetailListe {
   return {
     id: texte(champ(l, 'id')),
     title: texte(champ(l, 'title')),
+    kind: lireTypeListe(champ(l, 'kind')),
     event_id: texteOuNul(champ(l, 'event_id')),
     articles: liste(champ(l, 'articles')).map(article),
   };
@@ -57,6 +66,7 @@ export async function listerListes(groupId: string, evenementId?: string): Promi
   return liste(champ(await appeler('GET', `${base(groupId)}${requete}`), 'listes')).map((l) => ({
     id: texte(champ(l, 'id')),
     title: texte(champ(l, 'title')),
+    kind: lireTypeListe(champ(l, 'kind')),
     event_id: texteOuNul(champ(l, 'event_id')),
     articles_total: nombre(champ(l, 'articles_total')),
     articles_faits: nombre(champ(l, 'articles_faits')),
@@ -67,8 +77,8 @@ export async function lireListe(groupId: string, id: string): Promise<DetailList
   return detail(await appeler('GET', uneListe(groupId, id)));
 }
 
-export async function creerListe(groupId: string, title: string, eventId: string | null): Promise<DetailListe> {
-  return detail(await appeler('POST', base(groupId), { title, event_id: eventId }));
+export async function creerListe(groupId: string, title: string, eventId: string | null, kind: TypeListe = 'courses'): Promise<DetailListe> {
+  return detail(await appeler('POST', base(groupId), { title, event_id: eventId, kind }));
 }
 
 export async function renommerListe(groupId: string, id: string, title: string): Promise<DetailListe> {

@@ -4,7 +4,17 @@ import { listerMembres } from '../../db/queries/membres.js';
 import { mesGroupes } from '../../db/queries/transverse.js';
 import { versInstant } from '../../domain/instant.js';
 import { changerMaVisibiliteDefaut, disponibilitesDuGroupe } from '../../services/agenda-personnel.js';
-import { changerRole, creerNouveauGroupe, detailGroupe, inviter, modifierGroupe, quitter, retirerMembre, revoquerInvitation } from '../../services/groupes.js';
+import {
+  changerRole,
+  creerNouveauGroupe,
+  detailGroupe,
+  inviter,
+  modifierGroupe,
+  quitter,
+  retirerMembre,
+  revoquerInvitation,
+  supprimerGroupeService,
+} from '../../services/groupes.js';
 import type { Contexte } from '../contexte.js';
 import { exigerAdminGroupe, exigerAppartenance, scopeDe } from '../middleware/appartenance.js';
 import { cadence } from '../middleware/cadence.js';
@@ -60,6 +70,11 @@ function routesDuGroupe(contexte: Contexte): Router {
   routeur.patch('/', exigerAdminGroupe, (req, res) => {
     const champs = analyser(schemaModificationGroupe, req.body);
     res.json(modifierGroupe(contexte, scopeDe(req), champs));
+  });
+
+  routeur.delete('/', exigerAdminGroupe, (req, res) => {
+    supprimerGroupeService(contexte, scopeDe(req));
+    res.json({ ok: true });
   });
 
   routeur.get('/membres', (req, res) => {

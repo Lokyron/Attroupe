@@ -11,9 +11,17 @@ const titre = z.string().trim().min(1).max(120);
 const libelle = z.string().trim().min(1).max(120);
 const quantite = z.string().trim().min(1).max(40).nullable();
 
-export const schemaNouvelleListe = z.strictObject({ title: titre, event_id: identifiant.nullable().default(null) });
+const typeListe = z.enum(['courses', 'affaires', 'taches']);
 
-export const schemaRenommageListe = z.strictObject({ title: titre });
+export const schemaNouvelleListe = z.strictObject({
+  title: titre,
+  event_id: identifiant.nullable().default(null),
+  kind: typeListe.default('courses'),
+});
+
+export const schemaRenommageListe = z
+  .strictObject({ title: titre.optional(), kind: typeListe.optional() })
+  .refine((v) => v.title !== undefined || v.kind !== undefined);
 
 /** `?event_id=…` : les listes d'un événement. */
 export const schemaFiltreListes = z.strictObject({ event_id: identifiant.optional() });

@@ -1,7 +1,13 @@
 import type { Authentification } from '../http/middleware/session.js';
 import { ErreurHttp } from '../http/erreurs.js';
 import type { Contexte } from '../http/contexte.js';
-import { creerGroupe, lireGroupe, modifierGroupe as modifierGroupeEnBase, type Groupe } from '../db/queries/groupes.js';
+import {
+  creerGroupe,
+  lireGroupe,
+  modifierGroupe as modifierGroupeEnBase,
+  supprimerGroupe as supprimerGroupeEnBase,
+  type Groupe,
+} from '../db/queries/groupes.js';
 import { inviterParEmail, inviterParNomUtilisateur, revoquerInvitation as revoquerInvitationEnBase } from '../db/queries/invitations.js';
 import { changerRole as changerRoleEnBase, quitter as quitterEnBase, retirerMembre as retirerMembreEnBase } from '../db/queries/membres.js';
 import { lireMaVisibiliteDefaut, type VisibilitePartage } from '../db/queries/agenda-personnel.js';
@@ -51,6 +57,12 @@ export function modifierGroupe(
   if (resultat === 'devise_inconnue') throw new ErreurHttp(400, 'groupe.devise_inconnue');
   if (resultat === 'introuvable') throw new ErreurHttp(404, 'groupe.introuvable');
   return detailGroupe(scope);
+}
+
+export function supprimerGroupeService(contexte: Contexte, scope: GroupScope): void {
+  const ok = supprimerGroupeEnBase(scope, versInstant(contexte.horloge()));
+  if (!ok) throw new ErreurHttp(404, 'groupe.introuvable');
+  contexte.diffuseur.diffuser(scope, { type: 'groupe.supprime', ressource: 'groupe', id: scope.groupId, parent_id: null });
 }
 
 /** Crée un groupe dont l'appelant devient administrateur. Un compte peut en avoir plusieurs. */

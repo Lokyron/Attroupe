@@ -33,7 +33,12 @@
     },
     "notification_depense": {
       "sujet": "Une dépense vous concerne dans « {groupe} »",
-      "texte": "Bonjour {nom},\n\nUne dépense qui vous concerne vient d’être enregistrée dans le groupe « {groupe} » sur {application}. Aucune action n’est demandée par ce message.\n\n{lien}",
+      "texte": "Bonjour {nom},\n\nUne dépense qui vous concerne vient d’être enregistrée ou mise à jour dans le groupe « {groupe} » sur {application}. Aucune action n’est demandée par ce message.\n\n{lien}",
+      "action": "Voir les dépenses"
+    },
+    "notification_reglement": {
+      "sujet": "Un règlement vous concerne dans « {groupe} »",
+      "texte": "Bonjour {nom},\n\nUn règlement qui vous concerne vient d’être enregistré ou confirmé dans le groupe « {groupe} » sur {application}.\n\n{lien}",
       "action": "Voir les dépenses"
     },
     "resume_quotidien": {
@@ -44,7 +49,11 @@
   },
   "notifications_push": {
     "event_created": "Nouvel événement dans le groupe",
-    "expense_added": "Une dépense vous concerne"
+    "expense_added": "Une dépense vous concerne",
+    "expense_updated": "Une dépense qui vous concerne a été modifiée",
+    "expense_deleted": "Une dépense qui vous concerne a été supprimée",
+    "settlement_created": "Un règlement attend votre confirmation",
+    "settlement_confirmed": "Votre règlement a été confirmé"
   },
   "flux_ical": {
     "nom_calendrier": "Attroupe",

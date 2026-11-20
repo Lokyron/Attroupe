@@ -247,6 +247,10 @@ export function confirmerRemboursement(scope: GroupScope, remboursementId: strin
   return scope.modifier('settlements', remboursementId, { confirmed_by_membership_id: scope.membershipId });
 }
 
+export function supprimerRemboursement(scope: GroupScope, remboursementId: string): boolean {
+  return scope.supprimerDoux('settlements', remboursementId);
+}
+
 // --- Clôture d'événement (`expense_closures`) -------------------------------------------------------------
 
 const ligneCloture = z.object({

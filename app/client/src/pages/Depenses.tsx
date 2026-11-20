@@ -10,6 +10,7 @@ import {
   listerRemboursements,
   reouvrirEvenement,
   supprimerDepense,
+  supprimerRemboursement,
   type Depense,
   type Devise,
   type ModeRepartition,
@@ -85,6 +86,21 @@ function formaterDateJour(jour: string): string {
   }).format(date);
 }
 
+function formaterMoisAnnee(moisIso: string): string {
+  const date = new Date(`${moisIso}-01T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return moisIso;
+  return new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date);
+}
+
+function formaterSaisieMontant(minor: number, code: string, devises: readonly Devise[]): string {
+  const exposant = devises.find((d) => d.code === code)?.exponent ?? 2;
+  if (exposant === 0) return String(minor);
+  const facteur = 10 ** exposant;
+  const entier = Math.floor(minor / facteur);
+  const dec = String(minor % facteur).padStart(exposant, '0');
+  return `${String(entier)},${dec}`;
+}
+
 /** Action en attente de confirmation dans le dialogue unique de la section. */
 type Confirmation =
   | { readonly type: 'supprimer'; readonly depense: Depense }
@@ -95,6 +111,11 @@ type Confirmation =
       readonly remboursement: Remboursement;
       readonly montant: string;
       readonly nom: string;
+    }
+  | {
+      readonly type: 'annuler_remb';
+      readonly remboursement: Remboursement;
+      readonly montant: string;
     };
 
 export interface PropsSectionDepenses {
@@ -160,6 +181,13 @@ export function SectionDepenses({
 
   const [formDepenseOuvert, setFormDepenseOuvert] = useState(false);
   const [formRembOuvert, setFormRembOuvert] = useState(false);
+  const [erreursChamps, setErreursChamps] = useState<Record<string, string>>({});
+  const [erreurFormDepense, setErreurFormDepense] = useState<string | null>(null);
+  const [erreurFormRemb, setErreurFormRemb] = useState<string | null>(null);
+  const [limiteDepenses, setLimiteDepenses] = useState(20);
+  const [limiteRemboursements, setLimiteRemboursements] = useState(15);
+  const refFormDepense = useRef<HTMLDivElement>(null);
+  const refFormRemb = useRef<HTMLDivElement>(null);
 
   // Formulaire de nouvelle dépense
   const [libelle, setLibelle] = useState('');
@@ -232,49 +260,51 @@ export function SectionDepenses({
   const soumettreDepense = (e: FormEvent): void => {
     e.preventDefault();
     setErreur(null);
+    setErreurFormDepense(null);
+    const errs: Record<string, string> = {};
+    if (libelle.trim() === '') errs['libelle'] = t('depenses.erreur_libelle');
+
     const exposant = devises.find((d) => d.code === deviseCode)?.exponent ?? 2;
     const minor = analyserMontant(montantSaisi, exposant);
-    if (minor === null) {
-      setErreur(t('erreur.requete.invalide'));
-      return;
-    }
+    if (minor === null) errs['montant'] = t('depenses.erreur_montant');
 
     let ratePpm: number | undefined;
     if (deviseCode !== deviseCible) {
       const ppm = analyserMontant(tauxSaisi, 6);
-      if (ppm === null) {
-        setErreur(t('erreur.taux.requis'));
-        return;
-      }
-      ratePpm = ppm;
+      if (ppm === null) errs['taux'] = t('depenses.erreur_taux');
+      else ratePpm = ppm;
     }
 
     const selectionnes = actifs.filter((m) => estCoche(m.id));
-    if (selectionnes.length === 0) {
-      setErreur(t('erreur.requete.invalide'));
-      return;
-    }
+    if (selectionnes.length === 0) errs['participants'] = t('depenses.erreur_participants');
 
     const shares: Array<Parameters<typeof creerDepense>[1]['shares'][number]> = [];
     for (const m of selectionnes) {
       if (mode === 'weights') {
         const w = Number(poidsParMembre[m.id] ?? '1');
         if (!Number.isInteger(w) || w <= 0) {
-          setErreur(t('erreur.depenses.poids_invalide'));
-          return;
+          errs['parts'] = t('erreur.depenses.poids_invalide');
+          break;
         }
         shares.push({ membership_id: m.id, weight: w });
       } else if (mode === 'exact') {
         const part = analyserMontant(partsExactesParMembre[m.id] ?? '0', exposant, true);
         if (part === null) {
-          setErreur(t('erreur.requete.invalide'));
-          return;
+          errs['parts'] = t('depenses.erreur_parts_exactes');
+          break;
         }
         shares.push({ membership_id: m.id, share_minor: part });
       } else {
         shares.push({ membership_id: m.id });
       }
     }
+
+    if (Object.keys(errs).length > 0 || minor === null) {
+      setErreursChamps(errs);
+      refFormDepense.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+    setErreursChamps({});
 
     soumDepense
       .lancer(() =>
@@ -291,37 +321,44 @@ export function SectionDepenses({
         }).then(() => {
           setLibelle('');
           setMontantSaisi('');
+          setErreursChamps({});
           setFormDepenseOuvert(false);
           return rechargerPartiel();
         }),
       )
-      .catch((err: unknown) => setErreur(messageDe(err)));
+      .catch((err: unknown) => {
+        setErreurFormDepense(messageDe(err));
+        refFormDepense.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
   };
 
   const soumettreRemboursement = (e: FormEvent): void => {
     e.preventDefault();
     setErreur(null);
+    setErreurFormRemb(null);
+    const errs: Record<string, string> = {};
+    if (deMembreEffectif === '' || versMembreEffectif === '' || deMembreEffectif === versMembreEffectif) {
+      errs['remb_membres'] = t('depenses.erreur_membres_identiques');
+    }
     const exposant = devises.find((d) => d.code === deviseRembCode)?.exponent ?? 2;
     const minor = analyserMontant(montantRembSaisi, exposant);
-    if (
-      minor === null ||
-      deMembreEffectif === '' ||
-      versMembreEffectif === '' ||
-      deMembreEffectif === versMembreEffectif
-    ) {
-      setErreur(t('erreur.requete.invalide'));
-      return;
+    if (minor === null) {
+      errs['remb_montant'] = t('depenses.erreur_montant');
     }
 
     let ratePpm: number | undefined;
     if (deviseRembCode !== deviseCible) {
       const ppm = analyserMontant(tauxRembSaisi, 6);
-      if (ppm === null) {
-        setErreur(t('erreur.taux.requis'));
-        return;
-      }
-      ratePpm = ppm;
+      if (ppm === null) errs['remb_taux'] = t('depenses.erreur_taux');
+      else ratePpm = ppm;
     }
+
+    if (Object.keys(errs).length > 0 || minor === null) {
+      setErreursChamps(errs);
+      refFormRemb.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+    setErreursChamps({});
 
     soumRemb
       .lancer(() =>
@@ -337,11 +374,15 @@ export function SectionDepenses({
         }).then(() => {
           setMontantRembSaisi('');
           setNoteRemb('');
+          setErreursChamps({});
           setFormRembOuvert(false);
           return rechargerPartiel();
         }),
       )
-      .catch((err: unknown) => setErreur(messageDe(err)));
+      .catch((err: unknown) => {
+        setErreurFormRemb(messageDe(err));
+        refFormRemb.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
   };
 
   /** Exécute l'action confirmée. Le dialogue est refermé d'abord : il est contrôlé et ne se ferme jamais seul. */
@@ -371,6 +412,11 @@ export function SectionDepenses({
       case 'recu':
         soumRecu
           .lancer(() => confirmerRemboursement(groupId, action.remboursement.id).then(rechargerPartiel))
+          .catch((err: unknown) => setErreur(messageDe(err)));
+        return;
+      case 'annuler_remb':
+        soumSuppression
+          .lancer(() => supprimerRemboursement(groupId, action.remboursement.id).then(rechargerPartiel))
           .catch((err: unknown) => setErreur(messageDe(err)));
         return;
     }
@@ -421,6 +467,16 @@ export function SectionDepenses({
           action: t('confirm.depenses.confirmer_recu.action'),
           reversible: false,
           danger: false,
+        };
+      case 'annuler_remb':
+        return {
+          titre: t('confirm.depenses.annuler_remb.titre', {
+            montant: confirmation.montant,
+          }),
+          consequence: t('confirm.depenses.annuler_remb.consequence'),
+          action: t('confirm.depenses.annuler_remb.action'),
+          reversible: false,
+          danger: true,
         };
       case undefined:
         return {
@@ -551,9 +607,29 @@ export function SectionDepenses({
                                   montant: formaterMontant(tr.amount_minor, tr.currency_code, devises),
                                 })}
                               </span>
+                              {!estCloture && actifs.length >= 2 && (
+                                <button
+                                  type="button"
+                                  className="bouton-compact"
+                                  onClick={() => {
+                                    setDeMembreId(tr.from_membership_id);
+                                    setVersMembreId(tr.to_membership_id);
+                                    setMontantRembSaisi(formaterSaisieMontant(tr.amount_minor, tr.currency_code, devises));
+                                    setDeviseRembChoisie(tr.currency_code);
+                                    setErreursChamps({});
+                                    setErreurFormRemb(null);
+                                    setFormRembOuvert(true);
+                                    setFormDepenseOuvert(false);
+                                    setTimeout(() => refFormRemb.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 0);
+                                  }}
+                                >
+                                  {t('depenses.preremplir_reglement')}
+                                </button>
+                              )}
                             </li>
                           ))}
                         </ul>
+                        <p className="texte-doux">{t('depenses.aucun_flux_bancaire')}</p>
                       </div>
                     )}
                   </div>
@@ -563,20 +639,31 @@ export function SectionDepenses({
           </div>
 
           {!estCloture && formDepenseOuvert && (
-            <div className="carte">
+            <div ref={refFormDepense} className="carte">
               <div className="carte-entete">
                 <h3>{t('depenses.ajouter_titre')}</h3>
               </div>
-              <form onSubmit={soumettreDepense} className="formulaire">
+              <Erreur message={erreurFormDepense} />
+              <form onSubmit={soumettreDepense} className="formulaire" noValidate>
                 <label>
                   {t('depenses.champ_libelle')}
                   <input
                     type="text"
                     value={libelle}
                     maxLength={140}
-                    onChange={(e) => setLibelle(e.target.value)}
+                    aria-invalid={erreursChamps['libelle'] !== undefined}
+                    aria-describedby={erreursChamps['libelle'] !== undefined ? 'err-depense-libelle' : undefined}
+                    onChange={(e) => {
+                      setLibelle(e.target.value);
+                      if (erreursChamps['libelle'] !== undefined) setErreursChamps((p) => ({ ...p, libelle: '' }));
+                    }}
                     required
                   />
+                  {erreursChamps['libelle'] !== undefined && erreursChamps['libelle'] !== '' && (
+                    <p id="err-depense-libelle" className="erreur-champ" role="alert">
+                      {erreursChamps['libelle']}
+                    </p>
+                  )}
                 </label>
                 <div className="grille-champs-2">
                   <label>
@@ -588,9 +675,19 @@ export function SectionDepenses({
                       value={montantSaisi}
                       onChange={(e) => setMontantSaisi(e.target.value)}
                       placeholder={t('depenses.exemple_montant')}
-                      aria-describedby="aide-montant-depense"
+                      aria-invalid={erreursChamps['montant'] !== undefined}
+                      aria-describedby={
+                        erreursChamps['montant'] !== undefined
+                          ? 'err-depense-montant aide-montant-depense'
+                          : 'aide-montant-depense'
+                      }
                       required
                     />
+                    {erreursChamps['montant'] !== undefined && (
+                      <p id="err-depense-montant" className="erreur-champ" role="alert">
+                        {erreursChamps['montant']}
+                      </p>
+                    )}
                     {/* La contrainte est dite avant l'erreur : le `placeholder` seul ne suffit pas,
                     il disparaît dès la première frappe. */}
                     <small id="aide-montant-depense" className="texte-doux">
@@ -624,8 +721,15 @@ export function SectionDepenses({
                       value={tauxSaisi}
                       onChange={(e) => setTauxSaisi(e.target.value)}
                       placeholder={t('depenses.exemple_montant')}
+                      aria-invalid={erreursChamps['taux'] !== undefined}
+                      aria-describedby={erreursChamps['taux'] !== undefined ? 'err-depense-taux' : undefined}
                       required
                     />
+                    {erreursChamps['taux'] !== undefined && (
+                      <p id="err-depense-taux" className="erreur-champ" role="alert">
+                        {erreursChamps['taux']}
+                      </p>
+                    )}
                   </label>
                 )}
                 <div className="grille-champs-2">
@@ -700,6 +804,16 @@ export function SectionDepenses({
                       )}
                     </div>
                   ))}
+                  {erreursChamps['participants'] !== undefined && (
+                    <p className="erreur-champ" role="alert">
+                      {erreursChamps['participants']}
+                    </p>
+                  )}
+                  {erreursChamps['parts'] !== undefined && (
+                    <p className="erreur-champ" role="alert">
+                      {erreursChamps['parts']}
+                    </p>
+                  )}
                 </fieldset>
                 <button type="submit" disabled={soumDepense.enCours}>
                   {soumDepense.enCours ? t('commun.enregistrement') : t('depenses.ajouter')}
@@ -709,15 +823,21 @@ export function SectionDepenses({
           )}
 
           {!estCloture && formRembOuvert && actifs.length >= 2 && (
-            <div className="carte">
+            <div ref={refFormRemb} className="carte">
               <div className="carte-entete">
                 <h3>{t('depenses.declarer_remboursement')}</h3>
               </div>
-              <form onSubmit={soumettreRemboursement} className="formulaire">
+              <p className="texte-doux">{t('depenses.aucun_flux_bancaire')}</p>
+              <Erreur message={erreurFormRemb} />
+              <form onSubmit={soumettreRemboursement} className="formulaire" noValidate>
                 <div className="grille-champs-2">
                   <label>
                     {t('depenses.champ_de')}
-                    <select value={deMembreEffectif} onChange={(e) => setDeMembreId(e.target.value)}>
+                    <select
+                      value={deMembreEffectif}
+                      aria-invalid={erreursChamps['remb_membres'] !== undefined}
+                      onChange={(e) => setDeMembreId(e.target.value)}
+                    >
                       {actifs.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.display_name}
@@ -727,7 +847,11 @@ export function SectionDepenses({
                   </label>
                   <label>
                     {t('depenses.champ_vers')}
-                    <select value={versMembreEffectif} onChange={(e) => setVersMembreId(e.target.value)}>
+                    <select
+                      value={versMembreEffectif}
+                      aria-invalid={erreursChamps['remb_membres'] !== undefined}
+                      onChange={(e) => setVersMembreId(e.target.value)}
+                    >
                       {actifs.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.display_name}
@@ -736,6 +860,11 @@ export function SectionDepenses({
                     </select>
                   </label>
                 </div>
+                {erreursChamps['remb_membres'] !== undefined && (
+                  <p className="erreur-champ" role="alert">
+                    {erreursChamps['remb_membres']}
+                  </p>
+                )}
                 <div className="grille-champs-2">
                   <label>
                     {t('depenses.champ_montant')}
@@ -746,8 +875,15 @@ export function SectionDepenses({
                       value={montantRembSaisi}
                       onChange={(e) => setMontantRembSaisi(e.target.value)}
                       placeholder={t('depenses.exemple_montant')}
+                      aria-invalid={erreursChamps['remb_montant'] !== undefined}
+                      aria-describedby={erreursChamps['remb_montant'] !== undefined ? 'err-remb-montant' : undefined}
                       required
                     />
+                    {erreursChamps['remb_montant'] !== undefined && (
+                      <p id="err-remb-montant" className="erreur-champ" role="alert">
+                        {erreursChamps['remb_montant']}
+                      </p>
+                    )}
                   </label>
                   <label>
                     {t('depenses.champ_devise')}
@@ -776,8 +912,15 @@ export function SectionDepenses({
                       value={tauxRembSaisi}
                       onChange={(e) => setTauxRembSaisi(e.target.value)}
                       placeholder={t('depenses.exemple_montant')}
+                      aria-invalid={erreursChamps['remb_taux'] !== undefined}
+                      aria-describedby={erreursChamps['remb_taux'] !== undefined ? 'err-remb-taux' : undefined}
                       required
                     />
+                    {erreursChamps['remb_taux'] !== undefined && (
+                      <p id="err-remb-taux" className="erreur-champ" role="alert">
+                        {erreursChamps['remb_taux']}
+                      </p>
+                    )}
                   </label>
                 )}
                 <label>
@@ -815,56 +958,87 @@ export function SectionDepenses({
                 )}
               </div>
             ) : (
-              <ul className="liste-elements">
-                {depenses.map((d) => {
-                  const peutSupprimer =
-                    !estCloture &&
-                    (d.created_by_membership_id === groupe.mon_appartenance_id ||
-                      d.payer_membership_id === groupe.mon_appartenance_id ||
-                      groupe.mon_role === 'admin');
-                  return (
-                    <li key={d.id} className="ligne ligne-depense">
-                      <span className="depense-icone-rond" aria-hidden="true">
-                        <IconeRecu className="icone-mini" />
-                      </span>
-                      <div className="ligne-principale">
-                        <span className="ligne-titre">{d.label}</span>
-                        <span className="ligne-meta">
-                          {t('depenses.paye_par_date', {
-                            nom: nomDe(d.payer_membership_id),
-                            date: formaterDateJour(d.spent_on),
-                          })}
-                        </span>
-                      </div>
-                      <div className="ligne-depense-droite">
-                        <div className="montant-depense-pile">
-                          <span className="montant-depense">
-                            {formaterMontant(d.amount_minor, d.currency_code, devises)}
-                          </span>
-                          {d.currency_code !== d.target_currency_code && (
-                            <span className="ligne-meta">
-                              {t('depenses.converti_info', {
-                                montant_cible: formaterMontant(d.amount_target_minor, d.target_currency_code, devises),
-                              })}
-                            </span>
-                          )}
-                        </div>
-                        {peutSupprimer && (
-                          <button
-                            type="button"
-                            className="bouton-icone-discret"
-                            aria-label={`${t('depenses.supprimer')} ${d.label}`}
-                            disabled={soumSuppression.enCours}
-                            onClick={() => setConfirmation({ type: 'supprimer', depense: d })}
-                          >
-                            <IconePoubelle className="icone-mini" />
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+              <>
+                {(() => {
+                  const tranche = depenses.slice(0, limiteDepenses);
+                  const groupesMois: Array<{ readonly mois: string; readonly items: Depense[] }> = [];
+                  for (const d of tranche) {
+                    const mois = d.spent_on.slice(0, 7);
+                    const dernier = groupesMois[groupesMois.length - 1];
+                    if (dernier !== undefined && dernier.mois === mois) {
+                      dernier.items.push(d);
+                    } else {
+                      groupesMois.push({ mois, items: [d] });
+                    }
+                  }
+                  return groupesMois.map((gm) => (
+                    <div key={gm.mois} className="groupe-mois-depenses">
+                      <h4 className="sous-titre-compact">{formaterMoisAnnee(gm.mois)}</h4>
+                      <ul className="liste-elements">
+                        {gm.items.map((d) => {
+                          const peutSupprimer =
+                            !estCloture &&
+                            (d.created_by_membership_id === groupe.mon_appartenance_id ||
+                              d.payer_membership_id === groupe.mon_appartenance_id ||
+                              groupe.mon_role === 'admin');
+                          return (
+                            <li key={d.id} className="ligne ligne-depense">
+                              <span className="depense-icone-rond" aria-hidden="true">
+                                <IconeRecu className="icone-mini" />
+                              </span>
+                              <div className="ligne-principale">
+                                <span className="ligne-titre">{d.label}</span>
+                                <span className="ligne-meta">
+                                  {t('depenses.paye_par_date', {
+                                    nom: nomDe(d.payer_membership_id),
+                                    date: formaterDateJour(d.spent_on),
+                                  })}
+                                </span>
+                              </div>
+                              <div className="ligne-depense-droite">
+                                <div className="montant-depense-pile">
+                                  <span className="montant-depense">
+                                    {formaterMontant(d.amount_minor, d.currency_code, devises)}
+                                  </span>
+                                  {d.currency_code !== d.target_currency_code && (
+                                    <span className="ligne-meta">
+                                      {t('depenses.converti_info', {
+                                        montant_cible: formaterMontant(d.amount_target_minor, d.target_currency_code, devises),
+                                      })}
+                                    </span>
+                                  )}
+                                </div>
+                                {peutSupprimer && (
+                                  <button
+                                    type="button"
+                                    className="bouton-icone-discret"
+                                    aria-label={`${t('depenses.supprimer')} ${d.label}`}
+                                    disabled={soumSuppression.enCours}
+                                    onClick={() => setConfirmation({ type: 'supprimer', depense: d })}
+                                  >
+                                    <IconePoubelle className="icone-mini" />
+                                  </button>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ));
+                })()}
+                {depenses.length > limiteDepenses && (
+                  <p className="barre-compacte">
+                    <button
+                      type="button"
+                      className="bouton-compact"
+                      onClick={() => setLimiteDepenses((n) => n + 20)}
+                    >
+                      {t('depenses.voir_plus', { reste: String(depenses.length - limiteDepenses) })}
+                    </button>
+                  </p>
+                )}
+              </>
             )}
           </div>
 
@@ -888,58 +1062,92 @@ export function SectionDepenses({
                   </button>
                 </div>
               ) : (
-                <ul className="liste-elements">
-                  {remboursements.map((r) => {
-                    const confirme = r.confirmed_by_membership_id !== null;
-                    const statut = t(confirme ? 'depenses.statut_confirme' : 'depenses.statut_en_attente');
-                    const montant = formaterMontant(r.amount_minor, r.currency_code, devises);
-                    return (
-                      <li key={r.id} className="ligne">
-                        <div className="ligne-principale">
-                          <span className="ligne-titre">
-                            {r.method_note !== null
-                              ? t('depenses.remboursement_ligne_note', {
-                                  de: nomDe(r.from_membership_id),
-                                  vers: nomDe(r.to_membership_id),
-                                  montant,
-                                  statut,
-                                  note: r.method_note,
-                                })
-                              : t('depenses.remboursement_ligne', {
-                                  de: nomDe(r.from_membership_id),
-                                  vers: nomDe(r.to_membership_id),
-                                  montant,
-                                  statut,
-                                })}
-                          </span>
-                        </div>
-                        <div className="ligne-actions-discretes">
-                          <span className={`pilule${confirme ? ' pilule-statut-yes' : ' pilule-statut-maybe'}`}>
-                            {statut}
-                          </span>
-                          {!estCloture && !confirme && r.to_membership_id === groupe.mon_appartenance_id && (
-                            <button
-                              type="button"
-                              className="bouton-compact"
-                              aria-label={`${t('depenses.confirmer')} ${nomDe(r.from_membership_id)} → ${nomDe(r.to_membership_id)}`}
-                              disabled={soumRecu.enCours}
-                              onClick={() =>
-                                setConfirmation({
-                                  type: 'recu',
-                                  remboursement: r,
-                                  montant,
-                                  nom: nomDe(r.from_membership_id),
-                                })
-                              }
-                            >
-                              {soumRecu.enCours ? t('commun.enregistrement') : t('depenses.confirmer')}
-                            </button>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <>
+                  <ul className="liste-elements">
+                    {remboursements.slice(0, limiteRemboursements).map((r) => {
+                      const confirme = r.confirmed_by_membership_id !== null;
+                      const statut = t(confirme ? 'depenses.statut_confirme' : 'depenses.statut_en_attente');
+                      const montant = formaterMontant(r.amount_minor, r.currency_code, devises);
+                      const peutAnnuler =
+                        !estCloture &&
+                        !confirme &&
+                        (r.recorded_by_membership_id === groupe.mon_appartenance_id || groupe.mon_role === 'admin');
+                      return (
+                        <li key={r.id} className="ligne">
+                          <div className="ligne-principale">
+                            <span className="ligne-titre">
+                              {r.method_note !== null
+                                ? t('depenses.remboursement_ligne_note', {
+                                    de: nomDe(r.from_membership_id),
+                                    vers: nomDe(r.to_membership_id),
+                                    montant,
+                                    statut,
+                                    note: r.method_note,
+                                  })
+                                : t('depenses.remboursement_ligne', {
+                                    de: nomDe(r.from_membership_id),
+                                    vers: nomDe(r.to_membership_id),
+                                    montant,
+                                    statut,
+                                  })}
+                            </span>
+                          </div>
+                          <div className="ligne-actions-discretes">
+                            <span className={`pilule${confirme ? ' pilule-statut-yes' : ' pilule-statut-maybe'}`}>
+                              {statut}
+                            </span>
+                            {!estCloture && !confirme && r.to_membership_id === groupe.mon_appartenance_id && (
+                              <button
+                                type="button"
+                                className="bouton-compact"
+                                aria-label={`${t('depenses.confirmer')} ${nomDe(r.from_membership_id)} → ${nomDe(r.to_membership_id)}`}
+                                disabled={soumRecu.enCours}
+                                onClick={() =>
+                                  setConfirmation({
+                                    type: 'recu',
+                                    remboursement: r,
+                                    montant,
+                                    nom: nomDe(r.from_membership_id),
+                                  })
+                                }
+                              >
+                                {soumRecu.enCours ? t('commun.enregistrement') : t('depenses.confirmer')}
+                              </button>
+                            )}
+                            {peutAnnuler && (
+                              <button
+                                type="button"
+                                className="bouton-compact"
+                                aria-label={`${t('depenses.annuler_remboursement')} ${nomDe(r.from_membership_id)} → ${nomDe(r.to_membership_id)}`}
+                                disabled={soumSuppression.enCours}
+                                onClick={() =>
+                                  setConfirmation({
+                                    type: 'annuler_remb',
+                                    remboursement: r,
+                                    montant,
+                                  })
+                                }
+                              >
+                                {t('depenses.annuler_remboursement')}
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {remboursements.length > limiteRemboursements && (
+                    <p className="barre-compacte">
+                      <button
+                        type="button"
+                        className="bouton-compact"
+                        onClick={() => setLimiteRemboursements((n) => n + 15)}
+                      >
+                        {t('depenses.voir_plus', { reste: String(remboursements.length - limiteRemboursements) })}
+                      </button>
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}

@@ -21,8 +21,11 @@ const VUES: readonly Vue[] = ['liste', 'semaine', 'mois'];
 const lienEvenement = (groupId: string, id: string): string => `#/groupe/${encodeURIComponent(groupId)}/evenement/${encodeURIComponent(id)}`;
 
 /** Fenêtre à demander au serveur : la grille affichée, élargie d'un jour (les jours sont lus dans le fuseau de l'événement, la fenêtre en UTC). */
-function fenetre(vue: Vue, ancre: string): { du: string; au?: string } {
-  if (vue === 'liste') return { du: aujourdhui() };
+function fenetre(vue: Vue, ancre: string, joursListe: number): { du: string; au?: string } {
+  if (vue === 'liste') {
+    const debut = aujourdhui();
+    return { du: debut, au: ajouterJours(debut, joursListe) };
+  }
   const jours = vue === 'mois' ? grilleMois(ancre).flat() : joursDeSemaine(ancre);
   return { du: ajouterJours(jours[0] ?? ancre, -1), au: ajouterJours(jours[jours.length - 1] ?? ancre, 1) };
 }
@@ -49,6 +52,7 @@ function LigneDisponibilite({ d }: { d: DisponibiliteMembre }) {
 export function Agenda({ groupId }: { groupId: string }) {
   const [vue, setVue] = useState<Vue>(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'liste' : 'mois'));
   const [ancre, setAncre] = useState(aujourdhui);
+  const [joursListe, setJoursListe] = useState(30);
   const [evenements, setEvenements] = useState<Evenement[]>([]);
   const [disponibilites, setDisponibilites] = useState<DisponibiliteMembre[]>([]);
   // Choix de l'utilisateur, tant qu'il n'en a pas fait : la valeur par défaut du groupe (contexte).
@@ -60,7 +64,7 @@ export function Agenda({ groupId }: { groupId: string }) {
   useEffect(() => {
     setErreur(null);
     let abandonne = false;
-    const f = fenetre(vue, ancre);
+    const f = fenetre(vue, ancre, joursListe);
     Promise.all([listerEvenements(groupId, f), listerDisponibilitesGroupe(groupId, f)])
       .then(([lus, dispos]) => {
         if (!abandonne) {
@@ -74,7 +78,7 @@ export function Agenda({ groupId }: { groupId: string }) {
     return () => {
       abandonne = true;
     };
-  }, [groupId, vue, ancre]);
+  }, [groupId, vue, ancre, joursListe]);
 
   const modifierVisibilite = (nouvelle: VisibilitePartage): void => {
     setErreur(null);
@@ -172,21 +176,29 @@ export function Agenda({ groupId }: { groupId: string }) {
             </div>
             {grilleMois(ancre).map((ligne) => (
               <div key={ligne[0]} className="grille-ligne" role="row">
-                {ligne.map((jour) => (
-                  <div
-                    key={jour}
-                    role="cell"
-                    className={`grille-jour${jour.slice(0, 7) === ancre.slice(0, 7) ? '' : ' hors-mois'}${jour === aujourdhui() ? ' aujourdhui' : ''}`}
-                  >
-                    <span className="numero">{Number(jour.slice(8))}</span>
-                    {(parJour.get(jour) ?? []).map((e) => (
-                      <LigneEvenement key={e.id} groupId={groupId} e={e} court />
-                    ))}
-                    {(disposParJour.get(jour) ?? []).map((d) => (
-                      <LigneDisponibilite key={`${d.id}-${d.membership_id}`} d={d} />
-                    ))}
-                  </div>
-                ))}
+                {ligne.map((jour) => {
+                  const disposJour = disposParJour.get(jour) ?? [];
+                  const disposVisibles = disposJour.slice(0, 2);
+                  const resteDispos = disposJour.length - disposVisibles.length;
+                  return (
+                    <div
+                      key={jour}
+                      role="cell"
+                      className={`grille-jour${jour.slice(0, 7) === ancre.slice(0, 7) ? '' : ' hors-mois'}${jour === aujourdhui() ? ' aujourdhui' : ''}`}
+                    >
+                      <span className="numero">{Number(jour.slice(8))}</span>
+                      {(parJour.get(jour) ?? []).map((e) => (
+                        <LigneEvenement key={e.id} groupId={groupId} e={e} court />
+                      ))}
+                      {disposVisibles.map((d) => (
+                        <LigneDisponibilite key={`${d.id}-${d.membership_id}`} d={d} />
+                      ))}
+                      {resteDispos > 0 && (
+                        <span className="discret ligne-meta">{t('agenda.plus_autres', { count: String(resteDispos) })}</span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -228,6 +240,11 @@ export function Agenda({ groupId }: { groupId: string }) {
                 </li>
               ))}
             </ul>
+            <p className="barre-compacte">
+              <button type="button" className="bouton-compact" onClick={() => setJoursListe((n) => n + 30)}>
+                {t('agenda.jours_suivants')}
+              </button>
+            </p>
           </>
         )}
       </div>

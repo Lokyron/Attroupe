@@ -199,6 +199,7 @@ export const REGISTRE: readonly EntreeRoute[] = [
   // --- Le groupe (appartenance obligatoire, posée une fois sur le préfixe) ----------------------------------------
   { methode: 'GET', chemin: '/api/groupes/:groupId', exige: 'appartenance' },
   { methode: 'PATCH', chemin: '/api/groupes/:groupId', exige: 'admin', corps: { name: 'Nouveau nom' } },
+  { methode: 'DELETE', chemin: '/api/groupes/:groupId', exige: 'admin' },
   { methode: 'GET', chemin: '/api/groupes/:groupId/membres', exige: 'appartenance' },
   { methode: 'PATCH', chemin: '/api/groupes/:groupId/membres/:membreId', exige: 'admin', ressources: { membreId: 'membre' }, corps: { role: 'admin' } },
   { methode: 'DELETE', chemin: '/api/groupes/:groupId/membres/:membreId', exige: 'admin', ressources: { membreId: 'membre' } },
@@ -309,6 +310,7 @@ export const REGISTRE: readonly EntreeRoute[] = [
     ressourcesCorps: { event_id: 'evenement', from_membership_id: 'membre', to_membership_id: 'membreAutre' },
   },
   { methode: 'POST', chemin: '/api/groupes/:groupId/remboursements/:remboursementId/confirmation', exige: 'appartenance', droitFin: 'droit.beneficiaire_requis', ressources: { remboursementId: 'remboursement' } },
+  { methode: 'DELETE', chemin: '/api/groupes/:groupId/remboursements/:remboursementId', exige: 'appartenance', droitFin: 'droit.auteur_requis', ressources: { remboursementId: 'remboursement' } },
   { methode: 'POST', chemin: '/api/groupes/:groupId/evenements/:evenementId/cloture', exige: 'organisateur', ressources: { evenementId: 'evenement' } },
   { methode: 'DELETE', chemin: '/api/groupes/:groupId/evenements/:evenementId/cloture', exige: 'organisateur', ressources: { evenementId: 'evenement' } },
 

@@ -9,6 +9,7 @@ import {
   listerRemboursementsService,
   modifierDepenseService,
   supprimerDepenseService,
+  supprimerRemboursementService,
 } from '../../services/depenses.js';
 import type { Contexte } from '../contexte.js';
 import { scopeDe } from '../middleware/appartenance.js';
@@ -71,6 +72,11 @@ export function routesRemboursements(contexte: Contexte): Router {
 
   routeur.post('/:remboursementId/confirmation', (req, res) => {
     res.json(confirmerRemboursementService(contexte, scopeDe(req), parametre(req, 'remboursementId')));
+  });
+
+  routeur.delete('/:remboursementId', (req, res) => {
+    supprimerRemboursementService(contexte, scopeDe(req), parametre(req, 'remboursementId'));
+    res.json({ ok: true });
   });
 
   return routeur;

@@ -1,7 +1,10 @@
 import { grilleMois } from '../../agenda/dates';
 import { libelleJourCourt } from '../../agenda/format';
+import { t } from '../../i18n';
 import { libellePastilleCalendrier } from './formats';
 import { lienElementCalendrier, type CouleurGroupe, type ElementCalendrier } from './selecteurs';
+
+const MAX_ELEMENTS_CELLULE = 3;
 
 export function GrilleMois({
   ancre,
@@ -35,20 +38,30 @@ export function GrilleMois({
               className={`grille-jour${jour.slice(0, 7) === ancre.slice(0, 7) ? '' : ' hors-mois'}${jour === jourActuel ? ' aujourdhui' : ''}`}
             >
               <span className="numero">{Number(jour.slice(8))}</span>
-              {(parJour.get(jour) ?? []).map((el) => {
-                const libelle = libellePastilleCalendrier(el);
-                const couleur = el.sorte === 'perso' ? 'violet' : (couleurParGroupe.get(el.group_id) ?? 'indigo');
+              {(() => {
+                const duJour = parJour.get(jour) ?? [];
+                const visibles = duJour.slice(0, MAX_ELEMENTS_CELLULE);
+                const reste = duJour.length - visibles.length;
                 return (
-                  <a
-                    key={`${el.sorte}-${el.id}`}
-                    href={lienElementCalendrier(el)}
-                    className={`evenement ${el.sorte === 'groupe' ? 'evenement-groupe' : 'evenement-perso'} bordure-${couleur}`}
-                    title={libelle}
-                  >
-                    {libelle}
-                  </a>
+                  <>
+                    {visibles.map((el) => {
+                      const libelle = libellePastilleCalendrier(el);
+                      const couleur = el.sorte === 'perso' ? 'violet' : (couleurParGroupe.get(el.group_id) ?? 'indigo');
+                      return (
+                        <a
+                          key={`${el.sorte}-${el.id}`}
+                          href={lienElementCalendrier(el)}
+                          className={`evenement ${el.sorte === 'groupe' ? 'evenement-groupe' : 'evenement-perso'} bordure-${couleur}`}
+                          title={libelle}
+                        >
+                          {libelle}
+                        </a>
+                      );
+                    })}
+                    {reste > 0 && <span className="discret ligne-meta">{t('agenda.plus_autres', { count: String(reste) })}</span>}
+                  </>
                 );
-              })}
+              })()}
             </div>
           ))}
         </div>

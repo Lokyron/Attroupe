@@ -3,6 +3,16 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-20 — Fin de la phase 2 et levée des trois dettes bloquantes
+
+- **Trois dettes bloquantes soldées** : lecture de `notification_preferences.muted_kinds` dans `notifierMembresGroupe`, notifications sur `modifierDepenseService` (`expense_updated`), `supprimerDepenseService` (`expense_deleted`), `creerRemboursementService` (`settlement_created`) et `confirmerRemboursementService` (`settlement_confirmed`), avec migration `0006_notifications_reglement.sql` (reconstruction de `notifications`).
+- **Fin de la phase 2** :
+  - **Remboursements actionnables et validation champ par champ** (`Depenses.tsx`, `DELETE /api/groupes/:g/remboursements/:id`).
+  - **Sortie du type de liste hors du titre** (`0007_listes_type.sql`, colonne `shopping_lists.kind`).
+  - **Paramètres et suppression de groupe** (`PATCH` et `DELETE /api/groupes/:g` dans `Groupe.tsx`).
+  - **Pagination / bornage des listes** : dépenses (regroupées par mois + « Voir plus »), règlements, vue liste de l'agenda (fenêtre de 30 jours), grille du mois (`+N autre(s)`), créneaux passés repliés dans `Compte.tsx`, et notifications.
+- **Vérifié** : `npm run typecheck`, `npm run lint`, `npm run build` verts ; 862 tests schéma + unité, 460 tests de cloisonnement (dont les 2 nouvelles routes `DELETE`), 431 tests d'intégration.
+
 ## 2026-11-20 — Audit de l'interface, puis trois phases de remise à niveau
 
 L'interface n'avait jamais été auditée, et jamais ouverte dans un navigateur avant la bêta. Un audit complet

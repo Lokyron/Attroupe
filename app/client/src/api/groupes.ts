@@ -215,6 +215,17 @@ export async function quitterGroupe(groupId: string): Promise<void> {
   await appeler('POST', `/api/groupes/${encodeURIComponent(groupId)}/depart`, {});
 }
 
+export async function modifierGroupe(
+  groupId: string,
+  champs: { name?: string; default_currency_code?: string; time_zone?: string },
+): Promise<void> {
+  await appeler('PATCH', `/api/groupes/${encodeURIComponent(groupId)}`, champs);
+}
+
+export async function supprimerGroupe(groupId: string): Promise<void> {
+  await appeler('DELETE', `/api/groupes/${encodeURIComponent(groupId)}`);
+}
+
 export async function listerInvitationsEmises(groupId: string): Promise<InvitationEmise[]> {
   const r = await appeler('GET', `/api/groupes/${encodeURIComponent(groupId)}/invitations`);
   return liste(champ(r, 'invitations')).map((i) => {

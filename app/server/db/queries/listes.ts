@@ -8,10 +8,13 @@ import type { GroupScope } from '../scope.js';
 // tranche, et `false` veut dire « quelqu'un a été plus rapide ». Jamais « je lis, puis j'écris » : c'est la seule forme qui reste
 // juste quand huit personnes cochent en même temps.
 
+export type TypeListe = 'courses' | 'affaires' | 'taches';
+
 const ligneListe = z.object({
   id: z.string(),
   event_id: z.string().nullable(),
   title: z.string(),
+  kind: z.enum(['courses', 'affaires', 'taches']),
   created_by_membership_id: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -59,12 +62,26 @@ export function listerListes(scope: GroupScope, eventId?: string): Liste[] {
   return scope.tous<unknown>('shopping_lists', filtres, { ordre: [{ colonne: 'created_at' }, { colonne: 'id' }] }).map((ligne) => ligneListe.parse(ligne));
 }
 
-export function creerListe(scope: GroupScope, champs: { readonly title: string; readonly event_id: string | null }): string {
-  return scope.inserer('shopping_lists', { title: champs.title, event_id: champs.event_id });
+export function creerListe(
+  scope: GroupScope,
+  champs: { readonly title: string; readonly event_id: string | null; readonly kind?: TypeListe },
+): string {
+  return scope.inserer('shopping_lists', {
+    title: champs.title,
+    event_id: champs.event_id,
+    kind: champs.kind ?? 'courses',
+  });
 }
 
-export function renommerListe(scope: GroupScope, listeId: string, title: string): boolean {
-  return scope.modifier('shopping_lists', listeId, { title });
+export function renommerListe(
+  scope: GroupScope,
+  listeId: string,
+  champs: { readonly title?: string | undefined; readonly kind?: TypeListe | undefined },
+): boolean {
+  return scope.modifier('shopping_lists', listeId, {
+    ...(champs.title !== undefined ? { title: champs.title } : {}),
+    ...(champs.kind !== undefined ? { kind: champs.kind } : {}),
+  });
 }
 
 /**

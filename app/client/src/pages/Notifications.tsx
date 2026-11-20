@@ -31,6 +31,7 @@ export function Notifications({ groupes, onChange }: { groupes: GroupeResume[]; 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [nonLues, setNonLues] = useState(0);
   const [preferences, setPreferences] = useState<PreferenceNotification[]>([]);
+  const [limite, setLimite] = useState(20);
   const [erreur, setErreur] = useState<string | null>(null);
 
   const charger = useCallback((): void => {
@@ -92,37 +93,46 @@ export function Notifications({ groupes, onChange }: { groupes: GroupeResume[]; 
       {notifications.length === 0 ? (
         <p>{t('notifications.aucune')}</p>
       ) : (
-        <ul>
-          {notifications.map((n) => {
-            const lien = lienNotification(n);
-            const lue = n.read_at !== null;
-            return (
-              <li key={n.id}>
-                <span>
-                  {t('notifications.ligne', {
-                    marque: lue ? '' : '● ',
-                    groupe: n.group_name ?? t('notifications.groupe_inconnu'),
-                    date: horodatage(n.created_at),
-                  })}
-                </span>
-                {lien !== null && (
-                  <>
-                    {' '}
-                    <a href={lien}>{t('notifications.ouvrir')}</a>
-                  </>
-                )}
-                {!lue && (
-                  <>
-                    {' '}
-                    <button type="button" onClick={() => marquerUneLue(n.id)}>
-                      {t('notifications.marquer_lue')}
-                    </button>
-                  </>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <ul>
+            {notifications.slice(0, limite).map((n) => {
+              const lien = lienNotification(n);
+              const lue = n.read_at !== null;
+              return (
+                <li key={n.id}>
+                  <span>
+                    {t('notifications.ligne', {
+                      marque: lue ? '' : '● ',
+                      groupe: n.group_name ?? t('notifications.groupe_inconnu'),
+                      date: horodatage(n.created_at),
+                    })}
+                  </span>
+                  {lien !== null && (
+                    <>
+                      {' '}
+                      <a href={lien}>{t('notifications.ouvrir')}</a>
+                    </>
+                  )}
+                  {!lue && (
+                    <>
+                      {' '}
+                      <button type="button" onClick={() => marquerUneLue(n.id)}>
+                        {t('notifications.marquer_lue')}
+                      </button>
+                    </>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {notifications.length > limite && (
+            <p className="barre-compacte">
+              <button type="button" className="bouton-compact" onClick={() => setLimite((n) => n + 20)}>
+                {t('notifications.voir_plus', { reste: String(notifications.length - limite) })}
+              </button>
+            </p>
+          )}
+        </>
       )}
 
       <h3>{t('notifications.preferences_titre')}</h3>

@@ -4,7 +4,13 @@ import { creerPorteeUtilisateur } from '../../server/db/portee-utilisateur.js';
 import { creerScope, type GroupScope } from '../../server/db/scope.js';
 import type { Contexte } from '../../server/http/contexte.js';
 import { JOURNAL_SILENCIEUX } from '../../server/http/middleware/journal.js';
-import { creerDepenseService } from '../../server/services/depenses.js';
+import {
+  confirmerRemboursementService,
+  creerDepenseService,
+  creerRemboursementService,
+  modifierDepenseService,
+  supprimerDepenseService,
+} from '../../server/services/depenses.js';
 import { creerEvenement } from '../../server/services/evenements.js';
 import { libelleNotificationPush } from '../../server/services/notifications.js';
 import { DiffuseurTempsReel } from '../../server/services/temps-reel.js';
@@ -259,5 +265,85 @@ describe('notifications d’événement et de dépense (unité)', () => {
   it('le texte du Web Push vient de i18n/fr.json et ne dit rien du contenu', () => {
     expect(libelleNotificationPush('event_created', {})).toBe('Nouvel événement dans le groupe');
     expect(libelleNotificationPush('expense_added', {})).toBe('Une dépense vous concerne');
+    expect(libelleNotificationPush('expense_updated', {})).toBe('Une dépense qui vous concerne a été modifiée');
+    expect(libelleNotificationPush('expense_deleted', {})).toBe('Une dépense qui vous concerne a été supprimée');
+    expect(libelleNotificationPush('settlement_created', {})).toBe('Un règlement attend votre confirmation');
+    expect(libelleNotificationPush('settlement_confirmed', {})).toBe('Votre règlement a été confirmé');
+  });
+
+  it('muted_kinds coupe une catégorie de notification sans couper les autres (groupe prime sur global)', () => {
+    // Carole coupe expense_added au niveau global ('*')
+    t.sql
+      .prepare(
+        `INSERT INTO notification_preferences (user_id, group_id, channel_email, digest, muted_kinds, created_at, updated_at)
+         VALUES (?, '*', 1, 'instant', '["expense_added"]', ?, ?)`,
+      )
+      .run(carole.userId, T0, T0);
+    // Erin coupe expense_added au niveau global, mais le réactive (tableau vide) pour le groupe A
+    t.sql
+      .prepare(
+        `INSERT INTO notification_preferences (user_id, group_id, channel_email, digest, muted_kinds, created_at, updated_at)
+         VALUES (?, '*', 1, 'instant', '["expense_added"]', ?, ?),
+                (?, ?, 1, 'instant', '[]', ?, ?)`,
+      )
+      .run(erin.userId, T0, T0, erin.userId, d.a.groupId, T0, T0);
+
+    depense(d.scopeA, d.a.membershipId, [{ membership_id: carole.membershipId }, { membership_id: erin.membershipId }]);
+    expect(nonLues(carole.userId)).toBe(0);
+    expect(nonLues(erin.userId)).toBe(1);
+    expect(emails().filter((e) => e.to_email === 'carole@exemple.test')).toHaveLength(0);
+
+    // Un événement reste bien notifié à Carole
+    creerEvenement(contexte, d.scopeA, champsEvenement);
+    expect(nonLues(carole.userId)).toBe(1);
+  });
+
+  it('modifier et supprimer une dépense notifient les membres concernés (anciens et nouveaux)', () => {
+    const creee = depense(d.scopeA, d.a.membershipId, [{ membership_id: carole.membershipId }]);
+    expect(nonLues(carole.userId)).toBe(1);
+    expect(nonLues(erin.userId)).toBe(0);
+
+    // Alice retire Carole et ajoute Erin : les deux sont prévenues de la modification
+    modifierDepenseService(contexte, d.scopeA, creee.id, {
+      shares: [{ membership_id: erin.membershipId }],
+    });
+    expect(nonLues(carole.userId)).toBe(2);
+    expect(nonLues(erin.userId)).toBe(1);
+    const notifModif = listerMesNotifications(creerPorteeUtilisateur(t.base, erin.userId)).notifications[0];
+    expect(notifModif).toMatchObject({ kind: 'expense_updated', subject_type: 'expense', subject_id: creee.id });
+
+    // Alice supprime la dépense : Erin (concernée au moment de la suppression) est notifiée
+    supprimerDepenseService(contexte, d.scopeA, creee.id);
+    expect(nonLues(erin.userId)).toBe(2);
+    const notifSuppr = listerMesNotifications(creerPorteeUtilisateur(t.base, erin.userId)).notifications[0];
+    expect(notifSuppr).toMatchObject({ kind: 'expense_deleted', subject_type: 'expense', subject_id: creee.id });
+  });
+
+  it('créer puis confirmer un règlement notifient respectivement le bénéficiaire puis le payeur', () => {
+    const reglement = creerRemboursementService(contexte, d.scopeA, {
+      event_id: null,
+      from_membership_id: d.a.membershipId,
+      to_membership_id: carole.membershipId,
+      amount_minor: 5000,
+      currency_code: 'EUR',
+      settled_on: '2027-03-01',
+      method_note: null,
+    });
+    expect(nonLues(carole.userId)).toBe(1);
+    expect(nonLues(d.a.userId)).toBe(0);
+    expect(listerMesNotifications(creerPorteeUtilisateur(t.base, carole.userId)).notifications[0]).toMatchObject({
+      kind: 'settlement_created',
+      subject_type: 'settlement',
+      subject_id: reglement.id,
+    });
+
+    const scopeCarole = creerScope(t.base, carole.userId, d.a.groupId);
+    confirmerRemboursementService(contexte, scopeCarole, reglement.id);
+    expect(nonLues(d.a.userId)).toBe(1);
+    expect(listerMesNotifications(creerPorteeUtilisateur(t.base, d.a.userId)).notifications[0]).toMatchObject({
+      kind: 'settlement_confirmed',
+      subject_type: 'settlement',
+      subject_id: reglement.id,
+    });
   });
 });

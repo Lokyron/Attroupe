@@ -37,7 +37,7 @@ export function routesListes(contexte: Contexte): Router {
   });
 
   routeur.patch('/:listeId', (req, res) => {
-    res.json(renommerListe(contexte, scopeDe(req), parametre(req, 'listeId'), analyser(schemaRenommageListe, req.body).title));
+    res.json(renommerListe(contexte, scopeDe(req), parametre(req, 'listeId'), analyser(schemaRenommageListe, req.body)));
   });
 
   // Suppression logique : la liste et ses articles disparaissent ensemble.

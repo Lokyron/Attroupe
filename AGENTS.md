@@ -190,30 +190,23 @@ réellement vérifié par opposition à ce que tu supposes.
 
 ## 9. Où on en est — état au 20 novembre 2026
 
-Branche de travail : `beta`, propre et synchronisée. Quatre commits d'audit y sont :
-`b7f00f5` (le rapport), `af189dd` (phase 1), `2fabe53` (phase 2), `c717730` (phases 2 bis et
-2 ter). Vérification verte avant commit : typecheck, lint, 1 482 tests.
+Branche de travail : `beta`. Les trois dettes bloquantes et l'ensemble de la phase 2 de l'audit
+ont été soldés. Vérification verte : `typecheck`, `lint`, `build`, et 1 753 tests verts
+(862 schéma + unité, 460 cloisonnement dont 1 ignoré préexistant, 431 intégration).
 
-**Trois dettes à traiter avant d'ouvrir au groupe réel.** Ce sont les seules qui bloquent.
-
-1. **`notification_preferences.muted_kinds` n'est lue nulle part.** Elle existe en base, elle est
-   écrite à `[]`, personne ne la lit. Tant qu'un seul genre de notification était émis, sans
-   conséquence ; il y en a trois maintenant. Un trésorier qui saisit 30 dépenses un dimanche soir
-   envoie 30 notifications, 30 pushs et 30 e-mails à chaque participant, et le seul levier est
-   tout ou rien — la réaction prévisible est de tout couper, messages compris. Minimum utile :
-   lire `muted_kinds` dans `notifierMembresGroupe` **après** le filtre SQL, sans changer de schéma.
-2. **`modifierDepenseService`, `supprimerDepenseService`, `creerRemboursementService` et
-   `confirmerRemboursementService` font bouger les soldes en silence.** Une part qui passe de 0 à
-   50 € par modification ne prévient personne. Même critère que la création, qui notifie désormais.
-3. **La notification de règlement demande une migration qui reconstruit une table.** Un `CHECK`
-   SQLite ne s'altère pas : il faut une migration 0006 en table neuve + `INSERT … SELECT` + `DROP`
-   + `RENAME`, environ 8 fichiers. Aucune migration du projet n'a encore fait ça. Le risque est un
-   `INSERT … SELECT` qui oublie une colonne et perd des données sans bruit. Et
-   `app/tests/schema/migrations.test.ts:101` liste les versions attendues en dur (voir §3, défaut 4).
-
-**Ce qui reste de la phase 2** : validation champ par champ des dépenses, pagination des six
-listes non bornées, suppression de groupe, remboursements actionnables, sortie du type de liste
-hors du titre (changement de schéma serveur).
+**Ce qui a été livré depuis `678ec6f`** :
+1. **`muted_kinds` lue dans `notifierMembresGroupe`** après le filtre SQL (`app/server/db/queries/notifications.ts`).
+2. **Notifications sur les mouvements de solde** : `modifierDepenseService` (`expense_updated`),
+   `supprimerDepenseService` (`expense_deleted`), `creerRemboursementService`
+   (`settlement_created`) et `confirmerRemboursementService` (`settlement_confirmed`).
+3. **Migration `0006_notifications_reglement.sql`** (reconstruction de `notifications` avec
+   extension des `CHECK`) et **migration `0007_listes_type.sql`** (colonne `shopping_lists.kind`,
+   sortie du type de liste hors du titre).
+4. **Fin de la phase 2** : validation champ par champ des dépenses et règlements (`Depenses.tsx`),
+   remboursements actionnables (préremplissage depuis les suggestions, mention explicite d'absence
+   de flux bancaire, annulation d'un règlement non confirmé via `DELETE /api/groupes/:g/remboursements/:id`),
+   paramètres et suppression de groupe (`PATCH`/`DELETE /api/groupes/:g`), et pagination/bornage
+   des listes (`Depenses.tsx`, `Agenda.tsx`, `GrilleMois.tsx`, `Compte.tsx`, `Notifications.tsx`).
 
 **Phase 3** : mode sombre — les tokens le permettent enfin, avec deux pièges déjà repérés : le
 bloc `@supports` des voiles photo doit être redéfini lui aussi, et `theme-color` est figé dans

@@ -17,7 +17,16 @@ import type { Contexte } from '../http/contexte.js';
 import { ErreurHttp } from '../http/erreurs.js';
 import { envoyerNotificationPush } from './push.js';
 
-const LIBELLES_PUSH = z.object({ event_created: z.string(), expense_added: z.string() }).parse(fr.notifications_push);
+const LIBELLES_PUSH = z
+  .object({
+    event_created: z.string(),
+    expense_added: z.string(),
+    expense_updated: z.string(),
+    expense_deleted: z.string(),
+    settlement_created: z.string(),
+    settlement_confirmed: z.string(),
+  })
+  .parse(fr.notifications_push);
 
 export function mesNotifications(portee: PorteeUtilisateur): ListeNotifications {
   return listerMesNotifications(portee);
@@ -50,6 +59,10 @@ export function libelleNotificationPush(kind: NotificationKind, payload: Readonl
   // Libellés génériques : ni titre, ni montant, ni nom (même discipline que le message, dont le texte ne part jamais).
   if (kind === 'event_created') return LIBELLES_PUSH.event_created;
   if (kind === 'expense_added') return LIBELLES_PUSH.expense_added;
+  if (kind === 'expense_updated') return LIBELLES_PUSH.expense_updated;
+  if (kind === 'expense_deleted') return LIBELLES_PUSH.expense_deleted;
+  if (kind === 'settlement_created') return LIBELLES_PUSH.settlement_created;
+  if (kind === 'settlement_confirmed') return LIBELLES_PUSH.settlement_confirmed;
   return 'Nouvelle activité dans le groupe';
 }
 

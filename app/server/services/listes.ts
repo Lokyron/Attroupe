@@ -16,6 +16,7 @@ import {
   type Article,
   type Liste,
   type ResultatArticle,
+  type TypeListe,
 } from '../db/queries/listes.js';
 import { listerMembres } from '../db/queries/membres.js';
 import type { GroupScope } from '../db/scope.js';
@@ -96,16 +97,25 @@ export function detailListe(scope: GroupScope, listeId: string): DetailListe {
   return { ...liste, articles: articlesDe(scope, liste.id).map((a) => publier(a, nomsMembres)) };
 }
 
-export function creerListe(contexte: Contexte, scope: GroupScope, champs: { title: string; event_id: string | null }): DetailListe {
+export function creerListe(
+  contexte: Contexte,
+  scope: GroupScope,
+  champs: { title: string; event_id: string | null; kind?: TypeListe },
+): DetailListe {
   if (champs.event_id !== null) verifierEvenement(scope, champs.event_id);
   const id = creerListeEnBase(scope, champs);
   contexte.diffuseur.diffuser(scope, { type: 'liste.creee', ressource: 'liste', id, parent_id: champs.event_id });
   return detailListe(scope, id);
 }
 
-export function renommerListe(contexte: Contexte, scope: GroupScope, listeId: string, title: string): DetailListe {
+export function renommerListe(
+  contexte: Contexte,
+  scope: GroupScope,
+  listeId: string,
+  champs: { readonly title?: string | undefined; readonly kind?: TypeListe | undefined },
+): DetailListe {
   const liste = trouverListe(scope, listeId);
-  if (!renommerListeEnBase(scope, liste.id, title)) throw new ErreurHttp(404, 'liste.introuvable');
+  if (!renommerListeEnBase(scope, liste.id, champs)) throw new ErreurHttp(404, 'liste.introuvable');
   contexte.diffuseur.diffuser(scope, { type: 'liste.renommee', ressource: 'liste', id: liste.id, parent_id: liste.event_id });
   return detailListe(scope, liste.id);
 }

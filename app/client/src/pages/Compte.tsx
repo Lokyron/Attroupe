@@ -439,9 +439,11 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
         </p>
       )}
       {vide && <p className="texte-doux">{t('agenda_perso.aucun')}</p>}
-      {creneaux !== null && creneaux.length > 0 && (
-        <ul className="liste-elements">
-          {creneaux.map((c) => (
+      {creneaux !== null && creneaux.length > 0 && (() => {
+        const maintenantIso = new Date().toISOString();
+        const aVenir = creneaux.filter((c) => (c.ends_at ?? c.starts_at) >= maintenantIso);
+        const passes = creneaux.filter((c) => (c.ends_at ?? c.starts_at) < maintenantIso);
+        const rendreCreneau = (c: CreneauPersonnel) => (
             <li key={c.id} className="ligne ligne-pile">
               <div className="ligne-principale">
                 {/* `ligne-principale` est une grille : une pastille posée directement dedans s'étirerait sur
@@ -484,9 +486,19 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
                 <span className="ligne-meta">{t('agenda_perso.importe_aide')}</span>
               )}
             </li>
-          ))}
-        </ul>
-      )}
+        );
+        return (
+          <>
+            {aVenir.length > 0 && <ul className="liste-elements">{aVenir.map(rendreCreneau)}</ul>}
+            {passes.length > 0 && (
+              <details className="liste-compacte-haut">
+                <summary>{t('agenda_perso.passes_titre', { count: String(passes.length) })}</summary>
+                <ul className="liste-elements">{passes.map(rendreCreneau)}</ul>
+              </details>
+            )}
+          </>
+        );
+      })()}
 
       <DialogueConfirmation
         ouvert={cible !== null}

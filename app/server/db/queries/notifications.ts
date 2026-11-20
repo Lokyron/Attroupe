@@ -26,6 +26,10 @@ export type NotificationKind =
   | 'task_assigned'
   | 'message_posted'
   | 'expense_added'
+  | 'expense_updated'
+  | 'expense_deleted'
+  | 'settlement_created'
+  | 'settlement_confirmed'
   | 'accounts_closed';
 
 export type SubjectType =
@@ -38,6 +42,7 @@ export type SubjectType =
   | 'thread'
   | 'message'
   | 'expense'
+  | 'settlement'
   | 'album';
 
 const ligneNotification = z.object({
@@ -195,17 +200,45 @@ const prefLigneCourte = z.object({
   group_id: z.string(),
   channel_email: z.union([z.literal(0), z.literal(1)]),
   digest: z.enum(['instant', 'daily', 'off']),
+  muted_kinds: z.string(),
 });
 
-function resoudreModeEmail(base: Base, userId: string, groupId: string): EmailMode {
-  const prefs = preparer(base, 'SELECT group_id, channel_email, digest FROM notification_preferences WHERE user_id = ?')
+function parserMutedKinds(brut: string): ReadonlySet<string> {
+  try {
+    const parsed: unknown = JSON.parse(brut);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((v): v is string => typeof v === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+function resoudrePreferenceNotification(
+  base: Base,
+  userId: string,
+  groupId: string,
+): { readonly emailMode: EmailMode; readonly mutedKinds: ReadonlySet<string> } {
+  const prefs = preparer(
+    base,
+    'SELECT group_id, channel_email, digest, muted_kinds FROM notification_preferences WHERE user_id = ?',
+  )
     .all(userId)
     .map((l) => prefLigneCourte.parse(l));
   const specifique = prefs.find((p) => p.group_id === groupId);
-  if (specifique !== undefined) return versEmailMode(specifique.channel_email, specifique.digest);
+  if (specifique !== undefined) {
+    return {
+      emailMode: versEmailMode(specifique.channel_email, specifique.digest),
+      mutedKinds: parserMutedKinds(specifique.muted_kinds),
+    };
+  }
   const global = prefs.find((p) => p.group_id === '*');
-  if (global !== undefined) return versEmailMode(global.channel_email, global.digest);
-  return 'immediate';
+  if (global !== undefined) {
+    return {
+      emailMode: versEmailMode(global.channel_email, global.digest),
+      mutedKinds: parserMutedKinds(global.muted_kinds),
+    };
+  }
+  return { emailMode: 'immediate', mutedKinds: new Set() };
 }
 
 export interface OptionsNotificationGroupe {
@@ -268,8 +301,9 @@ export function notifierMembresGroupe(scope: GroupScope, options: OptionsNotific
 
   const aPousser: DestinatairePush[] = [];
   for (const dest of destinataires) {
-    const mode = resoudreModeEmail(base, dest.compte_id, scope.groupId);
-    const envoiImmediat = mode === 'immediate' && dest.email_verified_at !== null;
+    const pref = resoudrePreferenceNotification(base, dest.compte_id, scope.groupId);
+    if (pref.mutedKinds.has(options.kind)) continue;
+    const envoiImmediat = pref.emailMode === 'immediate' && dest.email_verified_at !== null;
     insererNotif.run(
       nouvelIdentifiant(),
       dest.compte_id,
@@ -337,7 +371,7 @@ export function envoyerResumesQuotidiens(base: Base, baseUrl: string, maintenant
       const premier = items[0];
       if (premier === undefined) continue;
       if (heureDansFuseau(maintenantDate, premier.time_zone) < 19) continue;
-      if (resoudreModeEmail(base, premier.user_id, premier.group_id) !== 'daily') continue;
+      if (resoudrePreferenceNotification(base, premier.user_id, premier.group_id).emailMode !== 'daily') continue;
 
       const lien = new URL(`/#/groupe/${encodeURIComponent(premier.group_id)}/fils`, baseUrl).toString();
       enfilerEmail(

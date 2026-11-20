@@ -250,6 +250,10 @@ export async function confirmerRemboursement(groupId: string, remboursementId: s
   return remboursement(await appeler('POST', `${baseRemboursements(groupId)}/${encodeURIComponent(remboursementId)}/confirmation`));
 }
 
+export async function supprimerRemboursement(groupId: string, remboursementId: string): Promise<void> {
+  await appeler('DELETE', `${baseRemboursements(groupId)}/${encodeURIComponent(remboursementId)}`);
+}
+
 export async function cloturerEvenement(groupId: string, eventId: string): Promise<ResultatSoldes> {
   return resultatSoldes(await appeler('POST', `/api/groupes/${encodeURIComponent(groupId)}/evenements/${encodeURIComponent(eventId)}/cloture`));
 }

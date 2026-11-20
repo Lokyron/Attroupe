@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { creerListe, listerListes, type ResumeListe } from '../api/listes';
+import { creerListe, listerListes, type ResumeListe, type TypeListe } from '../api/listes';
 import { useRechargement } from '../api/rechargement';
 import { useGroupe, useTempsReelGroupe } from '../components/FournisseurGroupe';
 import { ChargementPage } from '../components/ChargementPage';
@@ -14,19 +14,15 @@ import { t } from '../i18n';
 
 export const lienListe = (groupId: string, listeId: string): string => `#/groupe/${encodeURIComponent(groupId)}/liste/${encodeURIComponent(listeId)}`;
 
-type TypeListe = 'courses' | 'affaires' | 'taches';
-
 function extraireTypeListe(l: ResumeListe): { readonly cleType: string; readonly titrePropre: string } {
   if (l.event_id !== null) {
     return { cleType: t('listes.badge_evenement'), titrePropre: l.title };
   }
-  const prefixAffaires = `${t('listes.type_affaires')} : `;
-  if (l.title.startsWith(prefixAffaires)) {
-    return { cleType: t('listes.type_affaires'), titrePropre: l.title.slice(prefixAffaires.length) };
+  if (l.kind === 'affaires') {
+    return { cleType: t('listes.type_affaires'), titrePropre: l.title };
   }
-  const prefixTaches = `${t('listes.type_taches')} : `;
-  if (l.title.startsWith(prefixTaches)) {
-    return { cleType: t('listes.type_taches'), titrePropre: l.title.slice(prefixTaches.length) };
+  if (l.kind === 'taches') {
+    return { cleType: t('listes.type_taches'), titrePropre: l.title };
   }
   return { cleType: t('listes.type_courses'), titrePropre: l.title };
 }
@@ -64,15 +60,8 @@ export function Listes({ groupId }: { groupId: string }) {
     evt.preventDefault();
     const net = titre.trim();
     if (net === '') return;
-    const prefixe =
-      typeListe === 'affaires'
-        ? `${t('listes.type_affaires')} : `
-        : typeListe === 'taches'
-          ? `${t('listes.type_taches')} : `
-          : '';
-    const titreComplet = `${prefixe}${net}`.slice(0, 120);
     lancer(() =>
-      creerListe(groupId, titreComplet, null).then((l) => {
+      creerListe(groupId, net, null, typeListe).then((l) => {
         window.location.hash = lienListe(groupId, l.id);
       }),
     ).catch((err: unknown) => setErreur(messageDe(err)));

@@ -66,6 +66,16 @@ export function modifierGroupe(scope: GroupScope, champs: ModificationGroupe, ma
   return modifie.changes === 1 ? 'modifie' : 'introuvable';
 }
 
+/** Supprime logiquement SON groupe (`deleted_at`). L'appelant a vérifié le rôle d'administrateur. */
+export function supprimerGroupe(scope: GroupScope, maintenant: string): boolean {
+  const base = baseDeScope(scope);
+  const res = preparer(
+    base,
+    'UPDATE groups AS g SET deleted_at = ?, updated_at = ? WHERE g.id = ? AND g.deleted_at IS NULL',
+  ).run(maintenant, maintenant, scope.groupId);
+  return res.changes === 1;
+}
+
 export interface NouveauGroupe {
   readonly name: string;
   readonly default_currency_code: string;

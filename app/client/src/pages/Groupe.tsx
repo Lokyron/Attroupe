@@ -4,9 +4,11 @@ import {
   inviter,
   listerInvitationsEmises,
   listerMembres,
+  modifierGroupe,
   quitterGroupe,
   retirerMembre,
   revoquerInvitation,
+  supprimerGroupe,
   type InvitationEmise,
   type Membre,
 } from '../api/groupes';
@@ -106,12 +108,18 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
   const [aRetirer, setARetirer] = useState<Membre | null>(null);
   const [aRevoquer, setARevoquer] = useState<InvitationEmise | null>(null);
   const [quitterOuvert, setQuitterOuvert] = useState(false);
+  const [supprimerOuvert, setSupprimerOuvert] = useState(false);
+  const [editionParametres, setEditionParametres] = useState(false);
+  const [nomEdite, setNomEdite] = useState('');
+  const [deviseEditee, setDeviseEditee] = useState('');
+  const [fuseauEdite, setFuseauEdite] = useState('');
   const [debrancherOuvert, setDebrancherOuvert] = useState(false);
   // Une garde par action indépendante : inviter ne grise pas « Quitter », etc.
   const invitation = useSoumission();
   const membre = useSoumission();
   const revocation = useSoumission();
   const immichAction = useSoumission();
+  const parametresAction = useSoumission();
   const sortie = useSoumission();
 
   const rafraichir = async (): Promise<void> => {
@@ -534,12 +542,79 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                 <IconeParametres className="widget-titre-icone" />
                 <span>{t('groupe.parametres_titre')}</span>
               </h3>
+              {role === 'admin' && !editionParametres && (
+                <button
+                  type="button"
+                  className="bouton-compact"
+                  onClick={() => {
+                    setNomEdite(groupe.name);
+                    setDeviseEditee(groupe.default_currency_code);
+                    setFuseauEdite(groupe.time_zone);
+                    setEditionParametres(true);
+                  }}
+                >
+                  {t('groupe.modifier_parametres')}
+                </button>
+              )}
             </div>
-            <div className="groupe-meta">
-              <span className="pilule">{t('groupe.devise', { devise: groupe.default_currency_code })}</span>
-              <span className="pilule">{t('groupe.fuseau', { fuseau: groupe.time_zone })}</span>
-            </div>
-            <div className="liste-compacte-haut">
+            {editionParametres && role === 'admin' ? (
+              <form
+                className="formulaire"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  agir(
+                    parametresAction,
+                    async () => {
+                      await modifierGroupe(groupId, {
+                        name: nomEdite.trim(),
+                        default_currency_code: deviseEditee.trim().toUpperCase(),
+                        time_zone: fuseauEdite.trim(),
+                      });
+                      await rafraichir();
+                    },
+                    () => {
+                      setEditionParametres(false);
+                      setInfo(t('groupe.parametres_enregistres'));
+                    },
+                  );
+                }}
+              >
+                <label>
+                  {t('groupe.champ_nom')}
+                  <input type="text" value={nomEdite} maxLength={80} onChange={(e) => setNomEdite(e.target.value)} required />
+                </label>
+                <div className="grille-champs-2">
+                  <label>
+                    {t('groupe.champ_devise')}
+                    <input
+                      type="text"
+                      value={deviseEditee}
+                      maxLength={3}
+                      onChange={(e) => setDeviseEditee(e.target.value)}
+                      required
+                    />
+                  </label>
+                  <label>
+                    {t('groupe.champ_fuseau')}
+                    <input type="text" value={fuseauEdite} onChange={(e) => setFuseauEdite(e.target.value)} required />
+                  </label>
+                </div>
+                <div className="barre-compacte">
+                  <button type="submit" disabled={parametresAction.enCours}>
+                    {parametresAction.enCours ? t('commun.enregistrement') : t('commun.enregistrer')}
+                  </button>
+                  <button type="button" onClick={() => setEditionParametres(false)}>
+                    {t('commun.annuler')}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="groupe-meta">
+                <span className="pilule">{t('groupe.devise', { devise: groupe.default_currency_code })}</span>
+                <span className="pilule">{t('groupe.fuseau', { fuseau: groupe.time_zone })}</span>
+              </div>
+            )}
+            <div className="liste-compacte-haut barre-compacte">
               <button
                 type="button"
                 className="bouton-danger-discret"
@@ -548,6 +623,16 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
               >
                 {t('groupe.quitter')}
               </button>
+              {role === 'admin' && (
+                <button
+                  type="button"
+                  className="bouton-danger-discret"
+                  disabled={sortie.enCours}
+                  onClick={() => setSupprimerOuvert(true)}
+                >
+                  {t('groupe.supprimer')}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -618,6 +703,19 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
           agir(sortie, () => quitterGroupe(groupId), onQuitte);
         }}
         onAnnuler={() => setQuitterOuvert(false)}
+      />
+      <DialogueConfirmation
+        ouvert={supprimerOuvert}
+        titre={t('confirm.groupe.supprimer.titre', { groupe: groupe.name })}
+        consequence={t('confirm.groupe.supprimer.consequence')}
+        reversible={false}
+        libelleConfirmer={t('confirm.groupe.supprimer.action')}
+        danger
+        onConfirmer={() => {
+          setSupprimerOuvert(false);
+          agir(sortie, () => supprimerGroupe(groupId), onQuitte);
+        }}
+        onAnnuler={() => setSupprimerOuvert(false)}
       />
       <DialogueConfirmation
         ouvert={debrancherOuvert}

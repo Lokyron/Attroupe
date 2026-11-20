@@ -14,6 +14,7 @@ import {
   modifierDepense as modifierDepenseEnBase,
   supprimerCloture,
   supprimerDepense as supprimerDepenseEnBase,
+  supprimerRemboursement as supprimerRemboursementEnBase,
   type ClotureDepenses,
   type DepenseAvecParts,
   type FiltresDepenses,
@@ -223,12 +224,40 @@ export function lireDepenseService(scope: GroupScope, depenseId: string): Depens
  * doivent de l'argent). Une part nulle (poids 0, ou montant exact 0) ne change le solde de personne : ce membre n'est pas prévenu.
  * Les autres membres du groupe ne sont jamais notifiés. L'auteur de l'écriture est écarté plus loin, par `notifierMembresGroupe`.
  */
-function membresConcernes(payerMembershipId: string, parts: readonly NouvellePartDepense[]): ReadonlySet<string> {
+function membresConcernes(
+  payerMembershipId: string,
+  parts: readonly { readonly membership_id: string; readonly share_minor: number; readonly share_target_minor: number }[],
+): ReadonlySet<string> {
   const ids = new Set<string>([payerMembershipId]);
   for (const part of parts) {
     if (part.share_minor > 0 || part.share_target_minor > 0) ids.add(part.membership_id);
   }
   return ids;
+}
+
+function notifierMouvementSolde(
+  contexte: Contexte,
+  scope: GroupScope,
+  options: {
+    readonly kind: 'expense_added' | 'expense_updated' | 'expense_deleted' | 'settlement_created' | 'settlement_confirmed';
+    readonly subjectType: 'expense' | 'settlement';
+    readonly subjectId: string;
+    readonly payload: Readonly<Record<string, string>>;
+    readonly destinataires: ReadonlySet<string>;
+    readonly maintenant: string;
+  },
+) {
+  return notifierMembresGroupe(scope, {
+    kind: options.kind,
+    subjectType: options.subjectType,
+    subjectId: options.subjectId,
+    payload: options.payload,
+    baseUrl: contexte.env.ATTROUPE_BASE_URL,
+    lienChemin: `/#/groupe/${encodeURIComponent(scope.groupId)}/depenses`,
+    maintenant: options.maintenant,
+    destinataires: options.destinataires,
+    gabaritEmail: options.subjectType === 'settlement' ? 'notification_reglement' : 'notification_depense',
+  });
 }
 
 export function creerDepenseService(contexte: Contexte, scope: GroupScope, entree: EntreeCreationDepense): DepenseAvecParts {
@@ -275,16 +304,13 @@ export function creerDepenseService(contexte: Contexte, scope: GroupScope, entre
       },
       parts,
     );
-    const aPousser = notifierMembresGroupe(scope, {
+    const aPousser = notifierMouvementSolde(contexte, scope, {
       kind: 'expense_added',
       subjectType: 'expense',
       subjectId: idCree,
       payload: { expense_id: idCree },
-      baseUrl: contexte.env.ATTROUPE_BASE_URL,
-      lienChemin: `/#/groupe/${encodeURIComponent(scope.groupId)}/depenses`,
-      maintenant,
       destinataires: membresConcernes(entree.payer_membership_id, parts),
-      gabaritEmail: 'notification_depense',
+      maintenant,
     });
     return { id: idCree, destinataires: aPousser };
   });
@@ -379,25 +405,44 @@ export function modifierDepenseService(
     nouvellesParts = calculerParts(amountMinor, amount_target_minor, splitMode, participants);
   }
 
-  modifierDepenseEnBase(
-    scope,
-    depenseId,
-    {
-      event_id: modif.event_id,
-      label: modif.label,
-      spent_on: modif.spent_on,
-      payer_membership_id: modif.payer_membership_id,
-      amount_minor: modif.amount_minor,
-      currency_code: modif.currency_code,
-      target_currency_code: targetCurrencyCode,
-      rate_ppm,
-      rate_source,
-      amount_target_minor,
-      split_mode: modif.split_mode,
-      note: modif.note,
-    },
-    nouvellesParts,
+  const maintenant = versInstant(contexte.horloge());
+  const anciensConcernes = membresConcernes(actuelle.payer_membership_id, actuelle.shares);
+  const nouveauxConcernes = membresConcernes(
+    modif.payer_membership_id ?? actuelle.payer_membership_id,
+    nouvellesParts ?? actuelle.shares,
   );
+  const concernes = new Set<string>([...anciensConcernes, ...nouveauxConcernes]);
+
+  const destinataires = scope.transaction(() => {
+    modifierDepenseEnBase(
+      scope,
+      depenseId,
+      {
+        event_id: modif.event_id,
+        label: modif.label,
+        spent_on: modif.spent_on,
+        payer_membership_id: modif.payer_membership_id,
+        amount_minor: modif.amount_minor,
+        currency_code: modif.currency_code,
+        target_currency_code: targetCurrencyCode,
+        rate_ppm,
+        rate_source,
+        amount_target_minor,
+        split_mode: modif.split_mode,
+        note: modif.note,
+      },
+      nouvellesParts,
+    );
+    return notifierMouvementSolde(contexte, scope, {
+      kind: 'expense_updated',
+      subjectType: 'expense',
+      subjectId: depenseId,
+      payload: { expense_id: depenseId },
+      destinataires: concernes,
+      maintenant,
+    });
+  });
+  pousserNotificationsWebPush(contexte, destinataires, libelleNotificationPush('expense_updated', {}));
 
   contexte.diffuseur?.diffuser(scope, { type: 'depense.modifiee', ressource: 'depense', id: depenseId, parent_id: nouvelEventId });
   return lireDepenseService(scope, depenseId);
@@ -409,7 +454,20 @@ export function supprimerDepenseService(contexte: Contexte, scope: GroupScope, d
     throw new ErreurHttp(403, 'droit.depense_requise');
   }
   verifierNonCloture(scope, actuelle.event_id);
-  supprimerDepenseEnBase(scope, depenseId);
+  const maintenant = versInstant(contexte.horloge());
+  const concernes = membresConcernes(actuelle.payer_membership_id, actuelle.shares);
+  const destinataires = scope.transaction(() => {
+    supprimerDepenseEnBase(scope, depenseId);
+    return notifierMouvementSolde(contexte, scope, {
+      kind: 'expense_deleted',
+      subjectType: 'expense',
+      subjectId: depenseId,
+      payload: { expense_id: depenseId },
+      destinataires: concernes,
+      maintenant,
+    });
+  });
+  pousserNotificationsWebPush(contexte, destinataires, libelleNotificationPush('expense_deleted', {}));
   contexte.diffuseur?.diffuser(scope, { type: 'depense.supprimee', ressource: 'depense', id: depenseId, parent_id: actuelle.event_id });
 }
 
@@ -445,18 +503,31 @@ export function creerRemboursementService(
     'manual',
   );
 
-  const id = creerRemboursementEnBase(scope, {
-    event_id: entree.event_id,
-    from_membership_id: entree.from_membership_id,
-    to_membership_id: entree.to_membership_id,
-    amount_minor: entree.amount_minor,
-    currency_code: entree.currency_code,
-    target_currency_code: targetCurrencyCode,
-    rate_ppm,
-    amount_target_minor,
-    settled_on: entree.settled_on,
-    method_note: entree.method_note,
+  const maintenant = versInstant(contexte.horloge());
+  const { id, destinataires } = scope.transaction(() => {
+    const idCree = creerRemboursementEnBase(scope, {
+      event_id: entree.event_id,
+      from_membership_id: entree.from_membership_id,
+      to_membership_id: entree.to_membership_id,
+      amount_minor: entree.amount_minor,
+      currency_code: entree.currency_code,
+      target_currency_code: targetCurrencyCode,
+      rate_ppm,
+      amount_target_minor,
+      settled_on: entree.settled_on,
+      method_note: entree.method_note,
+    });
+    const aPousser = notifierMouvementSolde(contexte, scope, {
+      kind: 'settlement_created',
+      subjectType: 'settlement',
+      subjectId: idCree,
+      payload: { settlement_id: idCree },
+      destinataires: new Set([entree.from_membership_id, entree.to_membership_id]),
+      maintenant,
+    });
+    return { id: idCree, destinataires: aPousser };
   });
+  pousserNotificationsWebPush(contexte, destinataires, libelleNotificationPush('settlement_created', {}));
 
   contexte.diffuseur?.diffuser(scope, { type: 'remboursement.cree', ressource: 'remboursement', id, parent_id: entree.event_id });
   const cree = lireRemboursement(scope, id);
@@ -471,7 +542,19 @@ export function confirmerRemboursementService(contexte: Contexte, scope: GroupSc
     throw new ErreurHttp(403, 'droit.beneficiaire_requis');
   }
   verifierNonCloture(scope, actuel.event_id);
-  confirmerRemboursementEnBase(scope, remboursementId);
+  const maintenant = versInstant(contexte.horloge());
+  const destinataires = scope.transaction(() => {
+    confirmerRemboursementEnBase(scope, remboursementId);
+    return notifierMouvementSolde(contexte, scope, {
+      kind: 'settlement_confirmed',
+      subjectType: 'settlement',
+      subjectId: remboursementId,
+      payload: { settlement_id: remboursementId },
+      destinataires: new Set([actuel.from_membership_id, actuel.to_membership_id]),
+      maintenant,
+    });
+  });
+  pousserNotificationsWebPush(contexte, destinataires, libelleNotificationPush('settlement_confirmed', {}));
   contexte.diffuseur?.diffuser(scope, {
     type: 'remboursement.confirme',
     ressource: 'remboursement',
@@ -481,6 +564,25 @@ export function confirmerRemboursementService(contexte: Contexte, scope: GroupSc
   const misAJour = lireRemboursement(scope, remboursementId);
   if (misAJour === undefined) throw new ErreurHttp(404, 'remboursement.introuvable');
   return misAJour;
+}
+
+export function supprimerRemboursementService(contexte: Contexte, scope: GroupScope, remboursementId: string): void {
+  const actuel = lireRemboursement(scope, remboursementId);
+  if (actuel === undefined) throw new ErreurHttp(404, 'remboursement.introuvable');
+  if (actuel.recorded_by_membership_id !== scope.membershipId && scope.role !== 'admin') {
+    throw new ErreurHttp(403, 'droit.auteur_requis');
+  }
+  if (actuel.confirmed_by_membership_id !== null) {
+    throw new ErreurHttp(409, 'remboursement.deja_confirme');
+  }
+  verifierNonCloture(scope, actuel.event_id);
+  supprimerRemboursementEnBase(scope, remboursementId);
+  contexte.diffuseur?.diffuser(scope, {
+    type: 'remboursement.supprime',
+    ressource: 'remboursement',
+    id: remboursementId,
+    parent_id: actuel.event_id,
+  });
 }
 
 // --- Soldes et clôture -------------------------------------------------------------------------------------
