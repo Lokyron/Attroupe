@@ -8,7 +8,7 @@ import { useGroupe, useTempsReelGroupe } from './FournisseurGroupe';
 import { fusionnerEtats, premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
-import { lienListe } from '../pages/Listes';
+import { lienListe } from '../lib/liens';
 import { t } from '../i18n';
 import { ChargementPage } from './ChargementPage';
 import { DialogueConfirmation } from './DialogueConfirmation';

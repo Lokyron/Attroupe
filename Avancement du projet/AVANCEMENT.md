@@ -3,6 +3,14 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-20 — Phase 3 : mode sombre, accessibilité structurelle, tablette et finitions
+
+- **Mode sombre** : tokens `prefers-color-scheme: dark` dans `app/client/src/styles.css` (avec redéfinition du bloc `@supports` des voiles photo) et `<meta name="theme-color" media="...">` dans `app/client/index.html`.
+- **Accessibilité et routage (`App.tsx`)** : lien d'évitement `#contenu-principal`, `<h1>` unique sur mobile/bureau, libellés distincts pour les trois navigations, `document.title` par route, scroll/focus au `hashchange`, route `introuvable`, et lien AGPL-3.0 vers les sources dans le pied de page.
+- **Responsive tablette** : `.barre-kpis` en 4 colonnes dès 768 px, `.grille-bento-groupe` à 1280 px, `.nav-mobile` centrée et bornée sur tablette.
+- **Finitions** : `<ChampFuseau>` avec `Intl.supportedValuesOf('timeZone')` généralisé (`FormulaireEvenement`, `Groupe`, `Sondages`, `Compte`), `lib/liens.ts`, bouton « Créer l’album de la soirée » (`Evenement.tsx`), alternative sans Brevo signalée dans `Groupe.tsx`, et indicateur de reconnexion SSE silencieux à l'ouverture (`Liste.tsx`).
+- **Vérifié** : `npm run typecheck`, `npm run lint`, `npm run build` et 862 tests schéma + unité verts.
+
 ## 2026-11-20 — Fin de la phase 2 et levée des trois dettes bloquantes
 
 - **Trois dettes bloquantes soldées** : lecture de `notification_preferences.muted_kinds` dans `notifierMembresGroupe`, notifications sur `modifierDepenseService` (`expense_updated`), `supprimerDepenseService` (`expense_deleted`), `creerRemboursementService` (`settlement_created`) et `confirmerRemboursementService` (`settlement_confirmed`), avec migration `0006_notifications_reglement.sql` (reconstruction de `notifications`).

@@ -53,6 +53,7 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
   const [erreur, setErreur] = useState<string | null>(null);
   const [disparue, setDisparue] = useState(false);
   const [flux, setFlux] = useState<EtatFlux | null>(null);
+  const aEteConnecte = useRef(false);
   const [reordonner, setReordonner] = useState(false);
   const [saisie, setSaisie] = useState('');
   const [quantite, setQuantite] = useState('');
@@ -91,7 +92,14 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
 
   useTempsReelGroupe({
     onOuvert: recharger,
-    onEtat: setFlux,
+    onEtat: (etatFlux) => {
+      if (etatFlux === 'connecte') {
+        aEteConnecte.current = true;
+        setFlux('connecte');
+      } else if (aEteConnecte.current) {
+        setFlux('reconnexion');
+      }
+    },
     onEvenement: (e) => {
       if (e.id === listeId || e.parent_id === listeId) planifier();
     },

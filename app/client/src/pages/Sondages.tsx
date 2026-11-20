@@ -4,6 +4,7 @@ import { useRechargement } from '../api/rechargement';
 import { creerSondage, listerSondages, type NouvelleOptionSondage, type ResumeSondage } from '../api/sondages';
 import { useGroupe, useTempsReelGroupe } from '../components/FournisseurGroupe';
 import { ChargementPage } from '../components/ChargementPage';
+import { ChampFuseau } from '../components/ChampFuseau';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconeSondage } from '../components/Icones';
@@ -142,7 +143,7 @@ export function Sondages({ groupId }: { groupId: string }) {
             <div className="grille-champs-2">
               <label>
                 {t('sondages.champ_fuseau')}
-                <input type="text" value={fuseau} maxLength={64} onChange={(e) => setFuseauSaisi(e.target.value)} required />
+                <ChampFuseau value={fuseau} onChange={setFuseauSaisi} />
               </label>
               <label>
                 {t('sondages.champ_cloture')}

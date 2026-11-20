@@ -67,12 +67,16 @@ type Route =
   | { type: 'fil'; id: string; filId: string }
   | { type: 'albums'; id: string }
   | { type: 'evenement'; id: string; evenementId: string }
-  | { type: 'evenement-nouveau'; id: string };
+  | { type: 'evenement-nouveau'; id: string }
+  | { type: 'introuvable' };
 
 type Etat = { type: 'chargement' } | { type: 'anonyme' } | { type: 'connecte'; moi: Moi } | { type: 'erreur'; message: string };
 
 function lireRoute(): Route {
-  const [, premier, second, troisieme, quatrieme] = window.location.hash.split('/');
+  const hash = window.location.hash;
+  if (hash === '' || hash === '#' || hash === '#/') return { type: 'accueil' };
+  const [, premier, second, troisieme, quatrieme] = hash.split('/');
+  if (premier === undefined || premier === '') return { type: 'accueil' };
   if (premier === 'nouveau') return { type: 'nouveau' };
   if (premier === 'invitations') return { type: 'invitations' };
   if (premier === 'notifications') return { type: 'notifications' };
@@ -80,6 +84,7 @@ function lireRoute(): Route {
   if (premier === 'exploitation') return { type: 'exploitation' };
   if (premier === 'groupe' && second !== undefined && second !== '') {
     const id = decodeURIComponent(second);
+    if (troisieme === undefined || troisieme === '') return { type: 'groupe', id };
     if (troisieme === 'agenda') return { type: 'agenda', id };
     if (troisieme === 'listes') return { type: 'listes', id };
     if (troisieme === 'liste' && quatrieme !== undefined && quatrieme !== '') {
@@ -99,9 +104,48 @@ function lireRoute(): Route {
     if (troisieme === 'evenement' && quatrieme !== undefined && quatrieme !== '') {
       return { type: 'evenement', id, evenementId: decodeURIComponent(quatrieme) };
     }
-    return { type: 'groupe', id };
+    return { type: 'introuvable' };
   }
-  return { type: 'accueil' };
+  return { type: 'introuvable' };
+}
+
+function titreDeRoute(route: Route): string {
+  switch (route.type) {
+    case 'accueil':
+      return t('nav.tableau_de_bord');
+    case 'nouveau':
+      return t('nav.nouveau_groupe');
+    case 'invitations':
+      return t('nav.invitations');
+    case 'notifications':
+      return t('nav.notifications');
+    case 'compte':
+      return t('nav.compte');
+    case 'exploitation':
+      return t('exploitation.lien');
+    case 'groupe':
+      return t('nav.groupe');
+    case 'agenda':
+      return t('agenda.titre');
+    case 'listes':
+    case 'liste':
+      return t('listes.titre');
+    case 'sondages':
+    case 'sondage':
+      return t('sondages.titre');
+    case 'depenses':
+      return t('depenses.titre');
+    case 'fils':
+    case 'fil':
+      return t('fils.titre');
+    case 'albums':
+      return t('photos.titre');
+    case 'evenement':
+    case 'evenement-nouveau':
+      return t('agenda.titre');
+    case 'introuvable':
+      return t('introuvable.titre');
+  }
 }
 
 function aller(hash: string): void {
@@ -188,6 +232,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    document.title = `${titreDeRoute(route)} — ${t('app.nom')}`;
+  }, [route]);
+
+  useEffect(() => {
     const surChangement = (): void => {
       setRoute(lireRoute());
       setAvis(null);
@@ -198,6 +246,8 @@ export function App() {
       if (pageDuLien(window.location.pathname) === 'invitation') {
         history.replaceState(null, '', `/${window.location.search}${window.location.hash}`);
       }
+      window.scrollTo(0, 0);
+      document.getElementById('contenu-principal')?.focus({ preventScroll: true });
     };
     window.addEventListener('hashchange', surChangement);
     return () => window.removeEventListener('hashchange', surChangement);
@@ -286,7 +336,10 @@ export function App() {
 
   return (
     <div className="coque-app">
-      <aside className="barre-laterale" aria-label={t('nav.principale')}>
+      <a href="#contenu-principal" className="lien-evitement">
+        {t('nav.evitement')}
+      </a>
+      <aside className="barre-laterale" aria-label={t('nav.laterale')}>
         <div className="barre-laterale-haut">
           <div className="barre-laterale-entete">
             <a href="#/" className="marque">
@@ -448,14 +501,13 @@ export function App() {
         </div>
       </aside>
 
-      <main className="contenu-principal">
+      <main id="contenu-principal" tabIndex={-1} className="contenu-principal">
+        <h1 className="sr-only">{titreDeRoute(route)}</h1>
         <header className="entete">
-          <h1>
-            <a href="#/" className="marque">
-              <img src="/icons/logo.png" alt={''} className="marque-logo" aria-hidden="true" />
-              <span className="marque-texte">{t('app.nom')}</span>
-            </a>
-          </h1>
+          <a href="#/" className="marque">
+            <img src="/icons/logo.png" alt={''} className="marque-logo" aria-hidden="true" />
+            <span className="marque-texte">{t('app.nom')}</span>
+          </a>
           <select
             className="selecteur-groupe"
             aria-label={t('nav.selecteur')}
@@ -528,12 +580,24 @@ export function App() {
           )}
           {!invitationOuverte && route.type === 'compte' && <Compte moi={moi} groupes={moi.groupes} onProfilChange={recharger} />}
           {!invitationOuverte && route.type === 'exploitation' && <Exploitation serviceEmail={moi.service_email} />}
+          {!invitationOuverte && route.type === 'introuvable' && (
+            <section className="carte">
+              <h2>{t('introuvable.titre')}</h2>
+              <p>{t('introuvable.message')}</p>
+              <p>
+                <a href="#/" className="bouton-primaire">
+                  {t('introuvable.retour')}
+                </a>
+              </p>
+            </section>
+          )}
           {!invitationOuverte && groupeCourant !== '' && (
             <FournisseurGroupe key={groupeCourant} groupId={groupeCourant} nomInitial={groupeActifObj?.name}>
               {route.type === 'groupe' && (
                 <Groupe
                   key={route.id}
                   groupId={route.id}
+                  serviceEmail={moi.service_email}
                   onQuitte={() => {
                     recharger();
                     aller('#/');
@@ -567,11 +631,14 @@ export function App() {
               </span>
             )}
             <a href="#/exploitation">{t('exploitation.lien')}</a>
+            <a href="https://github.com/Lokyron/Attroupe" target="_blank" rel="noreferrer">
+              {t('exploitation.sources')}
+            </a>
           </footer>
         </div>
       </main>
 
-      <nav className="nav-mobile" aria-label={t('nav.principale')}>
+      <nav className="nav-mobile" aria-label={t('nav.mobile')}>
         <a
           href="#/"
           className={`nav-mobile-lien${route.type === 'accueil' ? ' actif' : ''}`}

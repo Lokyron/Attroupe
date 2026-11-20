@@ -20,6 +20,7 @@ import {
   type EtatImmich,
 } from '../api/immich';
 import { ChargementPage, SqueletteCarte } from '../components/ChargementPage';
+import { ChampFuseau } from '../components/ChampFuseau';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
@@ -82,7 +83,15 @@ async function lireTout(groupId: string, estAdmin: boolean): Promise<DonneesGrou
 }
 
 /** Un groupe : en-tête, raccourcis Bento, membres, invitations (admin), Immich (admin) et paramètres. */
-export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () => void }) {
+export function Groupe({
+  groupId,
+  serviceEmail,
+  onQuitte,
+}: {
+  groupId: string;
+  serviceEmail?: 'actif' | 'non_configure';
+  onQuitte: () => void;
+}) {
   const { groupe, etat: etatGroupe, erreur: erreurGroupe, rechargerGroupe, rafraichirGroupe } = useGroupe();
   // `null` = rôle encore inconnu. Les lectures d'admin ne partent qu'une fois le rôle connu ; la
   // fusion des états garde UN seul squelette pendant cette seconde phase.
@@ -395,6 +404,9 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                   </button>
                 </div>
               </form>
+              {serviceEmail === 'non_configure' && (
+                <p className="texte-doux">{t('invitations_emises.sans_email')}</p>
+              )}
               {info !== null && (
                 <p role="status" className="info">
                   {info}
@@ -596,7 +608,7 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
                   </label>
                   <label>
                     {t('groupe.champ_fuseau')}
-                    <input type="text" value={fuseauEdite} onChange={(e) => setFuseauEdite(e.target.value)} required />
+                    <ChampFuseau value={fuseauEdite} onChange={setFuseauEdite} />
                   </label>
                 </div>
                 <div className="barre-compacte">

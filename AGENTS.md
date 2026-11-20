@@ -208,11 +208,19 @@ ont été soldés. Vérification verte : `typecheck`, `lint`, `build`, et 1 753 
    paramètres et suppression de groupe (`PATCH`/`DELETE /api/groupes/:g`), et pagination/bornage
    des listes (`Depenses.tsx`, `Agenda.tsx`, `GrilleMois.tsx`, `Compte.tsx`, `Notifications.tsx`).
 
-**Phase 3** : mode sombre — les tokens le permettent enfin, avec deux pièges déjà repérés : le
-bloc `@supports` des voiles photo doit être redéfini lui aussi, et `theme-color` est figé dans
-`index.html` —, accessibilité structurelle (lien d'évitement, `document.title` par route, focus au
-`hashchange`), route `introuvable`, fuseau horaire comme choix plutôt que saisie, responsive
-tablette, pluriels.
+**Phase 3 appliquée** :
+- **Mode sombre** (`prefers-color-scheme: dark` dans `styles.css`, avec redéfinition du bloc
+  `@supports` des voiles photo et `<meta name="theme-color" media="...">` dans `index.html`).
+- **Accessibilité structurelle & routage** (`App.tsx`) : lien d'évitement `#contenu-principal`,
+  `<h1>` unique sur mobile et bureau, trois `<nav>` aux libellés distincts, `document.title`
+  par route, remise à zéro du scroll et déplacement du focus au `hashchange`, route
+  `introuvable`, et lien code source AGPL-3.0 dans le pied de page.
+- **Responsive tablette** (`styles.css`) : `.barre-kpis` en 4 colonnes dès 768 px,
+  `.grille-bento-groupe` à 1280 px, et `.nav-mobile` bornée entre 640 px et 1023 px.
+- **Finitions** : `<ChampFuseau>` (`<input list>` + `<datalist>` `Intl.supportedValuesOf('timeZone')`)
+  partout, `lib/liens.ts` (suppression de la dépendance de `TachesEvenement` vers `pages/Listes`),
+  bouton « Créer l’album de la soirée » sur `Evenement.tsx`, note `service_email === 'non_configure'`
+  dans `Groupe.tsx`, et indicateur de reconnexion SSE silencieux à l'ouverture dans `Liste.tsx`.
 
 **Deux points qui appartiennent au propriétaire, pas à toi** : le refus d'invitation (aujourd'hui
 « Mettre de côté » oublie le lien sur l'appareil, rien de plus ; un vrai refus demande une route

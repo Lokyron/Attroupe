@@ -24,6 +24,8 @@ import { TachesEvenement } from '../components/TachesEvenement';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { SectionDepenses } from './Depenses';
+import { creerAlbum } from '../api/immich';
+import { lienAlbums } from '../lib/liens';
 import { t } from '../i18n';
 
 const REPONSES: readonly ReponsePresence[] = ['yes', 'maybe', 'no'];
@@ -92,6 +94,7 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
 
 /** Contenu d'un événement : 2 colonnes sur desktop (détails, RSVP, tâches, dépenses d'un côté ; discussion de l'autre). */
 function CorpsEvenement({ groupId, initial }: { groupId: string; initial: DonneesEvenement }) {
+  const { groupe } = useGroupe();
   const [evenement, setEvenement] = useState<DetailEvenement>(initial.evenement);
   const [presences, setPresences] = useState<Presences>(initial.presences);
   const membres = initial.membres;
@@ -263,6 +266,26 @@ function CorpsEvenement({ groupId, initial }: { groupId: string; initial: Donnee
                 {evenement.arrival_note !== null && <p>{t('evenement.arrivee', { note: evenement.arrival_note })}</p>}
                 {evenement.capacity !== null && <p>{t('evenement.capacite', { nombre: String(evenement.capacity) })}</p>}
                 {evenement.description !== null && <p className="description">{evenement.description}</p>}
+                {groupe?.fonctionnalites.photos === true && (
+                  <p className="liste-compacte-haut">
+                    <button
+                      type="button"
+                      className="bouton-compact"
+                      disabled={action.enCours}
+                      onClick={() =>
+                        action
+                          .lancer(() =>
+                            creerAlbum(groupId, evenement.title, evenement.id).then(() => {
+                              window.location.hash = lienAlbums(groupId);
+                            }),
+                          )
+                          .catch((err: unknown) => setErreur(messageDe(err)))
+                      }
+                    >
+                      {t('evenement.creer_album')}
+                    </button>
+                  </p>
+                )}
               </div>
             </div>
           )}

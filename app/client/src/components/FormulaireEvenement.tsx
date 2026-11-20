@@ -3,6 +3,7 @@ import { creerEvenement, modifierEvenement, type ChampsEvenement, type DetailEve
 import { heureLocaleDepuisInstant, instantDepuisHeureLocale } from '../agenda/dates';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
+import { ChampFuseau } from './ChampFuseau';
 import { Erreur, messageDe } from './Erreur';
 
 const vide = (valeur: string): string | null => (valeur.trim() === '' ? null : valeur.trim());
@@ -98,7 +99,7 @@ export function FormulaireEvenement({
       </label>
       <label>
         {t('evenement_form.fuseau')}
-        <input type="text" value={fuseau} onChange={(e) => setFuseau(e.target.value)} required maxLength={64} />
+        <ChampFuseau value={fuseau} onChange={setFuseau} />
       </label>
       <label>
         {t('evenement_form.lieu')}

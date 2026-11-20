@@ -11,8 +11,7 @@ import { premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
-
-export const lienListe = (groupId: string, listeId: string): string => `#/groupe/${encodeURIComponent(groupId)}/liste/${encodeURIComponent(listeId)}`;
+import { lienListe } from '../lib/liens';
 
 function extraireTypeListe(l: ResumeListe): { readonly cleType: string; readonly titrePropre: string } {
   if (l.event_id !== null) {

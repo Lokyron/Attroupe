@@ -22,6 +22,7 @@ import {
 import { CarteNotificationsPush } from '../components/CarteNotificationsPush';
 import { CarteProfil } from '../components/CarteProfil';
 import { CarteSecurite } from '../components/CarteSecurite';
+import { ChampFuseau } from '../components/ChampFuseau';
 import { CarteSourcesAgenda } from '../components/CarteSourcesAgenda';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { Erreur, messageDe } from '../components/Erreur';
@@ -416,7 +417,7 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
           <div className="grille-champs-2">
             <label>
               {t('agenda_perso.champ_fuseau')}
-              <input type="text" value={fuseau} maxLength={64} onChange={(e) => setFuseau(e.target.value)} required />
+              <ChampFuseau value={fuseau} onChange={setFuseau} />
             </label>
             <label>
               {t('agenda_perso.champ_lieu')}
