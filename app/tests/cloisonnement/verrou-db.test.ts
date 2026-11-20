@@ -28,7 +28,12 @@ describe('verrou n° 5 : seul app/server/db/ parle à la base', () => {
     expect(fichiers.length).toBeGreaterThan(0);
   });
 
-  it('aucun fichier ne contourne le verrou (imports résolus, ré-exports, import() et require)', () => {
+  // Délai explicite : ce test résout les imports de TOUT le dépôt, donc il s'allonge à mesure que le
+  // projet grossit, et il a dépassé le délai par défaut de 5 s quand la suite tourne en parallèle. Un
+  // garde-fou de sécurité qui « échoue » par dépassement de délai est le pire des signaux : on finit
+  // par le classer comme instable et par ne plus le lire. Il doit échouer pour ce qu'il mesure, ou pas
+  // du tout.
+  it('aucun fichier ne contourne le verrou (imports résolus, ré-exports, import() et require)', { timeout: 60_000 }, () => {
     const fautifs = fichiers.flatMap((f) =>
       violationsDuVerrou(readFileSync(f, 'utf8'), f).map((v) => `${relative(RACINE_APP, f)} ${v}`),
     );

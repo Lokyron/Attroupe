@@ -1,23 +1,11 @@
-import { useEffect, useRef } from 'react';
+import type { EtatFlux, EvenementTempsReel } from './canalGroupe';
 import { champ, SESSION_EXPIREE, texte, texteOuNul } from './client';
 
 // Le flux temps réel du groupe (SSE, architecture §3.2) : descendant seulement. Le message est MINIMAL (type, identifiant, parent) :
 // il dit « ceci a changé », jamais « voici la nouvelle valeur ». Le client recharge ce qu'il a le droit de voir par les routes
 // ordinaires, qui passent par le cloisonnement. La forme est stable : les messages de discussion du lot 10 s'y ajoutent sans la changer.
 
-export interface EvenementTempsReel {
-  /** `ressource.verbe` : `article.coche`, `liste.creee`, `tache.assignee`… */
-  type: string;
-  ressource: string;
-  id: string;
-  /** La liste d'un article, l'événement d'une tâche ou d'une liste… */
-  parent_id: string | null;
-  /** Appartenance de l'auteur du changement. */
-  par: string;
-  at: string;
-}
-
-export type EtatFlux = 'connecte' | 'reconnexion';
+export type { EtatFlux, EvenementTempsReel };
 
 /** Délais de nouvelle tentative quand le serveur a REFUSÉ le flux (EventSource ne retente alors plus de lui-même), en ms. */
 const RETENTES_MS = [2000, 5000, 15000, 30000] as const;
@@ -90,22 +78,4 @@ export function ouvrirTempsReel(
     if (minuterie !== undefined) clearTimeout(minuterie);
     source?.close();
   };
-}
-
-/** Abonne le composant au flux du groupe tant qu'il est monté. Les rappels peuvent changer à chaque rendu sans rouvrir le flux. */
-export function useTempsReel(
-  groupId: string,
-  rappels: { onEvenement: (e: EvenementTempsReel) => void; onOuvert: () => void; onEtat?: (etat: EtatFlux) => void },
-): void {
-  const derniers = useRef(rappels);
-  derniers.current = rappels;
-  useEffect(
-    () =>
-      ouvrirTempsReel(groupId, {
-        onEvenement: (e) => derniers.current.onEvenement(e),
-        onOuvert: () => derniers.current.onOuvert(),
-        onEtat: (etat) => derniers.current.onEtat?.(etat),
-      }),
-    [groupId],
-  );
 }

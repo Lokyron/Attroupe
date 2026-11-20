@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import fr from '../i18n/fr.json' with { type: 'json' };
 import type { PorteeUtilisateur } from '../db/portee-utilisateur.js';
 import {
   definirPreferenceNotification,
@@ -14,6 +16,8 @@ import { versInstant } from '../domain/instant.js';
 import type { Contexte } from '../http/contexte.js';
 import { ErreurHttp } from '../http/erreurs.js';
 import { envoyerNotificationPush } from './push.js';
+
+const LIBELLES_PUSH = z.object({ event_created: z.string(), expense_added: z.string() }).parse(fr.notifications_push);
 
 export function mesNotifications(portee: PorteeUtilisateur): ListeNotifications {
   return listerMesNotifications(portee);
@@ -43,6 +47,9 @@ export function libelleNotificationPush(kind: NotificationKind, payload: Readonl
   if (kind === 'message_posted') {
     return filTitre !== undefined && filTitre !== '' ? `Nouveau message dans « ${filTitre} »` : 'Nouveau message dans le groupe';
   }
+  // Libellés génériques : ni titre, ni montant, ni nom (même discipline que le message, dont le texte ne part jamais).
+  if (kind === 'event_created') return LIBELLES_PUSH.event_created;
+  if (kind === 'expense_added') return LIBELLES_PUSH.expense_added;
   return 'Nouvelle activité dans le groupe';
 }
 

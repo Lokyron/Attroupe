@@ -1,13 +1,13 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { instantDepuisHeureLocale } from '../agenda/dates';
-import { lireGroupe } from '../api/groupes';
 import { useRechargement } from '../api/rechargement';
 import { creerSondage, listerSondages, type NouvelleOptionSondage, type ResumeSondage } from '../api/sondages';
-import { useTempsReel } from '../api/tempsReel';
+import { useGroupe, useTempsReelGroupe } from '../components/FournisseurGroupe';
 import { ChargementPage } from '../components/ChargementPage';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconeSondage } from '../components/Icones';
+import { premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t, type CleTexte } from '../i18n';
@@ -41,7 +41,10 @@ export function Sondages({ groupId }: { groupId: string }) {
   }
   const { enCours, lancer } = useSoumission();
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
-  const [fuseau, setFuseau] = useState('Europe/Paris');
+  const { groupe, erreur: erreurGroupe } = useGroupe();
+  // Saisie de l'utilisateur, tant qu'il n'en a pas fait : le fuseau du groupe (contexte).
+  const [fuseauSaisi, setFuseauSaisi] = useState<string | null>(null);
+  const fuseau = fuseauSaisi ?? groupe?.time_zone ?? 'Europe/Paris';
   const [titre, setTitre] = useState('');
   const [description, setDescription] = useState('');
   const [cloture, setCloture] = useState('');
@@ -55,13 +58,7 @@ export function Sondages({ groupId }: { groupId: string }) {
     (err) => setErreur(messageDe(err)),
   );
 
-  useEffect(() => {
-    lireGroupe(groupId)
-      .then((g) => setFuseau(g.time_zone))
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId]);
-
-  useTempsReel(groupId, {
+  useTempsReelGroupe({
     onOuvert: recharger,
     onEvenement: (e) => {
       if (e.ressource === 'sondage') planifier();
@@ -113,7 +110,6 @@ export function Sondages({ groupId }: { groupId: string }) {
   return (
     <section className="page-groupe-pile">
       <EnteteGroupe
-        groupId={groupId}
         ongletActif="sondages"
         titre={t('sondages.titre')}
         actions={
@@ -127,7 +123,7 @@ export function Sondages({ groupId }: { groupId: string }) {
         }
       />
 
-      <Erreur message={erreur} />
+      <Erreur message={premiereErreur(erreur, erreurGroupe)} />
 
       {formulaireOuvert && (
         <div className="carte">
@@ -146,7 +142,7 @@ export function Sondages({ groupId }: { groupId: string }) {
             <div className="grille-champs-2">
               <label>
                 {t('sondages.champ_fuseau')}
-                <input type="text" value={fuseau} maxLength={64} onChange={(e) => setFuseau(e.target.value)} required />
+                <input type="text" value={fuseau} maxLength={64} onChange={(e) => setFuseauSaisi(e.target.value)} required />
               </label>
               <label>
                 {t('sondages.champ_cloture')}

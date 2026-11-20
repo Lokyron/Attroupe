@@ -23,9 +23,11 @@ import {
   type Presence,
   type Presences,
 } from '../db/queries/evenements.js';
+import { notifierMembresGroupe, type DestinatairePush } from '../db/queries/notifications.js';
 import type { GroupScope } from '../db/scope.js';
 import { champsHoraireInvalides } from '../domain/evenements.js';
 import { versInstant } from '../domain/instant.js';
+import { libelleNotificationPush, pousserNotificationsWebPush } from './notifications.js';
 
 // Cas d'usage de l'agenda du groupe (lot 4). Deux vérifications, jamais confondues (architecture §4) :
 //  1. le cloisonnement : un événement qui n'est pas de CE groupe n'existe pas → 404 `evenement.introuvable` ;
@@ -83,9 +85,37 @@ export function detailEvenement(scope: GroupScope, evenementId: string): DetailE
   };
 }
 
-export function creerEvenement(scope: GroupScope, champs: ChampsEvenement): DetailEvenement {
+/**
+ * Notifie les autres membres actifs qu'un événement existe (`event_created`). À appeler DANS la transaction qui crée l'événement
+ * (création manuelle ou conversion d'un sondage) ; rend les destinataires du Web Push, à envoyer APRÈS le commit.
+ */
+export function notifierEvenementCree(contexte: Contexte, scope: GroupScope, evenementId: string, maintenant: string): DestinatairePush[] {
+  return notifierMembresGroupe(scope, {
+    kind: 'event_created',
+    subjectType: 'event',
+    subjectId: evenementId,
+    payload: { event_id: evenementId },
+    baseUrl: contexte.env.ATTROUPE_BASE_URL,
+    lienChemin: `/#/groupe/${encodeURIComponent(scope.groupId)}/evenement/${encodeURIComponent(evenementId)}`,
+    maintenant,
+    gabaritEmail: 'notification_evenement',
+  });
+}
+
+/**
+ * Crée l'événement et prévient les autres membres actifs du groupe (`event_created`), dans UNE transaction : si l'écriture échoue,
+ * aucune notification ne reste. Le Web Push part après le commit, comme pour les messages (services/fils.ts).
+ */
+export function creerEvenement(contexte: Contexte, scope: GroupScope, champs: ChampsEvenement): DetailEvenement {
   refuserReference(scope, champs);
-  return detailEvenement(scope, creerEvenementEnBase(scope, champs).id);
+  const maintenant = versInstant(contexte.horloge());
+  const { id, destinataires } = scope.transaction(() => {
+    const cree = creerEvenementEnBase(scope, champs);
+    return { id: cree.id, destinataires: notifierEvenementCree(contexte, scope, cree.id, maintenant) };
+  });
+  // Web Push seulement une fois la transaction validée.
+  pousserNotificationsWebPush(contexte, destinataires, libelleNotificationPush('event_created', {}));
+  return detailEvenement(scope, id);
 }
 
 export function modifierEvenement(scope: GroupScope, evenementId: string, champs: ModificationEvenement): DetailEvenement {

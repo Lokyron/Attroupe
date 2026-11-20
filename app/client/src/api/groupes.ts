@@ -8,6 +8,10 @@ export interface Moi {
   username: string;
   display_name: string;
   avatar_url: string | null;
+  /** `null` : l'adresse e-mail n'est pas encore confirmée (écran Compte, carte « Profil »). */
+  email_verified_at: string | null;
+  /** Fuseau IANA (`Europe/Paris`) du compte. */
+  time_zone: string;
   groupes: GroupeResume[];
   invitations_en_attente: number;
   service_email: 'actif' | 'non_configure';
@@ -78,6 +82,8 @@ export async function lireMoi(): Promise<Moi> {
     username: texte(champ(r, 'username')),
     display_name: texte(champ(r, 'display_name')),
     avatar_url: avatarUrlOptionnel(r),
+    email_verified_at: texteOuNul(champ(r, 'email_verified_at')),
+    time_zone: texte(champ(r, 'time_zone')),
     groupes: liste(champ(r, 'groupes')).map((g) => ({ group_id: texte(champ(g, 'group_id')), name: texte(champ(g, 'name')), role: role(champ(g, 'role')) })),
     invitations_en_attente: nombre(champ(r, 'invitations_en_attente')),
     service_email,

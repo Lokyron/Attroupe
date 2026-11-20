@@ -2,13 +2,11 @@ import { useState, type FormEvent } from 'react';
 import {
   changerRole,
   inviter,
-  lireGroupe,
   listerInvitationsEmises,
   listerMembres,
   quitterGroupe,
   retirerMembre,
   revoquerInvitation,
-  type DetailGroupe,
   type InvitationEmise,
   type Membre,
 } from '../api/groupes';
@@ -23,6 +21,7 @@ import { ChargementPage, SqueletteCarte } from '../components/ChargementPage';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
+import { useGroupe } from '../components/FournisseurGroupe';
 import {
   IconeCalendrier,
   IconeCamera,
@@ -34,6 +33,7 @@ import {
   IconeRecu,
   IconeSondage,
 } from '../components/Icones';
+import { fusionnerEtats, premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t, type CleTexte } from '../i18n';
@@ -52,18 +52,16 @@ function initialesMembre(nom: string): string {
 
 /** Tout ce que la page affiche. `immich` est `null` hors admin, ou quand sa lecture a échoué (`erreurImmich`). */
 interface DonneesGroupe {
-  readonly groupe: DetailGroupe;
   readonly membres: Membre[];
   readonly invitations: InvitationEmise[];
   readonly immich: EtatImmich | null;
   readonly erreurImmich: string | null;
 }
 
-/** Lit le groupe, puis ses membres, invitations et configuration Immich en parallèle. */
-async function lireTout(groupId: string): Promise<DonneesGroupe> {
-  const groupe = await lireGroupe(groupId);
-  if (groupe.mon_role !== 'admin') {
-    return { groupe, membres: await listerMembres(groupId), invitations: [], immich: null, erreurImmich: null };
+/** Lit les membres, puis (admin seulement) invitations et configuration Immich en parallèle. Le groupe vient du contexte. */
+async function lireTout(groupId: string, estAdmin: boolean): Promise<DonneesGroupe> {
+  if (!estAdmin) {
+    return { membres: await listerMembres(groupId), invitations: [], immich: null, erreurImmich: null };
   }
   const [membres, invitations, immich] = await Promise.allSettled([
     listerMembres(groupId),
@@ -74,7 +72,6 @@ async function lireTout(groupId: string): Promise<DonneesGroupe> {
   if (membres.status === 'rejected') throw membres.reason;
   if (invitations.status === 'rejected') throw invitations.reason;
   return {
-    groupe,
     membres: membres.value,
     invitations: invitations.value,
     immich: immich.status === 'fulfilled' ? immich.value : null,
@@ -84,7 +81,18 @@ async function lireTout(groupId: string): Promise<DonneesGroupe> {
 
 /** Un groupe : en-tête, raccourcis Bento, membres, invitations (admin), Immich (admin) et paramètres. */
 export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () => void }) {
-  const { donnees, etat, erreur: erreurLecture, recharger } = useLecture(() => lireTout(groupId), [groupId]);
+  const { groupe, etat: etatGroupe, erreur: erreurGroupe, rechargerGroupe, rafraichirGroupe } = useGroupe();
+  // `null` = rôle encore inconnu. Les lectures d'admin ne partent qu'une fois le rôle connu ; la
+  // fusion des états garde UN seul squelette pendant cette seconde phase.
+  const role = groupe?.mon_role ?? null;
+  const {
+    donnees,
+    etat: etatPage,
+    erreur: erreurPage,
+    recharger,
+  } = useLecture(() => (role === null ? Promise.resolve(null) : lireTout(groupId, role === 'admin')), [groupId, role]);
+  const etat = fusionnerEtats(etatGroupe, etatPage);
+  const erreurLecture = premiereErreur(erreurGroupe, erreurPage);
   // Relecture silencieuse après une action : la page reste affichée, sans repasser par le squelette.
   const [fraiches, setFraiches] = useState<DonneesGroupe | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
@@ -107,10 +115,13 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
   const sortie = useSoumission();
 
   const rafraichir = async (): Promise<void> => {
-    setFraiches(await lireTout(groupId));
+    // Le groupe aussi : un branchement Immich change `fonctionnalites.photos`, donc l'onglet Photos de l'en-tête.
+    rafraichirGroupe();
+    setFraiches(await lireTout(groupId, role === 'admin'));
   };
   const relire = (): void => {
     setFraiches(null);
+    rechargerGroupe();
     recharger();
   };
 
@@ -145,17 +156,19 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
   };
 
   const courantes = fraiches ?? donnees;
-  if (courantes === null) {
+  if (courantes === null || groupe === null) {
+    // Groupe lu mais page pas encore relancée (rôle tout juste connu) : état transitoire, toujours le squelette.
+    const etatAffiche = etat === 'pret' ? 'chargement' : etat;
     return (
       <section className="page-groupe-pile">
-        <ChargementPage etat={etat} erreur={erreurLecture} onReessayer={relire} squelette={<SqueletteCarte />}>
+        <ChargementPage etat={etatAffiche} erreur={erreurLecture} onReessayer={relire} squelette={<SqueletteCarte />}>
           {null}
         </ChargementPage>
-        {etat === 'erreur' && <a href="#/">{t('lien.retour')}</a>}
+        {etatAffiche === 'erreur' && <a href="#/">{t('lien.retour')}</a>}
       </section>
     );
   }
-  const { groupe, membres, invitations, immich, erreurImmich } = courantes;
+  const { membres, invitations, immich, erreurImmich } = courantes;
   const changerLeRole = (m: Membre): void =>
     agir(membre, async () => {
       await changerRole(groupId, m.id, m.role === 'admin' ? 'member' : 'admin');
@@ -222,10 +235,7 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
   return (
     <section className="page-groupe-pile">
       <EnteteGroupe
-        groupId={groupId}
         ongletActif="apercu"
-        nomGroupe={groupe.name}
-        photosActives={groupe.fonctionnalites.photos}
         meta={
           <>
             <span className={`pilule${admin ? ' pilule-role-admin' : ''}`}>
@@ -253,7 +263,7 @@ export function Groupe({ groupId, onQuitte }: { groupId: string; onQuitte: () =>
         }
       />
 
-      <Erreur message={erreur} />
+      <Erreur message={premiereErreur(erreur, erreurGroupe)} />
 
       <div className="grille-bento-groupe">
         <div className="bento-colonne-gauche">

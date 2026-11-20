@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { ErreurApi } from '../api/client';
-import { lireGroupe } from '../api/groupes';
 import {
   ajouterArticle,
   definirFait,
@@ -16,12 +15,14 @@ import {
   type DetailListe,
 } from '../api/listes';
 import { useRechargement } from '../api/rechargement';
-import { useTempsReel, type EtatFlux } from '../api/tempsReel';
+import { type EtatFlux } from '../api/tempsReel';
+import { useGroupe, useTempsReelGroupe } from '../components/FournisseurGroupe';
 import { ChargementPage } from '../components/ChargementPage';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconePoubelle } from '../components/Icones';
+import { premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
@@ -47,7 +48,8 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
     setSource(lecture.donnees);
     setListe(lecture.donnees);
   }
-  const [moi, setMoi] = useState<string | null>(null);
+  const { groupe, erreur: erreurGroupe } = useGroupe();
+  const moi = groupe?.mon_appartenance_id ?? null;
   const [erreur, setErreur] = useState<string | null>(null);
   const [disparue, setDisparue] = useState(false);
   const [flux, setFlux] = useState<EtatFlux | null>(null);
@@ -84,16 +86,10 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
   );
 
   useEffect(() => {
-    lireGroupe(groupId)
-      .then((g) => setMoi(g.mon_appartenance_id))
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId]);
-
-  useEffect(() => {
     if (renommage !== null) champRenommage.current?.focus();
   }, [renommage === null]);
 
-  useTempsReel(groupId, {
+  useTempsReelGroupe({
     onOuvert: recharger,
     onEtat: setFlux,
     onEvenement: (e) => {
@@ -228,7 +224,6 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
     return (
       <section className="page-groupe-pile">
         <EnteteGroupe
-          groupId={groupId}
           ongletActif="listes"
           lienRetour={{ href: retourListes, libelle: t('liste.retour') }}
         />
@@ -321,7 +316,6 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
   return (
     <section className="page-groupe-pile liste-courses">
       <EnteteGroupe
-        groupId={groupId}
         ongletActif="listes"
         titre={liste?.title}
         lienRetour={{ href: retourListes, libelle: t('liste.retour') }}
@@ -376,7 +370,7 @@ export function Liste({ groupId, listeId }: { groupId: string; listeId: string }
         }
       />
 
-      <Erreur message={erreur} />
+      <Erreur message={premiereErreur(erreur, erreurGroupe)} />
 
       <ChargementPage etat={lecture.etat} erreur={lecture.erreur} onReessayer={lecture.recharger}>
         {liste !== null && (

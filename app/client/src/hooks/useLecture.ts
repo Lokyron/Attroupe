@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { messageDe } from '../components/Erreur';
+import type { EtatLecture } from './etatsLecture';
 
-export type EtatLecture = 'chargement' | 'erreur' | 'pret';
+export type { EtatLecture };
 
 /**
  * Lecture initiale d'une page, avec trois états DISTINCTS : `chargement`, `erreur`, `pret`. Ne jamais déduire

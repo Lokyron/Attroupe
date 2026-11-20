@@ -3,7 +3,9 @@ import { creerFilLibre, listerFils, type Fil } from '../api/fils';
 import { ChargementPage } from '../components/ChargementPage';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
+import { useGroupe } from '../components/FournisseurGroupe';
 import { IconeMessage } from '../components/Icones';
+import { premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
@@ -13,6 +15,7 @@ export function Fils({ groupId }: { groupId: string }) {
   const { donnees: fils, etat, erreur: erreurLecture, recharger } = useLecture<Fil[]>(() => listerFils(groupId), [groupId]);
   const [titre, setTitre] = useState('');
   const [erreur, setErreur] = useState<string | null>(null);
+  const { erreur: erreurGroupe } = useGroupe();
   const { enCours, lancer } = useSoumission();
 
   const soumettre = (e: FormEvent): void => {
@@ -29,8 +32,8 @@ export function Fils({ groupId }: { groupId: string }) {
 
   return (
     <section className="page-groupe-pile">
-      <EnteteGroupe groupId={groupId} ongletActif="fils" titre={t('fils.titre')} />
-      <Erreur message={erreur} />
+      <EnteteGroupe ongletActif="fils" titre={t('fils.titre')} />
+      <Erreur message={premiereErreur(erreur, erreurGroupe)} />
 
       <form onSubmit={soumettre} className="carte barre-ajout-ligne">
         <input

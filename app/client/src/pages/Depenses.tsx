@@ -16,12 +16,14 @@ import {
   type Remboursement,
   type ResultatSoldes,
 } from '../api/depenses';
-import { lireGroupe, listerMembres, type Membre } from '../api/groupes';
+import { listerMembres, type Membre } from '../api/groupes';
 import { ChargementPage, SqueletteListe } from '../components/ChargementPage';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
+import { useGroupe } from '../components/FournisseurGroupe';
 import { IconeBalance, IconePoubelle, IconeRecu } from '../components/Icones';
+import { fusionnerEtats, premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
@@ -117,24 +119,25 @@ export function SectionDepenses({
   // Erreur des actions (écritures, rechargement partiel) ; celle de la lecture initiale est gérée par `ChargementPage`.
   const [erreur, setErreur] = useState<string | null>(null);
 
-  // Lecture initiale : groupe, membres et devises ne bougent pas ensuite, seules les trois dernières valeurs sont rafraîchies.
+  // Le groupe vient du contexte, lu EN PARALLÈLE de cette lecture (les états sont fusionnés plus bas : un seul squelette).
+  const { groupe, etat: etatGroupe, erreur: erreurGroupe, rechargerGroupe } = useGroupe();
+
+  // Lecture initiale : membres et devises ne bougent pas ensuite, seules les trois dernières valeurs sont rafraîchies.
   // Si `membresFournis` est fourni, il fait foi (voir `membres` plus bas) : la lecture n'a pas à le suivre.
   const {
     donnees,
-    etat,
+    etat: etatLecture,
     erreur: erreurLecture,
     recharger,
   } = useLecture(
     () =>
       Promise.all([
-        lireGroupe(groupId),
         membresFournis !== undefined ? Promise.resolve([...membresFournis]) : listerMembres(groupId),
         listerDevises(),
         listerDepenses(groupId, evenementId),
         listerRemboursements(groupId, evenementId),
         lireSoldes(groupId, evenementId),
-      ]).then(([groupe, membres, devises, depenses, remboursements, soldes]) => ({
-        groupe,
+      ]).then(([membres, devises, depenses, remboursements, soldes]) => ({
         membres,
         devises,
         depenses,
@@ -205,7 +208,6 @@ export function SectionDepenses({
   };
 
   // Sans lecture terminée, `ChargementPage` n'affiche pas le contenu : on ne rend rien d'autre ici.
-  const groupe = donnees?.groupe ?? null;
   const devises = donnees?.devises ?? [];
   const membres: readonly Membre[] = membresFournis ?? donnees?.membres ?? [];
   const actuel = partiel !== null && partiel.base === donnees ? partiel : null;
@@ -433,9 +435,12 @@ export function SectionDepenses({
 
   return (
     <ChargementPage
-      etat={etat}
-      erreur={erreurLecture}
-      onReessayer={recharger}
+      etat={fusionnerEtats(etatGroupe, etatLecture)}
+      erreur={premiereErreur(erreurGroupe, erreurLecture)}
+      onReessayer={() => {
+        if (etatGroupe === 'erreur') rechargerGroupe();
+        recharger();
+      }}
       squelette={<SqueletteListe lignes={4} />}
     >
       {donnees !== null && groupe !== null && soldes !== null && (
@@ -959,7 +964,7 @@ export function SectionDepenses({
 export function Depenses({ groupId }: { groupId: string }) {
   return (
     <section className="page-groupe-pile">
-      <EnteteGroupe groupId={groupId} ongletActif="depenses" titre={t('depenses.titre')} />
+      <EnteteGroupe ongletActif="depenses" titre={t('depenses.titre')} />
       <SectionDepenses groupId={groupId} />
     </section>
   );

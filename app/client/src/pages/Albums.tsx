@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
-import { lireGroupe } from '../api/groupes';
 import {
   creerAlbum,
   listerAlbums,
@@ -14,7 +13,9 @@ import { ChargementPage, SqueletteCarte } from '../components/ChargementPage';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
+import { useGroupe } from '../components/FournisseurGroupe';
 import { IconeCamera, IconePoubelle } from '../components/Icones';
+import { fusionnerEtats, premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
@@ -70,16 +71,22 @@ function Visionneuse({ photo, onFermer }: { photo: PhotoAlbum; onFermer: () => v
 
 /** Page Photos / Albums Immich d'un groupe (lot 11). */
 export function Albums({ groupId }: { groupId: string }) {
+  const { groupe, etat: etatGroupe, erreur: erreurGroupe, rechargerGroupe } = useGroupe();
+  // `null` = fonctionnalité encore inconnue : les albums ne sont lus qu'une fois le groupe connu.
+  const photosActives = groupe?.fonctionnalites.photos ?? null;
   const {
     donnees,
-    etat,
+    etat: etatLecture,
     erreur: erreurLecture,
     recharger,
-  } = useLecture(async () => {
-    const g = await lireGroupe(groupId);
-    const liste = g.fonctionnalites.photos ? await listerAlbums(groupId) : [];
-    return { groupe: g, albums: liste };
-  }, [groupId]);
+  } = useLecture(
+    () => (photosActives === null ? Promise.resolve(null) : photosActives ? listerAlbums(groupId) : Promise.resolve<Album[]>([])),
+    [groupId, photosActives],
+  );
+  // Entre l'arrivée du groupe et le relancement de la lecture, `donnees` est encore `null` en `pret` : on reste en squelette.
+  const etatAlbums = photosActives !== null && donnees === null && etatLecture === 'pret' ? 'chargement' : etatLecture;
+  const etat = fusionnerEtats(etatGroupe, etatAlbums);
+  const erreurEcran = premiereErreur(erreurGroupe, erreurLecture);
   // Albums modifiés depuis la lecture (création, synchronisation, retrait) : prennent le pas sur ceux lus.
   const [albumsLocaux, setAlbumsLocaux] = useState<Album[] | null>(null);
   const [albumActif, setAlbumActif] = useState<Album | null>(null);
@@ -97,12 +104,12 @@ export function Albums({ groupId }: { groupId: string }) {
 
   const relire = (): void => {
     setAlbumsLocaux(null);
+    if (etatGroupe === 'erreur') rechargerGroupe();
     recharger();
   };
-  const groupe = donnees?.groupe ?? null;
-  const albums = albumsLocaux ?? donnees?.albums ?? [];
+  const albums = albumsLocaux ?? donnees ?? [];
   const majAlbums = (maj: (courants: Album[]) => Album[]): void =>
-    setAlbumsLocaux((precedents) => maj(precedents ?? donnees?.albums ?? []));
+    setAlbumsLocaux((precedents) => maj(precedents ?? donnees ?? []));
 
   const ouvrirAlbum = async (album: Album, forcerSync = false): Promise<void> => {
     setErreur(null);
@@ -190,10 +197,7 @@ export function Albums({ groupId }: { groupId: string }) {
   return (
     <section className="page-groupe-pile">
       <EnteteGroupe
-        groupId={groupId}
         ongletActif="photos"
-        nomGroupe={groupe?.name}
-        photosActives={groupe?.fonctionnalites.photos}
         titre={albumActif !== null ? albumActif.title : t('photos.titre')}
         actions={
           albumActif !== null ? (
@@ -226,7 +230,7 @@ export function Albums({ groupId }: { groupId: string }) {
 
       <Erreur message={erreur} />
 
-      <ChargementPage etat={etat} erreur={erreurLecture} onReessayer={relire} squelette={<SqueletteCarte />}>
+      <ChargementPage etat={etat} erreur={erreurEcran} onReessayer={relire} squelette={<SqueletteCarte />}>
         {groupe !== null && !groupe.fonctionnalites.photos ? (
           <div className="carte">
             <p className="discret">{t('erreur.immich.non_configure')}</p>

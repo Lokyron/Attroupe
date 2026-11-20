@@ -3,6 +3,81 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-20 — Audit de l'interface, puis trois phases de remise à niveau
+
+L'interface n'avait jamais été auditée, et jamais ouverte dans un navigateur avant la bêta. Un audit complet
+UI / UX / architecture frontend a été mené en lecture seule, puis appliqué en trois phases. Le rapport est dans
+[`docs/audits/2026-11-18-ui-ux-frontend.md`](../docs/audits/2026-11-18-ui-ux-frontend.md) : **note globale 5/10**,
+8 anomalies critiques, 44 majeures, et un plan d'action en trois phases.
+
+**Les deux défauts qui annulaient tout le reste.** `components/Erreur.tsx` rendait son message **sans aucune
+classe**, et appelait `texteErreur('erreur.interne')` — ce qui cherchait la clé `erreur.erreur.interne`, absente :
+le texte générique ne s'affichait que par accident. Autrement dit, la gestion d'erreur du client entier était
+inerte depuis l'origine. Et `App.tsx` restait indéfiniment sur « Chargement… » quand la lecture initiale échouait.
+
+**Phase 1 (quick wins).** Erreurs stylées et clé corrigée, bouton « Réessayer », écran d'erreur au démarrage,
+contrastes WCAG AA (cinq variables de couleur de texte ajoutées), `:hover` qui ne s'applique plus aux boutons
+désactivés, séparation d'une ligne inerte (`.ligne`) et d'une ligne cliquable (`.ligne-interactive`), ~132 lignes
+de CSS mort retirées, et une passe d'orthotypographie française sur 195 valeurs de `fr.json`.
+
+**Phase 2 (trois briques partagées, puis leur diffusion).** `hooks/useSoumission.ts` — garde par `ref` et non par
+état, **parce qu'une mise à jour d'état est asynchrone et ne bloque pas un second clic survenu dans le même
+tick** — appliqué aux quatorze chemins d'écriture qui n'en avaient aucune, dont la création de dépense, qui
+créait deux dettes dans un groupe d'amis. `hooks/useLecture.ts` et `components/ChargementPage.tsx`, qui
+remplacent un schéma recopié 56 fois, cinq pages blanches et cinq faux états vides.
+`components/DialogueConfirmation.tsx` sur `<dialog>` + `showModal()`, qui remplace 8 `window.confirm` et un
+`window.prompt`, et couvre des destructions qui n'avaient aucun garde-fou. Plus : traitement central du 401,
+présence enregistrée au clic, et fusion des messages de discussion par `id` au lieu d'un remplacement qui
+perdait l'historique déjà chargé. **La relecture a trouvé cinq défauts, dont trois que les correctifs
+eux-mêmes avaient introduits.**
+
+**Phase 2 bis (trois chantiers structurants).**
+1. **`FournisseurGroupe` et flux SSE unique par groupe** (`ADR-0014`). Onze appels à `lireGroupe` deviennent un
+   par entrée dans un groupe et zéro en navigation interne ; six connexions SSE deviennent une par onglet, ce qui
+   double la marge sous le plafond de 8 par compte — quatre onglets d'événement suffisaient à provoquer un 429.
+   `EnteteGroupe` devient présentationnel : plus de saut de titre. `useTempsReel` est supprimé plutôt que mis en
+   façade, pour que la compilation échoue sur tout site non migré.
+2. **`TableauDeBord.tsx` découpé**, 1043 → 232 lignes. La relecture y a trouvé une régression que le découpage
+   avait introduite : sans fenêtre explicite, le serveur plafonne à 12 événements de groupe **tous groupes
+   confondus** au lieu de 200, et filtrer sur le groupe le moins chargé affichait « Aucun événement » pendant que
+   la grille du mois montrait l'événement juste à côté.
+3. **Les écrans de compte qui manquaient** : cartes « Profil » et « Sécurité », sur un `api/compte.ts` créé de
+   zéro — les six routes `/api/moi` existaient et **aucune** n'était appelée par le client.
+
+**Vérifié.** `npm run typecheck` et `npm run lint` verts ; 562 tests unitaires, 458 de cloisonnement et 431
+d'intégration, les trois répertoires lancés séparément **et espacés** — enchaînés dans une même commande, les deux
+derniers échouent en masse faute de ports. Deux fragilités de test ont été diagnostiquées
+plutôt que contournées : l'épuisement de ports éphémères sur macOS, dont la signature est
+`EADDRNOTAVAIL 127.0.0.1` sur `suite-generique.test.ts` lancée en bloc, et un test de plafond d'iCal entrant trop
+juste sous charge, passé à un délai explicite de 20 s.
+
+**Non vérifié.** Rien n'a été ouvert dans un navigateur sur cette phase : le nombre réel de connexions
+`temps-reel` par onglet, le comportement sous `StrictMode`, l'absence de saut de titre et la reprise après une
+coupure réseau restent à contrôler à la main. Il n'existe toujours aucun test de composant React.
+
+**Phase 2 ter, le même jour.** Trois chantiers de plus, menés en parallèle avec cloisonnement des fichiers par
+propriétaire. **Gouvernance des tokens** (`ADR-0015`) : 0 couleur littérale hors `:root`, un seul `--c` par élément
+porteur de couleur, et la première cible navigateur déclarée du projet (Chrome 111+, Safari 16.4+, Firefox 113+),
+rendue nécessaire par 71 usages de `color-mix()`. Au passage, **les contrastes ont été corrigés pour de bon** : la
+passe précédente mesurait sur fond blanc, qui n'existe nulle part — sur les fonds réellement composés, le cyan
+tombait à 3,72:1. **Parcours d'invitation réparé**, y compris un jeton qui survivait à la déconnexion sur un poste
+partagé parce que le fragment restait dans l'URL ; et comme aucune route serveur ne permet de refuser une
+invitation par jeton, le bouton s'appelle « Mettre l'invitation de côté » et dit la vérité. **Les notifications ne
+couvrent plus que les messages** : `event_created` et `expense_added`, conversion de sondage comprise, sans aucune
+migration — les deux genres existaient déjà dans le schéma.
+
+Le cloisonnement a été **prouvé par mutation** sur ce dernier lot : une copie du SELECT des destinataires avec
+`(m.group_id = ? OR 1)` est refusée à l'exécution par le verrou de SQL brut. Et les deux échecs d'intégration
+observés ont été attribués par **mesure** et non par déduction, en rejouant la suite sur un instantané `git archive`
+de `HEAD` : mêmes échecs, donc antérieurs.
+
+**Restent** la phase 2 ter (fin) et la phase 3 : mode sombre (désormais possible), validation champ par champ des
+dépenses, pagination des six listes non bornées, suppression de groupe, remboursements actionnables, accessibilité
+structurelle. **Et trois dettes à solder avant d'ouvrir au groupe réel** : `muted_kinds` n'est lue nulle part, donc
+aucun moyen de couper une catégorie de notification ; les modifications, suppressions et règlements de dépenses
+font bouger les soldes sans rien notifier ; et la notification de règlement demande une migration qui reconstruit
+une table, ce qu'aucune migration du projet n'a jamais fait.
+
 ## 2026-11-17 — Relecture de la livraison : une SSRF, une addition de devises, une lecture inter-groupes
 
 Les lots 7 à 12 avaient été écrits par un autre assistant, dans une copie de travail, et n'avaient jamais été

@@ -30,7 +30,7 @@ export function routesEvenements(contexte: Contexte): Router {
 
   // Crée l'événement ET son fil de discussion, dans la même transaction.
   routeur.post('/', (req, res) => {
-    res.status(201).json(creerEvenement(scopeDe(req), analyser(schemaNouvelEvenement, req.body)));
+    res.status(201).json(creerEvenement(contexte, scopeDe(req), analyser(schemaNouvelEvenement, req.body)));
   });
 
   routeur.get('/:evenementId', (req, res) => {

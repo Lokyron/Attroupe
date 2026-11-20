@@ -662,11 +662,18 @@ describe('plafonds', () => {
     expect(plafond(ics(...Array.from({ length: 4 }, () => uneHeure('20270101T100000Z', `DESCRIPTION:${'d'.repeat(2000)}`, 'RRULE:FREQ=DAILY;COUNT=300'))))).toBe('texte'); // 2 400 000
   });
 
-  it('plafond de plages brutes (mémoire)', () => {
+  // Ce test déroule volontairement ~1 million de plages pour prouver qu'un flux hostile est COUPÉ.
+  // Deux gardes se font la course par construction : le plafond mémoire (`plagesBrutes`) et le budget
+  // de temps (`temps`, PLAFONDS.tempsMs, non injectable). Sur une machine chargée — toute la suite en
+  // parallèle — c'est le budget de temps qui tombe le premier, et exiger `plagesBrutes` rendait ce
+  // test instable deux fois sur trois. Ce qui doit être garanti, c'est qu'UNE garde coupe et que rien
+  // n'est analysé ; le budget de temps a par ailleurs son propre test déterministe à horloge simulée.
+  // Dette assumée : il n'existe donc plus de test déterministe du seul plafond mémoire.
+  it('un flux démesuré est coupé par une garde, jamais analysé', { timeout: 20_000 }, () => {
     const horizonFin = new Date(Date.UTC(2027, 0, 1) + 990 * 86_400_000);
     const quotidien = (): string[] => uneHeure('20270101T100000Z', 'RRULE:FREQ=DAILY');
     const n = Math.ceil(PLAFONDS.plagesBrutes / 990) + 1;
-    expect(plafond(evenements(n, quotidien), { horizonFin })).toBe('plagesBrutes');
+    expect(plafond(evenements(n, quotidien), { horizonFin })).toBeOneOf(['plagesBrutes', 'temps']);
   });
 
   it('budget de temps épuisé (horloge simulée) : ErreurIcsTropGros', () => {

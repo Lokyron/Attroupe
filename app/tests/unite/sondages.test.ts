@@ -21,7 +21,9 @@ import {
   retirerOption,
   voterSondage,
 } from '../../server/services/sondages.js';
+import { JOURNAL_SILENCIEUX } from '../../server/http/middleware/journal.js';
 import { DiffuseurTempsReel } from '../../server/services/temps-reel.js';
+import { envValide } from '../fixtures/env.js';
 import { baseTemporaire, deuxGroupes, type BaseTemporaire, type DeuxGroupes } from '../fixtures/base.js';
 
 describe('calculerCompteurs (pondération : oui = 2, peut-être = 1, non = 0)', () => {
@@ -138,6 +140,8 @@ describe('service et requêtes des sondages (parcours complet en base)', () => {
     instantCourant = new Date('2027-04-01T10:00:00Z');
     contexte = {
       base: t.base,
+      env: envValide({ ATTROUPE_BASE_URL: 'https://attroupe.exemple.test' }),
+      journal: JOURNAL_SILENCIEUX,
       horloge: () => instantCourant,
       diffuseur: new DiffuseurTempsReel({ horloge: () => instantCourant }),
     } as unknown as Contexte;
@@ -216,6 +220,12 @@ describe('service et requêtes des sondages (parcours complet en base)', () => {
     expect(evenement.starts_at).toBe('2027-04-11T19:00:00Z');
     expect(evenement.location_name).toBe('Bistrot du coin');
     expect(typeof evenement.thread_id).toBe('string');
+
+    // L'événement né du sondage est annoncé aux autres membres actifs du groupe, pas à l'auteure ni à l'autre groupe.
+    const destinataires = t.sql.prepare("SELECT user_id FROM notifications WHERE kind = 'event_created' AND subject_id = ?").all(evenement.id) as Array<{ user_id: string }>;
+    expect(destinataires.length).toBeGreaterThan(0);
+    expect(destinataires.map((n) => n.user_id)).not.toContain(d.a.userId);
+    expect(destinataires.map((n) => n.user_id)).not.toContain(d.b.userId);
 
     // Liste et refus après conversion
     expect(listerSondages(scopeAlice)).toHaveLength(1);

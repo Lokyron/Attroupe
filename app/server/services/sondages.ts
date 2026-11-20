@@ -30,7 +30,8 @@ import {
 } from '../domain/sondages.js';
 import type { Contexte } from '../http/contexte.js';
 import { ErreurHttp } from '../http/erreurs.js';
-import { detailEvenement, type DetailEvenement } from './evenements.js';
+import { detailEvenement, notifierEvenementCree, type DetailEvenement } from './evenements.js';
+import { libelleNotificationPush, pousserNotificationsWebPush } from './notifications.js';
 
 // Cas d'usage des sondages de dates (lot 7). Ordre strict des vérifications :
 //  1. cloisonnement (sondage du groupe → 404 `sondage.introuvable`, option du sondage → 404 `option.introuvable`) ;
@@ -245,11 +246,21 @@ export function convertirSondage(
     optionRetenue = trouverOption(scope, sondage.id, gagnante.id);
   }
 
-  const resultat = convertirSondageEnBase(scope, sondage, optionRetenue, champs);
+  // Conversion et notification « événement créé » dans la même transaction : la date choisie, c'est l'événement qui naît.
+  const maintenant = versInstant(contexte.horloge());
+  const { resultat, destinataires } = scope.transaction(() => {
+    const converti = convertirSondageEnBase(scope, sondage, optionRetenue, champs);
+    return {
+      resultat: converti,
+      destinataires: converti.etat === 'converti' ? notifierEvenementCree(contexte, scope, converti.evenementId, maintenant) : [],
+    };
+  });
   if (resultat.etat === 'introuvable') throw new ErreurHttp(404, 'sondage.introuvable');
   if (resultat.etat === 'deja_converti') throw new ErreurHttp(409, 'sondage.deja_converti');
   if (resultat.etat !== 'converti') throw new ErreurHttp(409, 'sondage.annule');
   const { evenementId } = resultat;
+  // Web Push seulement une fois la transaction validée.
+  pousserNotificationsWebPush(contexte, destinataires, libelleNotificationPush('event_created', {}));
   contexte.diffuseur.diffuser(scope, { type: 'sondage.converti', ressource: 'sondage', id: sondage.id, parent_id: evenementId });
   return {
     sondage: detailSondage(scope, sondage.id),

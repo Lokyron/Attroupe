@@ -10,13 +10,14 @@ import {
   type Presences,
   type ReponsePresence,
 } from '../api/evenements';
-import { lireGroupe, listerMembres, type Membre } from '../api/groupes';
+import { listerMembres, type Membre } from '../api/groupes';
 import { libelleDateHoraire } from '../agenda/format';
 import { ChargementPage, SqueletteCarte } from '../components/ChargementPage';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { FilDiscussion } from '../components/FilDiscussion';
+import { useGroupe } from '../components/FournisseurGroupe';
 import { FormulaireEvenement } from '../components/FormulaireEvenement';
 import { IconeCalendrier, IconeLieu, IconeMessage } from '../components/Icones';
 import { TachesEvenement } from '../components/TachesEvenement';
@@ -29,22 +30,21 @@ const REPONSES: readonly ReponsePresence[] = ['yes', 'maybe', 'no'];
 
 /** Création d'un événement : le formulaire, puis le détail du nouvel événement. */
 export function NouvelEvenement({ groupId }: { groupId: string }) {
-  const { donnees: fuseau, etat, erreur, recharger } = useLecture(() => lireGroupe(groupId).then((g) => g.time_zone), [groupId]);
+  const { groupe, etat, erreur, rechargerGroupe } = useGroupe();
   const agenda = `#/groupe/${encodeURIComponent(groupId)}/agenda`;
   return (
     <section className="page-groupe-pile">
       <EnteteGroupe
-        groupId={groupId}
         ongletActif="agenda"
         titre={t('evenement_form.titre_creation')}
         lienRetour={{ href: agenda, libelle: t('evenement.retour_agenda') }}
       />
-      <ChargementPage etat={etat} erreur={erreur} onReessayer={recharger} squelette={<SqueletteCarte />}>
-        {fuseau !== null && (
+      <ChargementPage etat={etat} erreur={erreur} onReessayer={rechargerGroupe} squelette={<SqueletteCarte />}>
+        {groupe !== null && (
       <div className="carte">
         <FormulaireEvenement
           groupId={groupId}
-          fuseauParDefaut={fuseau}
+          fuseauParDefaut={groupe.time_zone}
           onEnregistre={(e) => {
             window.location.hash = `#/groupe/${encodeURIComponent(groupId)}/evenement/${encodeURIComponent(e.id)}`;
           }}
@@ -78,7 +78,6 @@ export function Evenement({ groupId, evenementId }: { groupId: string; evenement
     return (
       <section className="page-groupe-pile">
         <EnteteGroupe
-          groupId={groupId}
           ongletActif="agenda"
           lienRetour={{ href: `#/groupe/${encodeURIComponent(groupId)}/agenda`, libelle: t('evenement.retour_agenda') }}
         />
@@ -174,7 +173,6 @@ function CorpsEvenement({ groupId, initial }: { groupId: string; initial: Donnee
     return (
       <section className="page-groupe-pile">
         <EnteteGroupe
-          groupId={groupId}
           ongletActif="agenda"
           titre={t('evenement_form.titre_modification')}
           lienRetour={{ href: agenda, libelle: t('evenement.retour_agenda') }}
@@ -198,7 +196,6 @@ function CorpsEvenement({ groupId, initial }: { groupId: string; initial: Donnee
   return (
     <section className="page-groupe-pile">
       <EnteteGroupe
-        groupId={groupId}
         ongletActif="agenda"
         titre={evenement.title}
         lienRetour={{ href: agenda, libelle: t('evenement.retour_agenda') }}

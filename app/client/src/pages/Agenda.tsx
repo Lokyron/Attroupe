@@ -7,11 +7,12 @@ import {
   type VisibilitePartage,
 } from '../api/agenda-personnel';
 import { listerEvenements, type Evenement } from '../api/evenements';
-import { lireGroupe } from '../api/groupes';
 import { ajouterJours, aujourdhui, grilleMois, jourDeDebut, joursDe, joursDeSemaine, moisVoisin } from '../agenda/dates';
 import { libelleHoraire, libelleJour, libelleJourCourt, libelleMois } from '../agenda/format';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
+import { useGroupe } from '../components/FournisseurGroupe';
+import { premiereErreur } from '../hooks/etatsLecture';
 import { t } from '../i18n';
 
 type Vue = 'liste' | 'semaine' | 'mois';
@@ -50,28 +51,11 @@ export function Agenda({ groupId }: { groupId: string }) {
   const [ancre, setAncre] = useState(aujourdhui);
   const [evenements, setEvenements] = useState<Evenement[]>([]);
   const [disponibilites, setDisponibilites] = useState<DisponibiliteMembre[]>([]);
-  const [maVisibilite, setMaVisibilite] = useState<VisibilitePartage>('busy');
-  const [nomGroupe, setNomGroupe] = useState<string | undefined>(undefined);
-  const [photosActives, setPhotosActives] = useState<boolean | undefined>(undefined);
+  // Choix de l'utilisateur, tant qu'il n'en a pas fait : la valeur par défaut du groupe (contexte).
+  const [visibiliteChoisie, setVisibiliteChoisie] = useState<VisibilitePartage | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
-
-  useEffect(() => {
-    let abandonne = false;
-    lireGroupe(groupId)
-      .then((g) => {
-        if (!abandonne) {
-          setMaVisibilite(g.ma_visibilite_defaut);
-          setNomGroupe(g.name);
-          setPhotosActives(g.fonctionnalites.photos);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!abandonne) setErreur(messageDe(err));
-      });
-    return () => {
-      abandonne = true;
-    };
-  }, [groupId]);
+  const { groupe, erreur: erreurGroupe, rafraichirGroupe } = useGroupe();
+  const maVisibilite = visibiliteChoisie ?? groupe?.ma_visibilite_defaut ?? 'busy';
 
   useEffect(() => {
     setErreur(null);
@@ -95,7 +79,11 @@ export function Agenda({ groupId }: { groupId: string }) {
   const modifierVisibilite = (nouvelle: VisibilitePartage): void => {
     setErreur(null);
     changerMaVisibiliteDefaut(groupId, nouvelle)
-      .then(setMaVisibilite)
+      .then((v) => {
+        setVisibiliteChoisie(v);
+        // Le contexte garde l'ancien défaut sinon : revenu sur l'agenda, le sélecteur réafficherait l'ancienne valeur.
+        rafraichirGroupe();
+      })
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
@@ -124,10 +112,7 @@ export function Agenda({ groupId }: { groupId: string }) {
   return (
     <section className="page-groupe-pile">
       <EnteteGroupe
-        groupId={groupId}
         ongletActif="agenda"
-        nomGroupe={nomGroupe}
-        photosActives={photosActives}
         titre={t('agenda.titre')}
         actions={
           <a className="bouton bouton-primaire" href={`#/groupe/${encodeURIComponent(groupId)}/evenement-nouveau`}>
@@ -136,7 +121,7 @@ export function Agenda({ groupId }: { groupId: string }) {
         }
       />
 
-      <Erreur message={erreur} />
+      <Erreur message={premiereErreur(erreur, erreurGroupe)} />
 
       <div className="carte">
         <div className="calendrier-barre-outils">

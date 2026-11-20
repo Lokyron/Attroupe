@@ -41,7 +41,9 @@ describe('invitations émises', () => {
 
       await d.remettre();
       const message = d.envoyes.find((m) => m.to === 'victime@exemple.test');
-      expect(message?.sujet).toBe('Invitation à rejoindre « Les potes »');
+      // Espace fine insécable U+202F à l'intérieur des guillemets, comme tout le fichier de textes
+      // serveur. Écrite en échappement pour qu'une espace ASCII ne puisse pas s'y glisser à la relecture.
+      expect(message?.sujet).toBe('Invitation \u00e0 rejoindre \u00ab\u202fLes potes\u202f\u00bb');
       expect(message?.texte).toContain('alice_m vous invite');
       expect(message?.texte).toContain('Viens !');
       const jeton = /\/invitation#jeton=([A-Za-z0-9_-]{43})/.exec(message?.texte ?? '')?.[1];

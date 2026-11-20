@@ -19,7 +19,13 @@ import {
   IconeUtilisateur,
 } from './components/Icones';
 import { Erreur, messageDe } from './components/Erreur';
+import { FournisseurGroupe } from './components/FournisseurGroupe';
 import { t } from './i18n';
+import {
+  effacerInvitationEnAttente,
+  jetonALArrivee,
+  lireInvitationEnAttente,
+} from './invitationEnAttente';
 import { pageDuLien } from './lien';
 import { Compte } from './pages/Compte';
 import { Connexion } from './pages/Connexion';
@@ -118,6 +124,23 @@ export function App() {
   const [infoVersion, setInfoVersion] = useState<InfoVersion | null>(null);
   // Les pages à jeton se reconnaissent au CHEMIN, pas au fragment : le routeur, lui, route sur le hash.
   const lien = pageDuLien(window.location.pathname);
+  // Invitation par lien. Le jeton est lu une fois à l'arrivée et gardé pour l'onglet : un clic de menu change le
+  // fragment, donc l'efface de l'URL, et la page ne doit pas perdre l'invitation pour autant.
+  const [jetonInvitation, setJetonInvitation] = useState<string | null>(() =>
+    lien === 'invitation' ? jetonALArrivee(window.location.hash) : lireInvitationEnAttente(),
+  );
+  // L'écran d'invitation est ouvert tant qu'on n'a pas navigué ailleurs ou qu'on ne l'a pas fermé.
+  const [invitationOuverte, setInvitationOuverte] = useState(lien === 'invitation');
+  const [avis, setAvis] = useState<string | null>(null);
+
+  // Le jeton est désormais gardé : il quitte la barre d'adresse, donc l'historique du navigateur. Sans cela, après une
+  // déconnexion ou une acceptation, un rechargement ou « Précédent » sur un poste partagé le remettrait en stockage.
+  // Dans un effet (idempotent) et non dans l'initialiseur d'état, que StrictMode appelle deux fois.
+  useEffect(() => {
+    if (pageDuLien(window.location.pathname) === 'invitation' && window.location.hash !== '') {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []);
 
   const rafraichirNotifications = useCallback((): void => {
     listerNotifications()
@@ -165,7 +188,17 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const surChangement = (): void => setRoute(lireRoute());
+    const surChangement = (): void => {
+      setRoute(lireRoute());
+      setAvis(null);
+      // Toute navigation ferme l'écran d'invitation, y compris après « Reprendre l'invitation » (le chemin est alors
+      // déjà `/`). Le jeton reste gardé : la bannière propose de la reprendre.
+      setInvitationOuverte(false);
+      // Premier clic : le chemin `/invitation` repasse à `/`, pour que la coque retrouve son routage par fragment.
+      if (pageDuLien(window.location.pathname) === 'invitation') {
+        history.replaceState(null, '', `/${window.location.search}${window.location.hash}`);
+      }
+    };
     window.addEventListener('hashchange', surChangement);
     return () => window.removeEventListener('hashchange', surChangement);
   }, []);
@@ -173,6 +206,24 @@ export function App() {
   useEffect(() => {
     lireVersion().then(setInfoVersion).catch(() => undefined);
   }, []);
+
+  const oublierInvitation = useCallback((): void => {
+    effacerInvitationEnAttente();
+    setJetonInvitation(null);
+  }, []);
+
+  const refuserInvitation = (): void => {
+    oublierInvitation();
+    setInvitationOuverte(false);
+    history.replaceState(null, '', '/#/');
+    setRoute(lireRoute());
+    setAvis(t('lien.refusee'));
+  };
+
+  const accepterInvitation = (): void => {
+    oublierInvitation();
+    recharger();
+  };
 
   // Confirmation d'adresse et réinitialisation ne dépendent pas de la session : elles s'affichent seules,
   // sans attendre `lireMoi` et sans la coquille de l'application.
@@ -190,7 +241,16 @@ export function App() {
   if (etat.type === 'anonyme') {
     return (
       <>
-        {lien === 'invitation' && <InvitationLien connecte={false} onAcceptee={recharger} />}
+        {avis !== null && <p role="status" className="message-avertissement">{avis}</p>}
+        {invitationOuverte && (
+          <InvitationLien
+            jeton={jetonInvitation}
+            connecte={false}
+            onAcceptee={accepterInvitation}
+            onRefusee={refuserInvitation}
+            onAbandon={oublierInvitation}
+          />
+        )}
         <Connexion onConnecte={recharger} />
       </>
     );
@@ -218,6 +278,9 @@ export function App() {
   const initiales = initialesDe(moi.display_name);
   const libelleTousGroupes = t('nav.selecteur_tous', { n: String(moi.groupes.length) });
   const gererDeconnexion = (): void => {
+    // Le jeton d'invitation est un secret porteur de droits : effacé du stockage ici, et déjà retiré de l'URL à l'arrivée.
+    oublierInvitation();
+    setInvitationOuverte(false);
     void deconnecter().then(() => setEtat({ type: 'anonyme' }));
   };
 
@@ -432,9 +495,26 @@ export function App() {
         </header>
 
         <div className="accueil">
-          {lien === 'invitation' && <InvitationLien connecte onAcceptee={recharger} />}
-          {!lien && route.type === 'accueil' && <TableauDeBord moi={moi} />}
-          {!lien && route.type === 'nouveau' && (
+          {avis !== null && <p role="status" className="message-avertissement">{avis}</p>}
+          {invitationOuverte && (
+            <InvitationLien
+              jeton={jetonInvitation}
+              connecte
+              onAcceptee={accepterInvitation}
+              onRefusee={refuserInvitation}
+              onAbandon={oublierInvitation}
+            />
+          )}
+          {!invitationOuverte && jetonInvitation !== null && (
+            <div className="message-avertissement">
+              <p>{t('lien.en_attente')}</p>
+              <button type="button" className="bouton-primaire" onClick={() => setInvitationOuverte(true)}>
+                {t('lien.reprendre')}
+              </button>
+            </div>
+          )}
+          {!invitationOuverte && route.type === 'accueil' && <TableauDeBord moi={moi} />}
+          {!invitationOuverte && route.type === 'nouveau' && (
             <NouveauGroupe
               onCree={(id) => {
                 recharger();
@@ -442,36 +522,40 @@ export function App() {
               }}
             />
           )}
-          {!lien && route.type === 'invitations' && <Invitations onChange={recharger} />}
-          {!lien && route.type === 'notifications' && (
+          {!invitationOuverte && route.type === 'invitations' && <Invitations onChange={recharger} />}
+          {!invitationOuverte && route.type === 'notifications' && (
             <Notifications groupes={moi.groupes} onChange={rafraichirNotifications} />
           )}
-          {!lien && route.type === 'compte' && <Compte moi={moi} groupes={moi.groupes} onProfilChange={recharger} />}
-          {!lien && route.type === 'exploitation' && <Exploitation serviceEmail={moi.service_email} />}
-          {!lien && route.type === 'groupe' && (
-            <Groupe
-              key={route.id}
-              groupId={route.id}
-              onQuitte={() => {
-                recharger();
-                aller('#/');
-              }}
-            />
-          )}
-          {!lien && route.type === 'agenda' && <Agenda key={route.id} groupId={route.id} />}
-          {!lien && route.type === 'listes' && <Listes key={route.id} groupId={route.id} />}
-          {!lien && route.type === 'liste' && <Liste key={route.listeId} groupId={route.id} listeId={route.listeId} />}
-          {!lien && route.type === 'sondages' && <Sondages key={route.id} groupId={route.id} />}
-          {!lien && route.type === 'sondage' && (
-            <Sondage key={route.sondageId} groupId={route.id} sondageId={route.sondageId} />
-          )}
-          {!lien && route.type === 'depenses' && <Depenses key={route.id} groupId={route.id} />}
-          {!lien && route.type === 'fils' && <Fils key={route.id} groupId={route.id} />}
-          {!lien && route.type === 'fil' && <Fil key={route.filId} groupId={route.id} filId={route.filId} />}
-          {!lien && route.type === 'albums' && <Albums key={route.id} groupId={route.id} />}
-          {!lien && route.type === 'evenement-nouveau' && <NouvelEvenement key={route.id} groupId={route.id} />}
-          {!lien && route.type === 'evenement' && (
-            <Evenement key={route.evenementId} groupId={route.id} evenementId={route.evenementId} />
+          {!invitationOuverte && route.type === 'compte' && <Compte moi={moi} groupes={moi.groupes} onProfilChange={recharger} />}
+          {!invitationOuverte && route.type === 'exploitation' && <Exploitation serviceEmail={moi.service_email} />}
+          {!invitationOuverte && groupeCourant !== '' && (
+            <FournisseurGroupe key={groupeCourant} groupId={groupeCourant} nomInitial={groupeActifObj?.name}>
+              {route.type === 'groupe' && (
+                <Groupe
+                  key={route.id}
+                  groupId={route.id}
+                  onQuitte={() => {
+                    recharger();
+                    aller('#/');
+                  }}
+                />
+              )}
+              {route.type === 'agenda' && <Agenda key={route.id} groupId={route.id} />}
+              {route.type === 'listes' && <Listes key={route.id} groupId={route.id} />}
+              {route.type === 'liste' && <Liste key={route.listeId} groupId={route.id} listeId={route.listeId} />}
+              {route.type === 'sondages' && <Sondages key={route.id} groupId={route.id} />}
+              {route.type === 'sondage' && (
+                <Sondage key={route.sondageId} groupId={route.id} sondageId={route.sondageId} />
+              )}
+              {route.type === 'depenses' && <Depenses key={route.id} groupId={route.id} />}
+              {route.type === 'fils' && <Fils key={route.id} groupId={route.id} />}
+              {route.type === 'fil' && <Fil key={route.filId} groupId={route.id} filId={route.filId} />}
+              {route.type === 'albums' && <Albums key={route.id} groupId={route.id} />}
+              {route.type === 'evenement-nouveau' && <NouvelEvenement key={route.id} groupId={route.id} />}
+              {route.type === 'evenement' && (
+                <Evenement key={route.evenementId} groupId={route.id} evenementId={route.evenementId} />
+              )}
+            </FournisseurGroupe>
           )}
           <footer className="pied">
             {infoVersion !== null && (

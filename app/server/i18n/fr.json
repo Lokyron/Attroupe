@@ -3,41 +3,55 @@
   "emails": {
     "verification_email": {
       "sujet": "Confirmez votre adresse e-mail",
-      "texte": "Bonjour {nom},\n\nBienvenue sur {application}. Il ne reste qu'une étape : confirmer votre adresse e-mail. Ce lien est valable 24 heures.\n\n{lien}\n\nSi vous n'êtes pas à l'origine de cette inscription, ignorez simplement ce message : aucun compte ne sera activé.",
+      "texte": "Bonjour {nom},\n\nBienvenue sur {application}. Il ne reste qu’une étape : confirmer votre adresse e-mail. Ce lien est valable 24 heures.\n\n{lien}\n\nSi vous n’êtes pas à l’origine de cette inscription, ignorez simplement ce message : aucun compte ne sera activé.",
       "action": "Confirmer mon adresse"
     },
     "reinitialisation_mot_de_passe": {
       "sujet": "Réinitialisation de votre mot de passe",
-      "texte": "Bonjour {nom},\n\nUne réinitialisation du mot de passe de votre compte {application} a été demandée. Ce lien est valable 1 heure et ne fonctionne qu'une seule fois.\n\n{lien}\n\nToutes vos sessions ouvertes seront fermées au changement. Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe actuel reste valable.",
+      "texte": "Bonjour {nom},\n\nUne réinitialisation du mot de passe de votre compte {application} a été demandée. Ce lien est valable 1 heure et ne fonctionne qu’une seule fois.\n\n{lien}\n\nToutes vos sessions ouvertes seront fermées au changement. Si vous n’êtes pas à l’origine de cette demande, ignorez ce message : votre mot de passe actuel reste valable.",
       "action": "Choisir un nouveau mot de passe"
     },
     "compte_existant": {
       "sujet": "Vous avez déjà un compte",
-      "texte": "Bonjour {nom},\n\nQuelqu'un a tenté de créer un compte {application} avec votre adresse e-mail, mais un compte existe déjà. Si c'était vous, connectez-vous — ou demandez un nouveau mot de passe si vous l'avez oublié.\n\n{lien}\n\nSinon, vous pouvez ignorer ce message : rien n'a été modifié.",
+      "texte": "Bonjour {nom},\n\nQuelqu’un a tenté de créer un compte {application} avec votre adresse e-mail, mais un compte existe déjà. Si c’était vous, connectez-vous — ou demandez un nouveau mot de passe si vous l’avez oublié.\n\n{lien}\n\nSinon, vous pouvez ignorer ce message : rien n’a été modifié.",
       "action": "Me connecter"
     },
     "invitation_groupe": {
-      "sujet": "Invitation à rejoindre « {groupe} »",
-      "texte": "Bonjour,\n\n{invitant} vous invite à rejoindre le groupe « {groupe} » sur {application}.{mot}\n\nCe lien est valable 14 jours et ne fonctionne qu'une seule fois.\n\n{lien}\n\nSi vous ne connaissez pas cette personne, ignorez simplement ce message : rien ne se passera tant que vous n'acceptez pas.",
+      "sujet": "Invitation à rejoindre « {groupe} »",
+      "texte": "Bonjour,\n\n{invitant} vous invite à rejoindre le groupe « {groupe} » sur {application}.{mot}\n\nCe lien est valable 14 jours et ne fonctionne qu’une seule fois.\n\n{lien}\n\nSi vous ne connaissez pas cette personne, ignorez simplement ce message : rien ne se passera tant que vous n’acceptez pas.",
       "action": "Voir l’invitation"
     },
     "notification_immediate": {
-      "sujet": "Du nouveau dans « {groupe} »",
-      "texte": "Bonjour {nom},\n\nIl y a du nouveau dans le groupe « {groupe} » sur {application}.\n\n{lien}",
+      "sujet": "Du nouveau dans « {groupe} »",
+      "texte": "Bonjour {nom},\n\nIl y a du nouveau dans le groupe « {groupe} » sur {application}.\n\n{lien}",
       "action": "Ouvrir la discussion"
     },
+    "notification_evenement": {
+      "sujet": "Nouvel événement dans « {groupe} »",
+      "texte": "Bonjour {nom},\n\nUn événement vient d’être ajouté à l’agenda du groupe « {groupe} » sur {application}.\n\n{lien}",
+      "action": "Voir l’événement"
+    },
+    "notification_depense": {
+      "sujet": "Une dépense vous concerne dans « {groupe} »",
+      "texte": "Bonjour {nom},\n\nUne dépense qui vous concerne vient d’être enregistrée dans le groupe « {groupe} » sur {application}. Aucune action n’est demandée par ce message.\n\n{lien}",
+      "action": "Voir les dépenses"
+    },
     "resume_quotidien": {
-      "sujet": "Résumé quotidien de « {groupe} »",
-      "texte": "Bonjour {nom},\n\nVous avez {nombre} nouvelle(s) notification(s) non lue(s) dans le groupe « {groupe} » sur {application}.\n\n{lien}",
+      "sujet": "Résumé quotidien de « {groupe} »",
+      "texte": "Bonjour {nom},\n\nVous avez {nombre} nouvelle(s) notification(s) non lue(s) dans le groupe « {groupe} » sur {application}.\n\n{lien}",
       "action": "Voir mes notifications"
     }
+  },
+  "notifications_push": {
+    "event_created": "Nouvel événement dans le groupe",
+    "expense_added": "Une dépense vous concerne"
   },
   "flux_ical": {
     "nom_calendrier": "Attroupe",
     "groupe_personnel": "Personnel",
     "lieu": "Lieu",
     "consignes": "Consignes",
-    "fuseau": "Fuseau d'origine",
+    "fuseau": "Fuseau d’origine",
     "lien": "Lien"
   }
 }

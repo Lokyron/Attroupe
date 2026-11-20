@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { lireGroupe, type Membre } from '../api/groupes';
+import { type Membre } from '../api/groupes';
 import { creerListe, listerListes, type ResumeListe } from '../api/listes';
 import { assigner, changerStatut, creerTache, listerTaches, supprimerTache, type Tache } from '../api/taches';
 import { useRechargement } from '../api/rechargement';
-import { useTempsReel } from '../api/tempsReel';
+import { useGroupe, useTempsReelGroupe } from './FournisseurGroupe';
+import { fusionnerEtats, premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { lienListe } from '../pages/Listes';
@@ -19,17 +20,18 @@ import { Erreur, messageDe } from './Erreur';
  */
 export function TachesEvenement({ groupId, evenementId, titreEvenement, membres }: { groupId: string; evenementId: string; titreEvenement: string; membres: Membre[] }) {
   // Lecture initiale à trois états ; les rafraîchissements du flux temps réel se font ensuite dans `CorpsTaches` (`useRechargement`), sans repasser par le squelette.
-  const { donnees, etat, erreur, recharger } = useLecture<LecturesTaches>(
-    () =>
-      Promise.all([listerTaches(groupId, evenementId), listerListes(groupId, evenementId), lireGroupe(groupId)]).then(([taches, listes, groupe]) => ({
-        taches,
-        listes,
-        moi: groupe.mon_appartenance_id,
-      })),
+  const { etat: etatGroupe, erreur: erreurGroupe, rechargerGroupe } = useGroupe();
+  const lecture = useLecture<LecturesTaches>(
+    () => Promise.all([listerTaches(groupId, evenementId), listerListes(groupId, evenementId)]).then(([taches, listes]) => ({ taches, listes })),
     [groupId, evenementId],
   );
+  const { donnees } = lecture;
+  const reessayer = (): void => {
+    if (etatGroupe === 'erreur') rechargerGroupe();
+    lecture.recharger();
+  };
   return (
-    <ChargementPage etat={etat} erreur={erreur} onReessayer={recharger}>
+    <ChargementPage etat={fusionnerEtats(etatGroupe, lecture.etat)} erreur={premiereErreur(erreurGroupe, lecture.erreur)} onReessayer={reessayer}>
       {donnees !== null && <CorpsTaches groupId={groupId} evenementId={evenementId} titreEvenement={titreEvenement} membres={membres} initial={donnees} />}
     </ChargementPage>
   );
@@ -38,13 +40,13 @@ export function TachesEvenement({ groupId, evenementId, titreEvenement, membres 
 interface LecturesTaches {
   taches: Tache[];
   listes: ResumeListe[];
-  moi: string | null;
 }
 
 function CorpsTaches({ groupId, evenementId, titreEvenement, membres, initial }: { groupId: string; evenementId: string; titreEvenement: string; membres: Membre[]; initial: LecturesTaches }) {
   const [taches, setTaches] = useState<Tache[]>(initial.taches);
   const [listes, setListes] = useState<ResumeListe[]>(initial.listes);
-  const moi = initial.moi;
+  const { groupe } = useGroupe();
+  const moi = groupe?.mon_appartenance_id ?? null;
   const [titre, setTitre] = useState('');
   const [erreur, setErreur] = useState<string | null>(null);
   const [aSupprimer, setASupprimer] = useState<Tache | null>(null);
@@ -63,7 +65,7 @@ function CorpsTaches({ groupId, evenementId, titreEvenement, membres, initial }:
   // Les listes de CET événement : un message d'article ne nous concerne que s'il vient de l'une d'elles.
   const idsListes = useRef<ReadonlySet<string>>(new Set());
   idsListes.current = new Set(listes.map((l) => l.id));
-  useTempsReel(groupId, {
+  useTempsReelGroupe({
     onOuvert: recharger,
     onEvenement: (e) => {
       const concerne =

@@ -2,11 +2,12 @@ import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { creerListe, listerListes, type ResumeListe } from '../api/listes';
 import { useRechargement } from '../api/rechargement';
-import { useTempsReel } from '../api/tempsReel';
+import { useGroupe, useTempsReelGroupe } from '../components/FournisseurGroupe';
 import { ChargementPage } from '../components/ChargementPage';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconeListe } from '../components/Icones';
+import { premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
@@ -40,6 +41,7 @@ export function Listes({ groupId }: { groupId: string }) {
     setSource(lecture.donnees);
     setListes(lecture.donnees);
   }
+  const { erreur: erreurGroupe } = useGroupe();
   const { enCours, lancer } = useSoumission();
   const champTitre = useRef<HTMLInputElement>(null);
   const [titre, setTitre] = useState('');
@@ -51,7 +53,7 @@ export function Listes({ groupId }: { groupId: string }) {
     setListes,
     (err) => setErreur(messageDe(err)),
   );
-  useTempsReel(groupId, {
+  useTempsReelGroupe({
     onOuvert: recharger,
     onEvenement: (e) => {
       if (e.ressource === 'liste' || e.ressource === 'article') planifier();
@@ -78,8 +80,8 @@ export function Listes({ groupId }: { groupId: string }) {
 
   return (
     <section className="page-groupe-pile">
-      <EnteteGroupe groupId={groupId} ongletActif="listes" titre={t('listes.titre')} />
-      <Erreur message={erreur} />
+      <EnteteGroupe ongletActif="listes" titre={t('listes.titre')} />
+      <Erreur message={premiereErreur(erreur, erreurGroupe)} />
 
       <form className="carte barre-ajout-ligne" onSubmit={creer}>
         <input

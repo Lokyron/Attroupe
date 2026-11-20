@@ -21,7 +21,6 @@ export function Fil({ groupId, filId }: { groupId: string; filId: string }) {
   return (
     <section className="page-groupe-pile">
       <EnteteGroupe
-        groupId={groupId}
         ongletActif="fils"
         titre={titre}
         lienRetour={{ href: retour, libelle: t('fil.retour_fils') }}

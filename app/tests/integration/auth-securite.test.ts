@@ -115,7 +115,12 @@ describe('pas d’énumération de comptes', () => {
     return [mediane(da), mediane(db)];
   }
 
-  it('connexion : la durée ne trahit pas l’existence de l’adresse (mot de passe vérifié contre un leurre)', async () => {
+  // Ces deux tests font chacun 30 requêtes scrypt à N=2^14. Avec 27 workers vitest en parallèle, la
+  // contention CPU les fait dépasser le délai par défaut de 5 s AVANT même qu'ils assertent : ils
+  // n'échouaient donc pas sur un écart de durée mesuré, mais sur le délai. Allonger le délai ne
+  // relâche rien de ce qu'ils vérifient — l'assertion porte sur l'écart ENTRE les deux cas, pas sur
+  // une durée absolue — et évite de les classer à tort comme instables.
+  it('connexion : la durée ne trahit pas l’existence de l’adresse (mot de passe vérifié contre un leurre)', { timeout: 60_000 }, async () => {
     d.nettoyer();
     // Coût de hachage sensible (~50 ms) pour que l'écart « vérifié / non vérifié » dépasse largement le bruit.
     d = decor({ parametresScrypt: { N: 2 ** 14, r: 8, p: 1 }, regles: grandesLimites() });
@@ -131,7 +136,12 @@ describe('pas d’énumération de comptes', () => {
     expect(Math.abs(connue - inconnue)).toBeLessThan(Math.max(connue, inconnue) * 0.5);
   });
 
-  it('inscription : la durée ne trahit pas l’existence de l’adresse (mot de passe haché dans les deux cas)', async () => {
+  // Ces deux tests font chacun 30 requêtes scrypt à N=2^14. Avec 27 workers vitest en parallèle, la
+  // contention CPU les fait dépasser le délai par défaut de 5 s AVANT même qu'ils assertent : ils
+  // n'échouaient donc pas sur un écart de durée mesuré, mais sur le délai. Allonger le délai ne
+  // relâche rien de ce qu'ils vérifient — l'assertion porte sur l'écart ENTRE les deux cas, pas sur
+  // une durée absolue — et évite de les classer à tort comme instables.
+  it('inscription : la durée ne trahit pas l’existence de l’adresse (mot de passe haché dans les deux cas)', { timeout: 60_000 }, async () => {
     d.nettoyer();
     d = decor({ parametresScrypt: { N: 2 ** 14, r: 8, p: 1 }, regles: grandesLimites() });
     await d.client().post('/api/auth/inscription', { email: 'alice@exemple.test', username: 'alice_m', password: MOT_DE_PASSE });

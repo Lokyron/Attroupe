@@ -20,6 +20,8 @@ import {
   type Moi,
 } from '../api/groupes';
 import { CarteNotificationsPush } from '../components/CarteNotificationsPush';
+import { CarteProfil } from '../components/CarteProfil';
+import { CarteSecurite } from '../components/CarteSecurite';
 import { CarteSourcesAgenda } from '../components/CarteSourcesAgenda';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { Erreur, messageDe } from '../components/Erreur';
@@ -691,6 +693,8 @@ export function Compte({
   return (
     <section className="page-pile">
       <h2>{t('compte.titre')}</h2>
+      <CarteProfil moi={moi} onProfilChange={onProfilChange} />
+      <CarteSecurite />
       <CartePhotoProfil moi={moi} onProfilChange={onProfilChange} />
       <CarteNotificationsPush />
       <MonAgendaPersonnel groupes={groupes} />

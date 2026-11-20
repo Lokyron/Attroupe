@@ -441,10 +441,11 @@ ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
   qu'elle soit lue (`pages/Compte.tsx:556-583`) ; `input:focus { outline: none }` (`styles.css:665`)
   rend le focus clavier invisible sur les cases et les radios ; douze contrastes sous le seuil WCAG AA,
   calculés, dont les boutons de vote à 3,19:1 et les bordures de champ à 1,26:1 ; et `Liste.tsx`
-  efface le message « déjà pris par X » en 150 ms. À noter aussi : seuls les messages de discussion
-  déclenchent une notification (`app/server/services/fils.ts:57` est le seul appelant de
-  `notifierMembresGroupe`, alors que `fr.json` promet « nouvel événement, message ou dépense »), et dix
-  capacités du serveur n'ont aucune porte d'entrée dans l'interface (mot de passe, sessions, profil et
+  efface le message « déjà pris par X » en 150 ms. À noter aussi, **dans l'état audité** : seuls les
+  messages de discussion déclenchaient une notification (`app/server/services/fils.ts:57` était le seul
+  appelant de `notifierMembresGroupe`, alors que `fr.json` promettait « nouvel événement, message ou
+  dépense ») — corrigé depuis, voir la phase 2 ter plus bas ; et dix
+  capacités du serveur n'avaient aucune porte d'entrée dans l'interface (mot de passe, sessions, profil et
   fuseau, modification d'une dépense, renommage d'un groupe et d'un album, modification d'un créneau
   personnel). Le plan d'action en trois phases est au chapitre 5 du rapport.
 - **Phase 1 de l'audit appliquée (quick wins).** Sont corrigés : les erreurs stylées et la clé de
@@ -484,14 +485,123 @@ ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
     bascule que si elle se croyait connectée), réponse de présence enregistrée au clic, fusion des
     messages de discussion par `id` au lieu d'un remplacement qui perdait l'historique chargé,
     visionneuse photo sur `<dialog>`, et `loading="lazy"` sur les vignettes.
-- **Restent les phases 2 bis et 3** : découpage de `TableauDeBord.tsx` (971 lignes, 10 blocs),
-  contexte de groupe partagé et flux SSE unique par groupe (`lireGroupe` est appelé à neuf
-  endroits), gouvernance des tokens du design system, mode sombre, écrans de compte manquants (mot
-  de passe, sessions, profil — quatre endpoints sans interface), validation champ par champ des
-  dépenses, pagination des six listes non bornées, suppression de groupe, sortie du type de liste
-  hors du titre, et **les notifications autres que les messages** : `services/fils.ts` reste le seul
-  appelant de `notifierMembresGroupe`.
-- **Fragilité de test confirmée** : sur ce même lot, un `npm test` lancé juste après un
+- **Phase 2 bis de l'audit appliquée : trois chantiers structurants.**
+  - **`FournisseurGroupe` et flux SSE unique** (ADR-0014, à lire avant d'y toucher). Quatre points
+    d'entrée à connaître : `components/FournisseurGroupe.tsx` (le fournisseur, `useGroupe` et
+    `useTempsReelGroupe`), `api/canalGroupe.ts` (le multiplexeur, sans React ni `EventSource`) et
+    `hooks/etatsLecture.ts` (`fusionnerEtats`, `premiereErreur`). **La règle : un abonné filtre, il
+    n'ouvre pas de connexion.** Onze appels à `lireGroupe` sont devenus un par entrée dans un groupe
+    et zéro en navigation interne ; six connexions SSE sont devenues une par onglet, ce qui double la
+    marge sous le plafond de 8 par compte. `useTempsReel` est supprimé — volontairement, pour que la
+    compilation échoue sur tout site non migré. `EnteteGroupe` est devenu présentationnel et a perdu
+    `groupId`, `nomGroupe` et `photosActives` : plus de saut de titre. Deux pages attendent
+    nécessairement le groupe à la première entrée (`Albums` pour `fonctionnalites.photos`, `Groupe`
+    pour `mon_role`) ; ailleurs les lectures partent en parallèle et `fusionnerEtats` garde un seul
+    squelette. Piège à ne pas « corriger » : `onOuvert` est rejoué à **chaque** reconnexion et à un
+    abonnement tardif ; le désarmer arrêterait le temps réel en silence après la première coupure
+    réseau (test `app/tests/unite/canal-groupe.test.ts`, cas « deux ouvertures »).
+  - **`TableauDeBord.tsx` découpé** : 1043 → 232 lignes, en `pages/tableau/` (`selecteurs.ts` pour les
+    dérivations pures, `formats.ts`, et un fichier par bloc d'affichage) plus `hooks/useTableauDeBord`
+    et `hooks/useFenetreCalendrier`. Lève M2 : les KPI, les événements à venir, les soldes, les photos
+    et les groupes ne bougent plus quand on navigue dans le calendrier. **`useTableauDeBord` passe une
+    fenêtre explicite bien qu'elle reproduise l'horizon par défaut du serveur** : c'est sa *présence*
+    qui lève le plafond de 12 événements de groupe et 8 personnels, tous groupes confondus, à 200
+    (`db/queries/tableau-de-bord.ts`, `MAX_EVENEMENTS_FENETRE`). Sans elle, filtrer sur le groupe le
+    moins chargé affichait « Aucun événement » alors que la grille du mois montrait l'événement juste
+    à côté.
+  - **Les écrans de compte qui manquaient** : `components/CarteProfil.tsx` (nom affiché, fuseau en
+    `<input list>` alimenté par `Intl.supportedValuesOf`, bandeau d'adresse non confirmée) et
+    `components/CarteSecurite.tsx` (mot de passe, liste et révocation des appareils), sur un
+    `api/compte.ts` créé de zéro : les six routes `/api/moi` existaient et **aucune** n'était appelée
+    par le client. La session courante n'a pas de bouton de révocation (s'en déconnecter depuis cet
+    écran serait un piège). Le changement de mot de passe **révoque les autres sessions et pivote la
+    courante** (`db/queries/comptes.ts:512-539`) : le message de succès le dit.
+  - L'anniversaire n'est pas exposé : l'API accepte aussi la forme `--MM-JJ` (sans année), qu'un
+    `<input type="date">` ne sait ni afficher ni renvoyer. Le client n'envoie que les champs modifiés,
+    donc une date saisie sans année n'est pas écrasée.
+- **Un risque latent figé par un test, pas corrigé** : dans `pages/tableau/selecteurs.ts`, le tri
+  compare `starts_at` en chaîne — donc en UTC pour un événement à heure fixe, et en date locale pour
+  une journée entière. Entre minuit local et minuit UTC, l'ordre affiché peut être faux (visible pour
+  un fuseau à l'est, type Tokyo). Comportement antérieur au découpage, figé par
+  `app/tests/unite/tableau-selecteurs.test.ts` plutôt que modifié à l'aveugle.
+- **Phase 2 ter appliquée : trois chantiers.**
+  - **Gouvernance des tokens du design system** (ADR-0015, à lire avant de toucher à `styles.css`).
+    0 couleur littérale hors `:root`, un seul `--c` par élément porteur de couleur, et des échelles
+    d'espacement, de rayon, d'ombre, de taille, de z-index, de durée et de flou. **La cible navigateur
+    est désormais déclarée** — Chrome 111+, Safari 16.4+, Firefox 113+ — parce que `color-mix()` est
+    employé 71 fois ; il n'existait aucun `browserslist` avant. Piège documenté dans l'ADR : nos
+    `color-mix()` contiennent tous un `var()`, donc la déclaration est acceptée à l'analyse puis
+    devient invalide au calcul et la propriété repasse à `unset` — **une déclaration littérale placée
+    juste avant ne sert pas de repli**. Cinq tokens de voile sur photo et de fond de visionneuse ont
+    donc une valeur `rgba` dans `:root`, surchargée sous `@supports` ; ombres et effets de verre n'en
+    ont pas, volontairement.
+  - **Les contrastes, pour de bon.** La passe précédente mesurait sur fond blanc, qui n'existe nulle
+    part dans l'application. Sur les fonds réellement composés (dégradé de `body::before`, verre,
+    `--primaire-clair` de la case du jour, puis la teinte), le cyan tombait à 3,72:1 et le violet à
+    3,80:1 pour du texte de 0,7 rem. Quatre tokens de texte assombris, pire cas remonté entre 4,6 et
+    5,3:1, vérifié par deux calculs indépendants. **Un ratio se calcule sur le fond composé.**
+  - **Parcours d'invitation réparé** : le jeton survit à la navigation (`invitationEnAttente.ts`,
+    `sessionStorage`, tous les accès sous `try`/`catch` y compris l'accesseur), le fragment est retiré
+    de l'URL dès l'arrivée — sinon il survivait à la déconnexion sur un poste partagé —,
+    « Reprendre l'invitation » après confirmation d'adresse, et le 403 `invitation.adresse_non_verifiee`
+    propose de renvoyer le lien. **Il n'existe aucune route serveur pour refuser une invitation par
+    jeton** (seul `POST /api/moi/invitations/:id/refus` existe, et il filtre sur `target_user_id`, que
+    les invitations par e-mail n'ont pas) : le bouton s'appelle donc « Mettre l'invitation de côté » et
+    les textes disent exactement ce qu'il fait.
+  - **Les notifications ne couvrent plus que les messages** : `event_created` et `expense_added` sont
+    émis, y compris pour un événement né de la conversion d'un sondage. Les deux genres existaient déjà
+    dans le `CHECK` SQL, aucune migration n'a été nécessaire. « La dépense me concerne » = le payeur
+    plus les porteurs d'une part non nulle, moins l'auteur. Ni montant, ni libellé, ni titre, ni lieu
+    n'est exposé dans l'e-mail ou le push — choix plus strict que celui du message. Coût **mesuré** de
+    `notifierMembresGroupe` dans la transaction : 17,6 ms médians pour 50 destinataires sous
+    `BEGIN IMMEDIATE`, ~3 à 4 ms pour 10 membres.
+- **Trois dettes à traiter avant d'ouvrir au groupe réel :**
+  - **`notification_preferences.muted_kinds` n'est lue nulle part.** Avec un seul genre émis, sans
+    conséquence ; avec trois, un trésorier qui saisit 30 dépenses un dimanche soir envoie 30
+    notifications, 30 pushs et 30 e-mails à chaque participant, et le seul levier est tout ou rien.
+    La réaction prévisible est de tout couper, messages compris. Minimum utile : lire `muted_kinds`
+    dans `notifierMembresGroupe` après le filtre SQL, sans changer de schéma.
+  - **Les écritures suivantes ne notifient pas** : `modifierDepenseService`, `supprimerDepenseService`,
+    `creerRemboursementService` et `confirmerRemboursementService` font bouger les soldes en silence.
+    Une part qui passe de 0 à 50 € par modification ne prévient personne.
+  - **La notification de règlement demande une migration** : ni `settlement` dans le `CHECK kind`, ni
+    dans `CHECK subject_type`. SQLite ne modifie pas un `CHECK`, et aucune migration du projet n'a
+    jamais reconstruit une table (0002 à 0005 ne font que `CREATE TABLE` et `ADD COLUMN`). Il faudrait
+    une 0006 par table neuve + `INSERT … SELECT` + `DROP` + `RENAME`, soit ~8 fichiers touchés ; et
+    `app/tests/schema/migrations.test.ts:101` liste les versions attendues en dur, il faudra le
+    toucher. Risque principal : un `INSERT … SELECT` qui oublie une colonne perd des données en
+    silence. `VACUUM INTO` sauvegarde avant migration.
+- **Restent la phase 2 ter (fin) et la phase 3** : mode sombre (les tokens le permettent désormais ;
+  attention, le bloc `@supports` des voiles doit être redéfini lui aussi, et `theme-color` est figé
+  dans `index.html`), validation champ par champ des dépenses, pagination des six listes non bornées,
+  suppression de groupe, remboursements actionnables, sortie du type de liste hors du titre,
+  accessibilité structurelle et route `introuvable`.
+- **Fragilité de test confirmée, et sa signature** : un `npm test` lancé juste après un
   `npm run typecheck` a donné 42 échecs sur 2 fichiers, puis deux runs espacés ont été entièrement
-  verts (1659 tests). C'est l'épuisement de ports éphémères déjà décrit plus haut — espacer les
-  lancements, et ne pas conclure sur un seul run rouge.
+  verts (1659 tests). Rejoué sur la phase 2 bis : `npx vitest run` en un seul bloc donne 49 échecs,
+  tous dans `app/tests/cloisonnement/suite-generique.test.ts`, avec
+  **`Error: connect EADDRNOTAVAIL 127.0.0.1:<port>`** — c'est la signature à reconnaître. Le même
+  répertoire lancé seul passe (458 tests). Et ce n'est pas réglé en
+  découpant : les trois répertoires enchaînés dans une **même** commande donnent 63 échecs sur l'intégration, pour
+  la même raison, alors que chacun lancé seul passe (562, 458 et 431 tests). Donc : lancer `app/tests/unite`,
+  `app/tests/cloisonnement` et `app/tests/integration` séparément **et espacés**, et ne jamais conclure à une
+  régression de cloisonnement sur un run en bloc sans avoir regardé la cause de l'échec.
+- **Un test de plafond était trop juste sous charge** : `app/tests/unite/ics-entrant.test.ts`,
+  « plafond de plages brutes (mémoire) », déroule ~1 million de plages. Deux gardes s'y font la course
+  par construction — le plafond mémoire et le budget de temps (`PLAFONDS.tempsMs`, non injectable) —
+  et sous charge c'est le budget de temps qui tombe le premier. Exiger `plagesBrutes` rendait le test
+  instable deux fois sur trois. Il exige désormais qu'**une** garde coupe, avec un délai explicite de
+  20 s. **Dette assumée** : il n'existe plus de test déterministe du seul plafond mémoire ; le budget
+  de temps, lui, garde le sien à horloge simulée.
+- **Trois tests avaient un délai par défaut trop court, et c'est maintenant explicite.** Le délai de
+  5 s de vitest fait échouer un test **avant qu'il asserte** : il « échoue » alors sur sa durée, pas
+  sur ce qu'il mesure, et on finit par le classer comme instable et ne plus le lire. Les trois cas :
+  - `app/tests/integration/auth-securite.test.ts`, « la durée ne trahit pas l'existence de l'adresse »
+    (connexion et inscription) : 30 requêtes scrypt à N=2^14 chacun, avec 27 workers concurrents.
+    Antériorité **prouvée par mesure**, en rejouant la suite sur un instantané `git archive` de `HEAD` :
+    mêmes deux échecs. L'assertion porte sur l'écart ENTRE deux cas, pas sur une durée absolue :
+    allonger le délai ne relâche donc rien.
+  - `app/tests/cloisonnement/verrou-db.test.ts`, « aucun fichier ne contourne le verrou » : il résout
+    les imports de tout le dépôt, donc il s'allonge à mesure que le projet grossit. C'est un garde-fou
+    de sécurité : il doit échouer pour ce qu'il mesure, ou pas du tout.
+  - `app/tests/unite/ics-entrant.test.ts`, le plafond de flux iCal (voir ci-dessus).

@@ -7,7 +7,9 @@
  * à usage unique (ce qui afficherait « lien invalide » à qui vient de réussir), et un jeton de réinitialisation,
  * valable une heure, ne dort pas dans la barre d'adresse ni dans l'historique du navigateur.
  *
- * Pas pour l'invitation : son jeton doit survivre au passage par la connexion, dans le même onglet.
+ * Pour l'invitation aussi, depuis que son jeton est gardé en `sessionStorage` (`invitationEnAttente.ts`) : c'est ce
+ * stockage, effacé à l'acceptation, au refus et à la déconnexion, qui lui fait traverser la connexion. Le laisser dans
+ * l'URL le ferait revenir en stockage après un rechargement ou « Précédent » sur un poste partagé.
  */
 export function effacerFragment(): void {
   history.replaceState(null, '', window.location.pathname + window.location.search);

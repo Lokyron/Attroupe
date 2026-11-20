@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import fr from '../../i18n/fr.json' with { type: 'json' };
 import type { Base } from '../base.js';
 import { nouvelIdentifiant } from '../identifiant.js';
 import type { PorteeUtilisateur } from '../portee-utilisateur.js';
@@ -215,6 +216,14 @@ export interface OptionsNotificationGroupe {
   readonly baseUrl: string;
   readonly lienChemin: string;
   readonly maintenant: string;
+  /**
+   * Restreint la diffusion à ces memberships. Ce n'est PAS un contournement du cloisonnement : la liste n'est qu'un second filtre,
+   * appliqué APRÈS la sélection `m.group_id = scope.groupId` — un identifiant d'un autre groupe (ou forgé) n'y retrouve personne.
+   * Absente : tous les membres actifs. Fournie vide : personne.
+   */
+  readonly destinataires?: ReadonlySet<string>;
+  /** Gabarit d'e-mail immédiat (clé de `emails.*` dans i18n/fr.json). Par défaut `notification_immediate`. */
+  readonly gabaritEmail?: keyof typeof fr.emails;
 }
 
 /** Un destinataire de notification Web Push : db/ ne fait que le désigner, l'envoi réseau se fait en service, après le commit. */
@@ -227,7 +236,7 @@ export interface DestinatairePush {
 }
 
 /**
- * Crée une notification pour chaque membre actif du groupe (sauf l'auteur du scope) et enfile
+ * Crée une notification pour chaque membre actif du groupe (sauf l'auteur du scope ; `options.destinataires` peut restreindre) et enfile
  * un e-mail minimal immédiat si la préférence du destinataire est `immediate` et son adresse vérifiée.
  * Rend les destinataires à notifier en Web Push : db/ n'appelle jamais le réseau. L'appelant (service) les passe à l'envoi APRÈS le
  * commit de sa transaction, pour qu'une transaction annulée ne laisse pas partir de notification.
@@ -246,7 +255,8 @@ export function notifierMembresGroupe(scope: GroupScope, options: OptionsNotific
   )
     .all(scope.groupId)
     .map((l) => destinataireLigne.parse(l))
-    .filter((d) => d.membership_id !== scope.membershipId);
+    .filter((d) => d.membership_id !== scope.membershipId)
+    .filter((d) => options.destinataires === undefined || options.destinataires.has(d.membership_id));
 
   const lien = new URL(options.lienChemin, options.baseUrl).toString();
   const payloadJson = JSON.stringify(options.payload);
@@ -276,7 +286,7 @@ export function notifierMembresGroupe(scope: GroupScope, options: OptionsNotific
         base,
         {
           to: dest.email,
-          templateKey: 'notification_immediate',
+          templateKey: options.gabaritEmail ?? 'notification_immediate',
           payload: { nom: dest.display_name, groupe: groupe.name, lien },
         },
         options.maintenant,

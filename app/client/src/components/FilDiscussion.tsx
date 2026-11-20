@@ -6,9 +6,9 @@ import {
   supprimerMessage,
   type Message,
 } from '../api/fils';
-import { lireGroupe } from '../api/groupes';
 import { useRechargement } from '../api/rechargement';
-import { useTempsReel } from '../api/tempsReel';
+import { useGroupe, useTempsReelGroupe } from './FournisseurGroupe';
+import { premiereErreur } from '../hooks/etatsLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { DialogueConfirmation } from './DialogueConfirmation';
 import { Erreur, messageDe } from './Erreur';
@@ -57,8 +57,9 @@ function fusionner(
 export function FilDiscussion({ groupId, filId }: { groupId: string; filId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [suivant, setSuivant] = useState<string | null>(null);
-  const [monMembreId, setMonMembreId] = useState<string | null>(null);
-  const [admin, setAdmin] = useState(false);
+  const { groupe, erreur: erreurGroupe } = useGroupe();
+  const monMembreId = groupe?.mon_appartenance_id ?? null;
+  const admin = groupe?.mon_role === 'admin';
   const [nouveau, setNouveau] = useState('');
   const [editionId, setEditionId] = useState<string | null>(null);
   const [editionCorps, setEditionCorps] = useState('');
@@ -72,7 +73,7 @@ export function FilDiscussion({ groupId, filId }: { groupId: string; filId: stri
   const courants = useRef<readonly Message[]>(messages);
   courants.current = messages;
 
-  // Les messages sont rechargés (regroupés, réponses obsolètes ignorées) ; le groupe, lui, n'est lu qu'une fois.
+  // Les messages sont rechargés (regroupés, réponses obsolètes ignorées) ; le groupe, lui, vient du contexte (lu une fois par entrée dans le groupe).
   const { recharger, planifier } = useRechargement(
     () => listerMessages(groupId, filId),
     (page) => {
@@ -89,23 +90,7 @@ export function FilDiscussion({ groupId, filId }: { groupId: string; filId: stri
     recharger();
   }, [recharger]);
 
-  useEffect(() => {
-    let abandonne = false;
-    lireGroupe(groupId)
-      .then((groupe) => {
-        if (abandonne) return;
-        setMonMembreId(groupe.mon_appartenance_id);
-        setAdmin(groupe.mon_role === 'admin');
-      })
-      .catch((err: unknown) => {
-        if (!abandonne) setErreur(messageDe(err));
-      });
-    return () => {
-      abandonne = true;
-    };
-  }, [groupId]);
-
-  useTempsReel(groupId, {
+  useTempsReelGroupe({
     onOuvert: recharger,
     onEvenement: (e) => {
       if (e.ressource === 'message' && e.parent_id === filId) {
@@ -170,7 +155,7 @@ export function FilDiscussion({ groupId, filId }: { groupId: string; filId: stri
 
   return (
     <div className="fil-discussion">
-      <Erreur message={erreur} />
+      <Erreur message={premiereErreur(erreur, erreurGroupe)} />
       {suivant !== null && (
         <div className="fil-precedents">
           <button type="button" className="bouton-compact" onClick={chargerPrecedents}>

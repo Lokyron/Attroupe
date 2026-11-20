@@ -21,6 +21,7 @@ import {
   type Remboursement,
 } from '../db/queries/depenses.js';
 import { lireEvenement, peutModifierEvenement } from '../db/queries/evenements.js';
+import { notifierMembresGroupe } from '../db/queries/notifications.js';
 import type { GroupScope } from '../db/scope.js';
 import { additionnerMontants, convertirMontant, creerMontant, ErreurArgent, UNITE_TAUX_PPM } from '../domain/argent.js';
 import { versInstant } from '../domain/instant.js';
@@ -28,6 +29,7 @@ import { ErreurRepartition, repartirDepense, type ModeRepartition, type Particip
 import { calculerSoldesParDevise, type SoldesParDevise } from '../domain/soldes.js';
 import type { Contexte } from '../http/contexte.js';
 import { ErreurHttp } from '../http/erreurs.js';
+import { libelleNotificationPush, pousserNotificationsWebPush } from './notifications.js';
 
 // Cas d'usage des dépenses partagées, remboursements, soldes et clôture (lot 9, ADR-0004).
 // Ordre strict des vérifications :
@@ -216,6 +218,19 @@ export function lireDepenseService(scope: GroupScope, depenseId: string): Depens
   return depense;
 }
 
+/**
+ * Les membres qu'une dépense « concerne » : celui qui a payé (on lui doit de l'argent) et ceux qui portent une part non nulle (ils
+ * doivent de l'argent). Une part nulle (poids 0, ou montant exact 0) ne change le solde de personne : ce membre n'est pas prévenu.
+ * Les autres membres du groupe ne sont jamais notifiés. L'auteur de l'écriture est écarté plus loin, par `notifierMembresGroupe`.
+ */
+function membresConcernes(payerMembershipId: string, parts: readonly NouvellePartDepense[]): ReadonlySet<string> {
+  const ids = new Set<string>([payerMembershipId]);
+  for (const part of parts) {
+    if (part.share_minor > 0 || part.share_target_minor > 0) ids.add(part.membership_id);
+  }
+  return ids;
+}
+
 export function creerDepenseService(contexte: Contexte, scope: GroupScope, entree: EntreeCreationDepense): DepenseAvecParts {
   const evenement = entree.event_id !== null ? trouverEvenement(scope, entree.event_id) : undefined;
   verifierMembreExiste(scope, entree.payer_membership_id);
@@ -239,25 +254,42 @@ export function creerDepenseService(contexte: Contexte, scope: GroupScope, entre
   );
   const parts = calculerParts(entree.amount_minor, amount_target_minor, entree.split_mode, entree.shares);
 
-  const id = creerDepenseEnBase(
-    scope,
-    {
-      event_id: entree.event_id,
-      label: entree.label,
-      spent_on: entree.spent_on,
-      payer_membership_id: entree.payer_membership_id,
-      amount_minor: entree.amount_minor,
-      currency_code: entree.currency_code,
-      target_currency_code: targetCurrencyCode,
-      rate_ppm,
-      rate_source,
-      rate_fetched_at: null,
-      amount_target_minor,
-      split_mode: entree.split_mode,
-      note: entree.note,
-    },
-    parts,
-  );
+  const maintenant = versInstant(contexte.horloge());
+  const { id, destinataires } = scope.transaction(() => {
+    const idCree = creerDepenseEnBase(
+      scope,
+      {
+        event_id: entree.event_id,
+        label: entree.label,
+        spent_on: entree.spent_on,
+        payer_membership_id: entree.payer_membership_id,
+        amount_minor: entree.amount_minor,
+        currency_code: entree.currency_code,
+        target_currency_code: targetCurrencyCode,
+        rate_ppm,
+        rate_source,
+        rate_fetched_at: null,
+        amount_target_minor,
+        split_mode: entree.split_mode,
+        note: entree.note,
+      },
+      parts,
+    );
+    const aPousser = notifierMembresGroupe(scope, {
+      kind: 'expense_added',
+      subjectType: 'expense',
+      subjectId: idCree,
+      payload: { expense_id: idCree },
+      baseUrl: contexte.env.ATTROUPE_BASE_URL,
+      lienChemin: `/#/groupe/${encodeURIComponent(scope.groupId)}/depenses`,
+      maintenant,
+      destinataires: membresConcernes(entree.payer_membership_id, parts),
+      gabaritEmail: 'notification_depense',
+    });
+    return { id: idCree, destinataires: aPousser };
+  });
+  // Web Push seulement une fois la transaction validée.
+  pousserNotificationsWebPush(contexte, destinataires, libelleNotificationPush('expense_added', {}));
 
   contexte.diffuseur?.diffuser(scope, { type: 'depense.creee', ressource: 'depense', id, parent_id: entree.event_id });
   return lireDepenseService(scope, id);

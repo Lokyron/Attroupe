@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { instantDepuisHeureLocale } from '../agenda/dates';
 import { libelleDateHoraire } from '../agenda/format';
-import { lireGroupe } from '../api/groupes';
 import { useRechargement } from '../api/rechargement';
 import {
   ajouterOptionSondage,
@@ -15,12 +14,13 @@ import {
   type OptionSondage,
   type ValeurVote,
 } from '../api/sondages';
-import { useTempsReel } from '../api/tempsReel';
+import { useGroupe, useTempsReelGroupe } from '../components/FournisseurGroupe';
 import { ChargementPage } from '../components/ChargementPage';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { IconeEtincelles, IconePoubelle } from '../components/Icones';
+import { premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t, type CleTexte } from '../i18n';
@@ -45,7 +45,8 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
   const [conversion, setConversion] = useState<{ readonly optionId: string | null } | null>(null);
   const [optionARetirer, setOptionARetirer] = useState<string | null>(null);
   const [annulation, setAnnulation] = useState(false);
-  const [fuseau, setFuseau] = useState('Europe/Paris');
+  const { groupe, erreur: erreurGroupe } = useGroupe();
+  const fuseau = groupe?.time_zone ?? 'Europe/Paris';
   const [journee, setJournee] = useState(false);
   const [debut, setDebut] = useState('');
   const [fin, setFin] = useState('');
@@ -60,13 +61,7 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
     (err) => setErreur(messageDe(err)),
   );
 
-  useEffect(() => {
-    lireGroupe(groupId)
-      .then((g) => setFuseau(g.time_zone))
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  }, [groupId]);
-
-  useTempsReel(groupId, {
+  useTempsReelGroupe({
     onOuvert: recharger,
     onEvenement: (e) => {
       if (e.ressource === 'sondage' && (e.id === sondageId || e.parent_id === sondageId)) planifier();
@@ -134,7 +129,7 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
   if (sondage === null) {
     return (
       <section className="page-groupe-pile">
-        <EnteteGroupe groupId={groupId} ongletActif="sondages" lienRetour={{ href: retour, libelle: t('sondage.retour') }} />
+        <EnteteGroupe ongletActif="sondages" lienRetour={{ href: retour, libelle: t('sondage.retour') }} />
         <ChargementPage etat={lecture.etat} erreur={lecture.erreur} onReessayer={lecture.recharger}>
           {null}
         </ChargementPage>
@@ -162,7 +157,6 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
   return (
     <section className="page-groupe-pile">
       <EnteteGroupe
-        groupId={groupId}
         ongletActif="sondages"
         titre={sondage.title}
         lienRetour={{ href: retour, libelle: t('sondage.retour') }}
@@ -191,7 +185,7 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
         }
       />
 
-      <Erreur message={erreur} />
+      <Erreur message={premiereErreur(erreur, erreurGroupe)} />
 
       {(sondage.description !== null || convertible || sondage.status === 'open' || sondage.status === 'closed') && (
         <div className="carte">

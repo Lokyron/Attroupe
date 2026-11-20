@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { lireGroupe, type DetailGroupe } from '../api/groupes';
+import type { ReactNode } from 'react';
 import { t } from '../i18n';
+import { useGroupe } from './FournisseurGroupe';
 import {
   IconeCalendrier,
   IconeCamera,
@@ -15,46 +15,22 @@ import {
 export type OngletGroupe = 'apercu' | 'agenda' | 'listes' | 'sondages' | 'depenses' | 'fils' | 'photos';
 
 export interface PropsEnteteGroupe {
-  readonly groupId: string;
   readonly ongletActif: OngletGroupe;
-  readonly nomGroupe?: string | undefined;
   readonly titre?: string | undefined;
   readonly meta?: ReactNode | undefined;
-  readonly photosActives?: boolean | undefined;
   readonly actions?: ReactNode | undefined;
   readonly lienRetour?: { readonly href: string; readonly libelle: string } | undefined;
 }
 
 /** En-tête compact partagé par toutes les pages internes d'un groupe + barre d'onglets défilable. */
-export function EnteteGroupe({
-  groupId,
-  ongletActif,
-  nomGroupe,
-  titre,
-  meta,
-  photosActives,
-  actions,
-  lienRetour,
-}: PropsEnteteGroupe) {
-  const [groupeCharge, setGroupeCharge] = useState<DetailGroupe | null>(null);
-
-  useEffect(() => {
-    if (nomGroupe !== undefined && photosActives !== undefined) return;
-    let abandonne = false;
-    lireGroupe(groupId)
-      .then((g) => {
-        if (!abandonne) setGroupeCharge(g);
-      })
-      .catch(() => undefined);
-    return () => {
-      abandonne = true;
-    };
-  }, [groupId, nomGroupe, photosActives]);
-
+export function EnteteGroupe({ ongletActif, titre, meta, actions, lienRetour }: PropsEnteteGroupe) {
+  const { groupId, groupe, nom } = useGroupe();
   const base = `#/groupe/${encodeURIComponent(groupId)}`;
-  const nomAffiche = nomGroupe ?? groupeCharge?.name ?? t('nav.groupe');
+  // `nom` vient de `moi.groupes` dès le premier rendu : plus de « Groupe » puis saut vers le vrai nom.
+  const nomAffiche = nom !== '' ? nom : t('nav.groupe');
   const titreAffiche = titre ?? nomAffiche;
-  const afficherPhotos = photosActives ?? groupeCharge?.fonctionnalites.photos ?? false;
+  // Inconnu avant la lecture : l'onglet n'est pas affiché plutôt qu'affiché à faux.
+  const afficherPhotos = groupe?.fonctionnalites.photos ?? false;
 
   const onglets: Array<{
     readonly id: OngletGroupe;

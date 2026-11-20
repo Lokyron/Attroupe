@@ -3,6 +3,7 @@ import { verifierEmail } from '../api/groupes';
 import { Erreur, messageDe } from '../components/Erreur';
 import { t } from '../i18n';
 import { effacerFragment } from '../historique';
+import { lireInvitationEnAttente } from '../invitationEnAttente';
 import { jetonDuFragment } from '../lien';
 
 /**
@@ -17,9 +18,14 @@ import { jetonDuFragment } from '../lien';
  *
  * Un lien rouvert après coup n'a donc plus de jeton : le message dit « incomplet OU déjà utilisé », parce que
  * cette page ne peut pas distinguer les deux et ne doit pas affirmer l'un pour l'autre.
+ *
+ * Si une invitation attendait (jeton gardé dans l'onglet), « Reprendre l'invitation » y retourne SANS remettre le
+ * jeton dans l'URL : la page d'invitation le relit du stockage. Le lien de confirmation s'ouvre souvent dans un
+ * autre onglet, qui n'a pas ce stockage : alors rien n'est proposé, et l'onglet d'origine garde son invitation.
  */
 export function VerificationEmail() {
   const [jeton] = useState(() => jetonDuFragment(window.location.hash));
+  const [invitationEnAttente] = useState(() => lireInvitationEnAttente() !== null);
   const envoye = useRef(false);
   const [etat, setEtat] = useState<'en_cours' | 'reussie'>('en_cours');
   const [erreur, setErreur] = useState<string | null>(null);
@@ -51,6 +57,12 @@ export function VerificationEmail() {
             <Erreur message={erreur} />
           </>
         )}
+        {etat === 'reussie' && invitationEnAttente && (
+          <p>
+            <a href="/invitation" className="bouton-primaire">{t('verification.reprendre_invitation')}</a>
+          </p>
+        )}
+        {etat === 'reussie' && !invitationEnAttente && <p className="texte-doux">{t('verification.invitation_rouvrir')}</p>}
         <a href="/">{t('verification.retour')}</a>
       </section>
     </main>

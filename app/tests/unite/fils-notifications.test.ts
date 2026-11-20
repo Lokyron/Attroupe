@@ -204,7 +204,7 @@ describe('fils de discussion libres, messages et notifications (unité)', () => 
   it('le texte du Web Push vient des clés que posterMessageDansFil fournit (thread_title)', () => {
     expect(libelleNotificationPush('message_posted', { thread_id: 'f1', thread_title: 'Sortie vélo' })).toBe('Nouveau message dans « Sortie vélo »');
     expect(libelleNotificationPush('message_posted', { thread_id: 'f1' })).toBe('Nouveau message dans le groupe');
-    expect(libelleNotificationPush('event_created', {})).toBe('Nouvelle activité dans le groupe');
+    expect(libelleNotificationPush('poll_opened', {})).toBe('Nouvelle activité dans le groupe');
   });
 
   it('db/ n’importe plus le service d’envoi Web Push (aucun appel réseau depuis la couche données)', () => {
