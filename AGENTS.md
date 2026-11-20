@@ -34,6 +34,7 @@ trois sections suivantes existent pour que cette couture ne coûte rien.
 | [`Dossier de conception/04 - Architecture.md`](Dossier%20de%20conception/04%20-%20Architecture.md) | L'architecture, et au §4 le détail du cloisonnement |
 | [`docs/decisions/`](docs/decisions/) | Une ADR par décision structurante. **Elles sont prises : ne les re-débats pas**, et n'en contredis aucune sans en écrire une nouvelle |
 | [`Avancement du projet/AVANCEMENT.md`](Avancement%20du%20projet/AVANCEMENT.md) | Où on en est, et les défauts déjà rencontrés avec leur leçon |
+| [`docs/audits/2026-11-18-ui-ux-frontend.md`](docs/audits/2026-11-18-ui-ux-frontend.md) | L'audit de l'interface et son plan d'action priorisé. **Les phases 1, 2, 2 bis et 2 ter sont appliquées** ; ce qui reste est listé au §9 |
 
 ## 3. Ce qui est déjà passé à travers — ne le refais pas
 
@@ -66,6 +67,22 @@ Ils sont corrigés ; ils sont listés ici parce que **chacun est un piège de ce
    qu'ils comptaient les tables du schéma et nommaient la dernière migration : une nouvelle
    migration les périme mécaniquement. Quand tu ajoutes une migration, cherche ce qui compte ou
    nomme, et mets-le à jour dans le même changement.
+
+5. **Un ratio de contraste se calcule sur le fond composé, jamais sur la surface nominale.**
+   Quatre tokens de texte paraissaient conformes parce qu'ils avaient été mesurés sur du blanc —
+   or le blanc n'existe nulle part dans l'application : les tuiles sont des dégradés posés sur
+   `--surface`. Sur le vrai fond, trois d'entre eux tombaient entre 3,80 et 3,98 pour du texte de
+   0,7 rem, donc sous l'AA. Mesure la couleur effectivement rendue
+   ([`ADR-0015`](docs/decisions/ADR-0015-design-system-et-cible-navigateur.md)).
+6. **Côté serveur, un plafond par défaut n'est pas une limite anodine.** Le tableau de bord
+   appelait son API sans fenêtre de dates ; sans fenêtre, le serveur rend au plus 12 événements de
+   groupe et 8 personnels **tous groupes confondus**, contre 200 avec
+   (`db/queries/tableau-de-bord.ts`). Un appel qui « marche » peut tronquer en silence : lis la
+   requête avant d'omettre un paramètre.
+7. **Les écritures qui font bouger un solde doivent notifier.** C'est le défaut structurel du
+   module dépenses : la création notifie désormais, mais modifier, supprimer et régler ne
+   notifient toujours pas (§9). Si tu touches à une de ces écritures, règle-le au passage plutôt
+   que d'ajouter une quatrième dette.
 
 ## 4. Conventions
 
@@ -112,6 +129,23 @@ image n'est publiée si l'une échoue.
 >
 > Un fichier qui passe seul mais échoue dans la suite complète, c'est ce symptôme et non un défaut
 > du code. Réduire la consommation de `suite-generique` reste à faire.
+>
+> **En pratique, ce qui marche** : lancer les trois répertoires séparément **et espacés**, en
+> laissant les ports se drainer entre deux. La référence verte au 20/11/2026 est
+> **593 unité + 458 cloisonnement + 431 intégration = 1 482 tests**.
+>
+> ```bash
+> npx vitest run app/tests/unite
+> npx vitest run app/tests/cloisonnement
+> npx vitest run app/tests/integration
+> ```
+
+**Trois tests portent un délai explicite, et ce n'est pas un contournement.** Ils sont lents par
+construction (un verrou de base de données, deux mesures de temps constant sur l'authentification)
+et échouaient au délai par défaut de 5 s alors qu'ils passent seuls. Un garde-fou de sécurité qui
+« échoue » par dépassement de délai est le pire des signaux : il apprend à ignorer un rouge. Le
+délai est commenté sur place — ne le retire pas sans lire le commentaire
+(`app/tests/cloisonnement/verrou-db.test.ts`, `app/tests/integration/auth-securite.test.ts`).
 
 ## 6. Git et déploiement
 
@@ -153,3 +187,45 @@ Ce projet est auto-hébergé chez son propriétaire, avec de vrais bêta-testeur
 **dis-le plutôt que de le contourner**, et ne le corrige pas en silence au milieu d'autre chose.
 Un rapport n'est pas une preuve — relis le diff, lance les tests, et rapporte ce que tu as
 réellement vérifié par opposition à ce que tu supposes.
+
+## 9. Où on en est — état au 20 novembre 2026
+
+Branche de travail : `beta`, propre et synchronisée. Quatre commits d'audit y sont :
+`b7f00f5` (le rapport), `af189dd` (phase 1), `2fabe53` (phase 2), `c717730` (phases 2 bis et
+2 ter). Vérification verte avant commit : typecheck, lint, 1 482 tests.
+
+**Trois dettes à traiter avant d'ouvrir au groupe réel.** Ce sont les seules qui bloquent.
+
+1. **`notification_preferences.muted_kinds` n'est lue nulle part.** Elle existe en base, elle est
+   écrite à `[]`, personne ne la lit. Tant qu'un seul genre de notification était émis, sans
+   conséquence ; il y en a trois maintenant. Un trésorier qui saisit 30 dépenses un dimanche soir
+   envoie 30 notifications, 30 pushs et 30 e-mails à chaque participant, et le seul levier est
+   tout ou rien — la réaction prévisible est de tout couper, messages compris. Minimum utile :
+   lire `muted_kinds` dans `notifierMembresGroupe` **après** le filtre SQL, sans changer de schéma.
+2. **`modifierDepenseService`, `supprimerDepenseService`, `creerRemboursementService` et
+   `confirmerRemboursementService` font bouger les soldes en silence.** Une part qui passe de 0 à
+   50 € par modification ne prévient personne. Même critère que la création, qui notifie désormais.
+3. **La notification de règlement demande une migration qui reconstruit une table.** Un `CHECK`
+   SQLite ne s'altère pas : il faut une migration 0006 en table neuve + `INSERT … SELECT` + `DROP`
+   + `RENAME`, environ 8 fichiers. Aucune migration du projet n'a encore fait ça. Le risque est un
+   `INSERT … SELECT` qui oublie une colonne et perd des données sans bruit. Et
+   `app/tests/schema/migrations.test.ts:101` liste les versions attendues en dur (voir §3, défaut 4).
+
+**Ce qui reste de la phase 2** : validation champ par champ des dépenses, pagination des six
+listes non bornées, suppression de groupe, remboursements actionnables, sortie du type de liste
+hors du titre (changement de schéma serveur).
+
+**Phase 3** : mode sombre — les tokens le permettent enfin, avec deux pièges déjà repérés : le
+bloc `@supports` des voiles photo doit être redéfini lui aussi, et `theme-color` est figé dans
+`index.html` —, accessibilité structurelle (lien d'évitement, `document.title` par route, focus au
+`hashchange`), route `introuvable`, fuseau horaire comme choix plutôt que saisie, responsive
+tablette, pluriels.
+
+**Deux points qui appartiennent au propriétaire, pas à toi** : le refus d'invitation (aujourd'hui
+« Mettre de côté » oublie le lien sur l'appareil, rien de plus ; un vrai refus demande une route
+serveur, et il n'est pas tranché qu'on la veuille), et le fait que **rien n'a jamais été ouvert sur
+un vrai téléphone** — le critère n° 2 de la vision, « une URL collée dans le calendrier d'un
+téléphone fait apparaître les soirées », n'a pas été validé à la main. Ne les décide pas seul.
+
+**Non vérifié en navigateur** : le comportement sous React StrictMode (le contexte de groupe et le
+flux SSE unique n'ont été éprouvés que sur un build de production).
