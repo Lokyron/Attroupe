@@ -2,35 +2,11 @@ import { useId, useState, type FormEvent } from 'react';
 import { modifierProfil, renvoyerVerificationEmail } from '../api/compte';
 import type { Moi } from '../api/groupes';
 import { ErreurApi } from '../api/client';
-import { Erreur, messageDe } from '../components/Erreur';
+import { ChampFuseau } from './ChampFuseau';
+import { Erreur, messageDe } from './Erreur';
+import { fuseauxConnus, fuseauValide } from '../lib/fuseaux';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
-
-/**
- * Fuseaux proposés dans la liste de saisie. `Intl.supportedValuesOf` manque aux navigateurs les plus anciens :
- * on renvoie alors `null` et le champ reste une saisie libre, que le serveur valide de toute façon.
- */
-function fuseauxConnus(): readonly string[] | null {
-  const intl: { supportedValuesOf?: (cle: 'timeZone') => string[] } = Intl;
-  if (typeof intl.supportedValuesOf !== 'function') return null;
-  try {
-    return intl.supportedValuesOf('timeZone');
-  } catch {
-    // Clé refusée par un moteur partiel : même repli que si la méthode n'existait pas.
-    return null;
-  }
-}
-
-/** Même test que le serveur (`fuseauValide`) : un fuseau inconnu fait lever `Intl.DateTimeFormat`. */
-function fuseauValide(valeur: string): boolean {
-  if (valeur === '') return false;
-  try {
-    new Intl.DateTimeFormat('fr', { timeZone: valeur });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** Mon profil : nom affiché, fuseau horaire, et rappel d'une adresse e-mail non confirmée. */
 export function CarteProfil({ moi, onProfilChange }: { moi: Moi; onProfilChange?: (() => void) | undefined }) {
@@ -47,14 +23,11 @@ export function CarteProfil({ moi, onProfilChange }: { moi: Moi; onProfilChange?
   const idNom = useId();
   const idErreurNom = useId();
   const idFuseau = useId();
-  const idListe = useId();
   const idAideFuseau = useId();
   const idErreurFuseau = useId();
 
-  // Calculée à chaque rendu : l'appel est peu coûteux et le résultat ne change pas, mais on le garde hors d'un état.
-  const fuseaux = fuseauxConnus();
-  // Le fuseau du compte peut être absent de la liste du navigateur (« UTC ») : on l'y ajoute pour qu'il reste proposé.
-  const options = fuseaux === null || fuseaux.includes(moi.time_zone) ? fuseaux : [moi.time_zone, ...fuseaux];
+  // Sans `Intl.supportedValuesOf`, le champ reste une saisie libre que le serveur valide de toute façon.
+  const listeDisponible = fuseauxConnus() !== null;
 
   const nomPropre = nom.trim();
   const fuseauPropre = fuseau.trim();
@@ -65,7 +38,7 @@ export function CarteProfil({ moi, onProfilChange }: { moi: Moi; onProfilChange?
     setInfo(null);
     setErreur(null);
     const nomVide = nomPropre === '';
-    const fuseauInvalide = !fuseauValide(fuseauPropre);
+    const fuseauInvalide = fuseauPropre === '' || !fuseauValide(fuseauPropre);
     setErreurNom(nomVide);
     setErreurFuseau(fuseauInvalide);
     if (nomVide || fuseauInvalide) return;
@@ -144,29 +117,17 @@ export function CarteProfil({ moi, onProfilChange }: { moi: Moi; onProfilChange?
         )}
 
         <label htmlFor={idFuseau}>{t('profil.champ_fuseau')}</label>
-        <input
+        <ChampFuseau
           id={idFuseau}
-          type="text"
           value={fuseau}
-          maxLength={64}
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
+          onChange={setFuseau}
+          inclure={moi.time_zone}
           disabled={enregistrement.enCours}
-          aria-invalid={erreurFuseau}
-          aria-describedby={erreurFuseau ? `${idAideFuseau} ${idErreurFuseau}` : idAideFuseau}
-          {...(options !== null ? { list: idListe } : {})}
-          onChange={(e) => setFuseau(e.target.value)}
+          ariaInvalid={erreurFuseau}
+          ariaDescribedBy={erreurFuseau ? `${idAideFuseau} ${idErreurFuseau}` : idAideFuseau}
         />
-        {options !== null && (
-          <datalist id={idListe}>
-            {options.map((z) => (
-              <option key={z} value={z} />
-            ))}
-          </datalist>
-        )}
         <p id={idAideFuseau} className="texte-doux">
-          {options !== null ? t('profil.aide_fuseau') : t('profil.aide_fuseau_libre')}
+          {listeDisponible ? t('profil.aide_fuseau') : t('profil.aide_fuseau_libre')}
         </p>
 
         {erreurFuseau && (

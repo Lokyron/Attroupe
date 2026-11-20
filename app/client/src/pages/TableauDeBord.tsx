@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { aujourdhui } from '../agenda/dates';
 import type { Moi } from '../api/groupes';
 import { ChargementPage, SqueletteCarte } from '../components/ChargementPage';
@@ -56,8 +56,8 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
   const jourActuel = aujourdhui();
   // Tant que la lecture n'a pas abouti (ou a échoué), les groupes de `moi` tiennent lieu de repli.
   const groupesConnus = donnees?.groupes ?? moi.groupes;
-  const couleurParGroupe = couleursParGroupe(groupesConnus);
-  const groupeCible = choisirGroupeCible(groupesConnus, filtreGroupe);
+  const couleurParGroupe = useMemo(() => couleursParGroupe(groupesConnus), [groupesConnus]);
+  const groupeCible = useMemo(() => choisirGroupeCible(groupesConnus, filtreGroupe), [groupesConnus, filtreGroupe]);
   const idAideActions = 'aide-actions-groupe';
   const aideActions =
     groupesConnus.length === 0 ? t('tableau.groupes_vide') : t('tableau.choisir_groupe_aide');
@@ -82,17 +82,26 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
   };
 
   // Tout ce qui suit dérive de la lecture indépendante de la fenêtre.
-  const groupesVisibles = filtrerParGroupe(donnees?.groupes ?? [], filtreGroupe);
-  const aVenir = donnees === null ? [] : evenementsAVenir(elementsCalendrier(donnees, filtreGroupe, filtreCalendrier), jourActuel);
-  const soldes = filtrerParGroupe(donnees?.soldes ?? [], filtreGroupe);
-  const photos = filtrerParGroupe(donnees?.photos ?? [], filtreGroupe);
-  const depenses = filtrerParGroupe(donnees?.depenses ?? [], filtreGroupe);
+  // Mémoïsé sur `donnees` (et non sur ses champs, dont le repli `?? []` changerait à chaque rendu) et sur les filtres.
+  const groupesVisibles = useMemo(() => filtrerParGroupe(donnees?.groupes ?? [], filtreGroupe), [donnees, filtreGroupe]);
+  const aVenir = useMemo(
+    () => (donnees === null ? [] : evenementsAVenir(elementsCalendrier(donnees, filtreGroupe, filtreCalendrier), jourActuel)),
+    [donnees, filtreGroupe, filtreCalendrier, jourActuel],
+  );
+  const soldes = useMemo(() => filtrerParGroupe(donnees?.soldes ?? [], filtreGroupe), [donnees, filtreGroupe]);
+  const photos = useMemo(() => filtrerParGroupe(donnees?.photos ?? [], filtreGroupe), [donnees, filtreGroupe]);
+  const depenses = useMemo(() => filtrerParGroupe(donnees?.depenses ?? [], filtreGroupe), [donnees, filtreGroupe]);
+  const resumeSoldes = useMemo(() => resumerSoldes(soldes), [soldes]);
   const groupeDepensesId = groupeDesDepenses(depenses, soldes, groupeCible, groupesConnus);
   const groupePhotos = groupeDesPhotos(groupesVisibles, donnees?.groupes ?? []);
 
   // La seule dérivation qui suit la navigation : la grille / liste d'agenda.
-  const elementsAgenda =
-    fenetre.donnees === null ? [] : elementsCalendrier(fenetre.donnees, filtreGroupe, filtreCalendrier);
+  // Référence stable entre deux rendus : `WidgetAgenda` en dérive son regroupement par jour.
+  const donneesFenetre = fenetre.donnees;
+  const elementsAgenda = useMemo(
+    () => (donneesFenetre === null ? [] : elementsCalendrier(donneesFenetre, filtreGroupe, filtreCalendrier)),
+    [donneesFenetre, filtreGroupe, filtreCalendrier],
+  );
 
   return (
     <div className="tableau-de-bord">
@@ -175,7 +184,7 @@ export function TableauDeBord({ moi, onNouveauGroupe }: { moi: Moi; onNouveauGro
               prochainEvenement={aVenir[0] ?? null}
               jourActuel={jourActuel}
               groupeCibleId={groupeCible?.group_id ?? null}
-              resumeSoldes={resumerSoldes(soldes)}
+              resumeSoldes={resumeSoldes}
               groupeDepensesId={groupeDepensesId}
               nbGroupes={donnees.groupes.length}
               invitationsEnAttente={moi.invitations_en_attente}

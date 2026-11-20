@@ -28,15 +28,10 @@ import { fusionnerEtats, premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
+import { formaterMontantExposant } from '../lib/montants';
 
 function formaterMontant(minor: number, code: string, devises: readonly Devise[]): string {
-  const exposant = devises.find((d) => d.code === code)?.exponent ?? 2;
-  return new Intl.NumberFormat('fr-FR', {
-    style: 'currency',
-    currency: code,
-    minimumFractionDigits: exposant,
-    maximumFractionDigits: exposant,
-  }).format(minor / 10 ** exposant);
+  return formaterMontantExposant(minor, code, devises.find((d) => d.code === code)?.exponent ?? 2);
 }
 
 /**
@@ -655,11 +650,14 @@ export function SectionDepenses({
                     aria-describedby={erreursChamps['libelle'] !== undefined ? 'err-depense-libelle' : undefined}
                     onChange={(e) => {
                       setLibelle(e.target.value);
-                      if (erreursChamps['libelle'] !== undefined) setErreursChamps((p) => ({ ...p, libelle: '' }));
+                      if (erreursChamps['libelle'] !== undefined) {
+                        // La clé est SUPPRIMÉE, pas vidée : `aria-invalid` se lit sur `!== undefined`.
+                        setErreursChamps(({ libelle: _corrige, ...autres }) => autres);
+                      }
                     }}
                     required
                   />
-                  {erreursChamps['libelle'] !== undefined && erreursChamps['libelle'] !== '' && (
+                  {erreursChamps['libelle'] !== undefined && (
                     <p id="err-depense-libelle" className="erreur-champ" role="alert">
                       {erreursChamps['libelle']}
                     </p>
@@ -989,10 +987,9 @@ export function SectionDepenses({
                               <div className="ligne-principale">
                                 <span className="ligne-titre">{d.label}</span>
                                 <span className="ligne-meta">
-                                  {t('depenses.paye_par_date', {
-                                    nom: nomDe(d.payer_membership_id),
-                                    date: formaterDateJour(d.spent_on),
-                                  })}
+                                  {t('depenses.paye_par', { nom: nomDe(d.payer_membership_id) })}
+                                  {t('commun.separateur_point')}
+                                  <time dateTime={d.spent_on}>{formaterDateJour(d.spent_on)}</time>
                                 </span>
                               </div>
                               <div className="ligne-depense-droite">

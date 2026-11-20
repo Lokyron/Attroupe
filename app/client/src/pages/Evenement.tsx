@@ -11,6 +11,7 @@ import {
   type ReponsePresence,
 } from '../api/evenements';
 import { listerMembres, type Membre } from '../api/groupes';
+import { listerAlbums, type Album } from '../api/immich';
 import { libelleDateHoraire } from '../agenda/format';
 import { ChargementPage, SqueletteCarte } from '../components/ChargementPage';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
@@ -21,11 +22,13 @@ import { useGroupe } from '../components/FournisseurGroupe';
 import { FormulaireEvenement } from '../components/FormulaireEvenement';
 import { IconeCalendrier, IconeLieu, IconeMessage } from '../components/Icones';
 import { TachesEvenement } from '../components/TachesEvenement';
+import { TexteAvecLiens } from '../components/TexteAvecLiens';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { SectionDepenses } from './Depenses';
 import { creerAlbum } from '../api/immich';
-import { lienAlbums } from '../lib/liens';
+import { lienAlbum, lienCarte } from '../lib/liens';
+import { cleAccord } from '../lib/pluriel';
 import { t } from '../i18n';
 
 const REPONSES: readonly ReponsePresence[] = ['yes', 'maybe', 'no'];
@@ -114,6 +117,16 @@ function CorpsEvenement({ groupId, initial }: { groupId: string; initial: Donnee
   const reponse = useSoumission();
   const action = useSoumission();
   const evenementId = evenement.id;
+  // L'album déjà lié à cet événement (le serveur en refuse un second : 409 `album.evenement_deja_lie`).
+  // `undefined` = pas connu (lecture en cours OU en échec : ni lien ni bouton, sinon un clic sur « Créer » finirait en 409) ;
+  // `null` = aucun, le bouton de création est proposé.
+  const photosActives = groupe?.fonctionnalites.photos === true;
+  const { donnees: albumsGroupe, etat: etatAlbums, erreur: erreurAlbums } = useLecture<Album[]>(
+    () => (photosActives ? listerAlbums(groupId) : Promise.resolve([])),
+    [groupId, photosActives],
+  );
+  const albumLie: Album | null | undefined =
+    etatAlbums !== 'pret' ? undefined : (albumsGroupe?.find((a) => a.event_id === evenementId) ?? null);
 
   const adopter = useCallback((e: DetailEvenement): void => {
     setEvenement(e);
@@ -206,8 +219,9 @@ function CorpsEvenement({ groupId, initial }: { groupId: string; initial: Donnee
           <>
             <span className="pilule">
               <IconeCalendrier className="icone-mini" />
-              <span>{libelleDateHoraire(evenement)}</span>
+              <time dateTime={evenement.starts_at}>{libelleDateHoraire(evenement)}</time>
             </span>
+            {!evenement.all_day && <span className="discret ligne-meta">{t('agenda.heure_de', { fuseau: evenement.time_zone })}</span>}
             {annule && (
               <span role="status" className="pilule pilule-statut-no">
                 {t('agenda.annule')}
@@ -236,6 +250,7 @@ function CorpsEvenement({ groupId, initial }: { groupId: string; initial: Donnee
       />
 
       <Erreur message={erreur} />
+      <Erreur message={erreurAlbums} />
 
       <div className="grille-bento-groupe">
         <div className="bento-colonne-gauche">
@@ -262,28 +277,45 @@ function CorpsEvenement({ groupId, initial }: { groupId: string; initial: Donnee
               </div>
               <div className="evenement-details-liste">
                 {evenement.location_name !== null && <p>{t('evenement.lieu', { lieu: evenement.location_name })}</p>}
-                {evenement.location_address !== null && <p className="discret">{evenement.location_address}</p>}
+                {evenement.location_address !== null && (
+                  <p className="discret">
+                    <a href={lienCarte(evenement.location_address)} target="_blank" rel="noopener noreferrer">
+                      {evenement.location_address}
+                      <span className="sr-only"> {t('evenement.adresse_carte')} {t('commun.nouvel_onglet')}</span>
+                    </a>
+                  </p>
+                )}
                 {evenement.arrival_note !== null && <p>{t('evenement.arrivee', { note: evenement.arrival_note })}</p>}
-                {evenement.capacity !== null && <p>{t('evenement.capacite', { nombre: String(evenement.capacity) })}</p>}
-                {evenement.description !== null && <p className="description">{evenement.description}</p>}
-                {groupe?.fonctionnalites.photos === true && (
+                {evenement.capacity !== null && <p>{t(cleAccord('evenement.capacite', evenement.capacity), { n: String(evenement.capacity) })}</p>}
+                {evenement.description !== null && (
+                  <p className="description">
+                    <TexteAvecLiens texte={evenement.description} />
+                  </p>
+                )}
+                {groupe?.fonctionnalites.photos === true && albumLie !== undefined && (
                   <p className="liste-compacte-haut">
-                    <button
-                      type="button"
-                      className="bouton-compact"
-                      disabled={action.enCours}
-                      onClick={() =>
-                        action
-                          .lancer(() =>
-                            creerAlbum(groupId, evenement.title, evenement.id).then(() => {
-                              window.location.hash = lienAlbums(groupId);
-                            }),
-                          )
-                          .catch((err: unknown) => setErreur(messageDe(err)))
-                      }
-                    >
-                      {t('evenement.creer_album')}
-                    </button>
+                    {albumLie !== null ? (
+                      <a className="bouton-compact" href={lienAlbum(groupId, albumLie.id)}>
+                        {t('evenement.voir_album')}
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        className="bouton-compact"
+                        disabled={action.enCours}
+                        onClick={() =>
+                          action
+                            .lancer(() =>
+                              creerAlbum(groupId, evenement.title, evenement.id).then((cree) => {
+                                window.location.hash = lienAlbum(groupId, cree.id);
+                              }),
+                            )
+                            .catch((err: unknown) => setErreur(messageDe(err)))
+                        }
+                      >
+                        {t('evenement.creer_album')}
+                      </button>
+                    )}
                   </p>
                 )}
               </div>
@@ -295,7 +327,7 @@ function CorpsEvenement({ groupId, initial }: { groupId: string; initial: Donnee
               <h3>{t('presence.titre')}</h3>
               {presences !== null && (
                 <span className="pilule pilule-role-admin">
-                  {t('presence.n_attendus', { n: String(presences.compteurs.attendus) })}
+                  {t(cleAccord('presence.n_attendus', presences.compteurs.attendus), { n: String(presences.compteurs.attendus) })}
                 </span>
               )}
             </div>
@@ -374,7 +406,7 @@ function CorpsEvenement({ groupId, initial }: { groupId: string; initial: Donnee
                       <li key={r.membership_id} className="ligne ligne-compacte">
                         <span>
                           {t('presence.ligne', { nom: r.display_name, reponse: t(`presence.${r.status}` as const) })}
-                          {r.guests_count > 0 && ` ${t('presence.plus_invites', { n: String(r.guests_count) })}`}
+                          {r.guests_count > 0 && ` ${t(cleAccord('presence.plus_invites', r.guests_count), { n: String(r.guests_count) })}`}
                           {r.comment !== null && ` — ${r.comment}`}
                         </span>
                       </li>

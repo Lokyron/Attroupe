@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react';
+import { ChampsPeriode } from '../components/ChampsPeriode';
 import { instantDepuisHeureLocale } from '../agenda/dates';
 import { libelleDateHoraire } from '../agenda/format';
 import { useRechargement } from '../api/rechargement';
@@ -356,27 +357,16 @@ export function Sondage({ groupId, sondageId }: { groupId: string; sondageId: st
               />
               {t('sondages.creneau_journee')}
             </label>
-            <div className="grille-champs-2">
-              <label>
-                {t('sondages.creneau_debut')}
-                <input
-                  ref={champDebut}
-                  type={journee ? 'date' : 'datetime-local'}
-                  value={debut}
-                  onChange={(e) => setDebut(e.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                {t('sondages.creneau_fin')}
-                <input
-                  type={journee ? 'date' : 'datetime-local'}
-                  value={fin}
-                  min={debut}
-                  onChange={(e) => setFin(e.target.value)}
-                />
-              </label>
-            </div>
+            <ChampsPeriode
+              journee={journee}
+              debut={debut}
+              fin={fin}
+              onDebut={setDebut}
+              onFin={setFin}
+              cleLibelleDebut="sondages.creneau_debut"
+              cleLibelleFin="sondages.creneau_fin"
+              refDebut={champDebut}
+            />
             <button type="submit" disabled={debut === '' || ajoutCreneau.enCours}>
               {ajoutCreneau.enCours ? t('commun.envoi') : t('sondage.ajouter_option')}
             </button>

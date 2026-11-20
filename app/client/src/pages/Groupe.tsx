@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import {
   changerRole,
   inviter,
@@ -28,6 +28,7 @@ import { useGroupe } from '../components/FournisseurGroupe';
 import {
   IconeCalendrier,
   IconeCamera,
+  IconeCopier,
   IconeEnveloppe,
   IconeGroupes,
   IconeListe,
@@ -40,17 +41,11 @@ import { fusionnerEtats, premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t, type CleTexte } from '../i18n';
+import { initialesDe } from '../lib/initiales';
 
 /** La cible affichée d'une invitation émise (courriel ou nom d'utilisateur), vide si le serveur n'en donne aucune. */
 function cibleInvitation(i: InvitationEmise): string {
   return i.email ?? i.username ?? '';
-}
-
-function initialesMembre(nom: string): string {
-  const morceaux = nom.trim().split(/\s+/).filter(Boolean);
-  if (morceaux.length === 0) return '?';
-  if (morceaux.length === 1) return (morceaux[0] ?? '?').slice(0, 2).toUpperCase();
-  return `${morceaux[0]?.[0] ?? ''}${morceaux[morceaux.length - 1]?.[0] ?? ''}`.toUpperCase();
 }
 
 /** Tout ce que la page affiche. `immich` est `null` hors admin, ou quand sa lecture a échoué (`erreurImmich`). */
@@ -109,6 +104,8 @@ export function Groupe({
   const [erreur, setErreur] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [mode, setMode] = useState<'email' | 'username'>('email');
+  const [lienCopie, setLienCopie] = useState<boolean | null>(null);
+  const champLien = useRef<HTMLInputElement>(null);
   const [cible, setCible] = useState('');
   const [immichUrl, setImmichUrl] = useState('');
   const [immichCle, setImmichCle] = useState('');
@@ -155,6 +152,28 @@ export function Groupe({
         apres();
       })
       .catch((err: unknown) => setErreur(messageDe(err)));
+  };
+
+  // Le lien d'invitation en lui-même (son jeton) n'est connu que du courriel : le serveur n'en garde que l'empreinte. Ce qu'on
+  // peut transmettre sans e-mail, c'est l'adresse de l'application, où la personne invitée retrouve l'invitation après connexion.
+  const adresseApplication = `${window.location.origin}/#/invitations`;
+  // `navigator.clipboard` est absent hors contexte sécurisé (instance auto-hébergée en HTTP sur le réseau local) : même repli
+  // que `pages/Compte.tsx` — sélectionner le champ pour une copie à la main — dans tous les cas d'échec.
+  const copierLien = (): void => {
+    const repli = (): void => {
+      setLienCopie(false);
+      // Le champ n'existe qu'au rendu suivant.
+      window.setTimeout(() => champLien.current?.select(), 0);
+    };
+    try {
+      if (typeof navigator.clipboard?.writeText !== 'function') {
+        repli();
+        return;
+      }
+      navigator.clipboard.writeText(adresseApplication).then(() => setLienCopie(true), repli);
+    } catch {
+      repli();
+    }
   };
 
   const soumettreInvitation = (e: FormEvent): void => {
@@ -328,7 +347,7 @@ export function Groupe({
                         />
                       ) : (
                         <span className="avatar-initiales avatar-initiales-mini" aria-hidden="true">
-                          {initialesMembre(m.display_name)}
+                          {initialesDe(m.display_name)}
                         </span>
                       )}
                       <div className="ligne-principale">
@@ -405,7 +424,33 @@ export function Groupe({
                 </div>
               </form>
               {serviceEmail === 'non_configure' && (
-                <p className="texte-doux">{t('invitations_emises.sans_email')}</p>
+                <>
+                  <p className="texte-doux">{t('invitations_emises.sans_email')}</p>
+                  <div className="barre-compacte">
+                    <button type="button" className="bouton-compact" onClick={copierLien}>
+                      <IconeCopier className="icone-mini" /> {t('invitations_emises.copier_lien')}
+                    </button>
+                  </div>
+                  {lienCopie === true && (
+                    <p role="status" className="message-succes">
+                      {t('invitations_emises.lien_copie')}
+                    </p>
+                  )}
+                  {lienCopie === false && (
+                    <>
+                      <p role="alert">{t('invitations_emises.copie_impossible')}</p>
+                      <input
+                        ref={champLien}
+                        type="text"
+                        readOnly
+                        className="champ-adresse"
+                        value={adresseApplication}
+                        aria-label={t('invitations_emises.lien_champ')}
+                        onFocus={(e) => e.target.select()}
+                      />
+                    </>
+                  )}
+                </>
               )}
               {info !== null && (
                 <p role="status" className="info">

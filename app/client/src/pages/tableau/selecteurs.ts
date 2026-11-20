@@ -131,7 +131,9 @@ export function grouperParJour(elements: readonly ElementCalendrier[]): Map<stri
   const parJour = new Map<string, ElementCalendrier[]>();
   for (const el of elements) {
     for (const jour of joursDe(el)) {
-      parJour.set(jour, [...(parJour.get(jour) ?? []), el]);
+      const duJour = parJour.get(jour);
+      if (duJour === undefined) parJour.set(jour, [el]);
+      else duJour.push(el);
     }
   }
   return parJour;

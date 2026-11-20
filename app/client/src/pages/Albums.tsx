@@ -9,16 +9,20 @@ import {
   type Album,
   type PhotoAlbum,
 } from '../api/immich';
+import { BarreAjout } from '../components/BarreAjout';
 import { ChargementPage, SqueletteCarte } from '../components/ChargementPage';
 import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { useGroupe } from '../components/FournisseurGroupe';
+import { GrilleCartes } from '../components/GrilleCartes';
 import { IconeCamera, IconePoubelle } from '../components/Icones';
 import { fusionnerEtats, premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
+import { lienAlbum, lienAlbums } from '../lib/liens';
+import { cleAccord } from '../lib/pluriel';
 
 /**
  * Visionneuse plein écran bâtie sur `<dialog>` + `showModal()` : focus déplacé à l'ouverture et piégé, fermeture par Échap,
@@ -69,8 +73,8 @@ function Visionneuse({ photo, onFermer }: { photo: PhotoAlbum; onFermer: () => v
   );
 }
 
-/** Page Photos / Albums Immich d'un groupe (lot 11). */
-export function Albums({ groupId }: { groupId: string }) {
+/** Page Photos / Albums Immich d'un groupe (lot 11). L'album ouvert est dans la route (`…/albums/:albumId`) : « retour » le referme. */
+export function Albums({ groupId, albumId }: { groupId: string; albumId?: string | undefined }) {
   const { groupe, etat: etatGroupe, erreur: erreurGroupe, rechargerGroupe } = useGroupe();
   // `null` = fonctionnalité encore inconnue : les albums ne sont lus qu'une fois le groupe connu.
   const photosActives = groupe?.fonctionnalites.photos ?? null;
@@ -95,7 +99,15 @@ export function Albums({ groupId }: { groupId: string }) {
   const [photoARetirer, setPhotoARetirer] = useState<PhotoAlbum | null>(null);
   const [albumADetacher, setAlbumADetacher] = useState<Album | null>(null);
   const [nouveauTitre, setNouveauTitre] = useState('');
-  const [envoiEnCours, setEnvoiEnCours] = useState(false);
+  // Envoi fichier par fichier : `fait` compte les fichiers terminés (réussis ou non), `total` ceux de la sélection.
+  const [envoi, setEnvoi] = useState<{ fait: number; total: number } | null>(null);
+  const annulationEnvoi = useRef<AbortController | null>(null);
+  // La garde de double envoi est celle de `useSoumission` : le hook porte aussi une boucle, la progression (`envoi`) restant ici.
+  const envoiSoumission = useSoumission();
+  const envoiEnCours = envoiSoumission.enCours;
+  // Album que la route désigne MAINTENANT : une réponse tardive (relecture après envoi, synchronisation) ne doit pas
+  // reposer l'album qu'on vient de quitter. Posé dans un effet pour rester juste sous StrictMode.
+  const albumCourant = useRef<string | undefined>(undefined);
   const [survolDepot, setSurvolDepot] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const creation = useSoumission();
@@ -111,17 +123,65 @@ export function Albums({ groupId }: { groupId: string }) {
   const majAlbums = (maj: (courants: Album[]) => Album[]): void =>
     setAlbumsLocaux((precedents) => maj(precedents ?? donnees ?? []));
 
-  const ouvrirAlbum = async (album: Album, forcerSync = false): Promise<void> => {
+  /** Lit un album et ses photos (avec `forcerSync`, après resynchronisation avec Immich). Sans effet si la route a changé entre-temps. */
+  const chargerAlbum = async (id: string, forcerSync = false): Promise<void> => {
     setErreur(null);
     try {
-      const res = await listerPhotosAlbum(groupId, album.id, forcerSync);
+      const res = await listerPhotosAlbum(groupId, id, forcerSync);
+      if (albumCourant.current !== id) return;
       setAlbumActif(res.album);
       setPhotos(res.photos);
       majAlbums((courants) => courants.map((a) => (a.id === res.album.id ? res.album : a)));
     } catch (err: unknown) {
+      if (albumCourant.current !== id) return;
       setErreur(messageDe(err));
     }
   };
+
+  // Ouvrir un album, c'est changer de route : une entrée d'historique, que « retour » referme.
+  const ouvrirAlbum = (album: Album): void => {
+    window.location.hash = lienAlbum(groupId, album.id);
+  };
+
+  // Changer d'album ou quitter la page coupe l'envoi en cours : sinon la boucle tournerait sans écran ni bouton d'annulation,
+  // et sa progression s'afficherait sur l'album suivant.
+  useEffect(() => {
+    albumCourant.current = albumId;
+    return () => {
+      albumCourant.current = undefined;
+      annulationEnvoi.current?.abort();
+    };
+  }, [groupId, albumId]);
+
+  // La route fait foi : un identifiant d'album absent la referme, un identifiant inconnu laisse la liste et affiche l'erreur.
+  // Rien n'est lu tant que les photos ne sont pas connues comme activées (un lien collé sur un groupe sans photos n'appelle pas Immich).
+  useEffect(() => {
+    if (albumId === undefined) {
+      setAlbumActif(null);
+      setPhotos([]);
+      setPhotoSelectionnee(null);
+      return;
+    }
+    if (photosActives !== true) return;
+    let abandonne = false;
+    setErreur(null);
+    listerPhotosAlbum(groupId, albumId)
+      .then((res) => {
+        if (abandonne) return;
+        setAlbumActif(res.album);
+        setPhotos(res.photos);
+        setAlbumsLocaux((precedents) => (precedents === null ? null : precedents.map((a) => (a.id === res.album.id ? res.album : a))));
+      })
+      .catch((err: unknown) => {
+        if (abandonne) return;
+        setAlbumActif(null);
+        setPhotos([]);
+        setErreur(messageDe(err));
+      });
+    return () => {
+      abandonne = true;
+    };
+  }, [groupId, albumId, photosActives]);
 
   const soumettreCreation = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
@@ -132,25 +192,56 @@ export function Albums({ groupId }: { groupId: string }) {
         const cree = await creerAlbum(groupId, nouveauTitre.trim());
         setNouveauTitre('');
         majAlbums((courants) => [cree, ...courants]);
-        await ouvrirAlbum(cree);
+        ouvrirAlbum(cree);
       });
     } catch (err: unknown) {
       setErreur(messageDe(err));
     }
   };
 
+  /** Envoie les fichiers un par un : la progression est réelle, et l'annulation coupe la requête en cours. */
   const envoyerFichiers = async (fichiers: FileList | readonly File[]): Promise<void> => {
     if (albumActif === null || fichiers.length === 0) return;
-    setErreur(null);
-    setEnvoiEnCours(true);
-    try {
-      await televerserPhotosAlbum(groupId, albumActif.id, fichiers);
-      await ouvrirAlbum(albumActif, true);
-    } catch (err: unknown) {
-      setErreur(messageDe(err));
-    } finally {
-      setEnvoiEnCours(false);
-    }
+    const idAlbum = albumActif.id;
+    const liste = Array.from(fichiers);
+    await envoiSoumission.lancer(async () => {
+      const controle = new AbortController();
+      annulationEnvoi.current = controle;
+      setErreur(null);
+      setEnvoi({ fait: 0, total: liste.length });
+      const echecs: string[] = [];
+      let premiereErreurEnvoi: unknown = null;
+      let fait = 0;
+      for (const fichier of liste) {
+        if (controle.signal.aborted) break;
+        try {
+          await televerserPhotosAlbum(groupId, idAlbum, [fichier], controle.signal);
+        } catch (err: unknown) {
+          if (controle.signal.aborted) break;
+          echecs.push(fichier.name);
+          premiereErreurEnvoi ??= err;
+        }
+        fait += 1;
+        setEnvoi({ fait, total: liste.length });
+      }
+      annulationEnvoi.current = null;
+      setEnvoi(null);
+      // Route changée ou page quittée : l'envoi a été coupé et son compte rendu n'a plus d'écran où s'afficher.
+      if (albumCourant.current !== idAlbum) return;
+      const messages: string[] = [];
+      // « Au moins » : une requête coupée après réception du corps par le serveur a pu ajouter sa photo sans qu'on le sache.
+      if (controle.signal.aborted) messages.push(t('photos.envoi_annule', { fait: String(fait - echecs.length), total: String(liste.length) }));
+      if (echecs.length > 0) {
+        messages.push(t(cleAccord('photos.envoi_echecs', echecs.length), { n: String(echecs.length), noms: echecs.join(', ') }));
+        messages.push(messageDe(premiereErreurEnvoi));
+      }
+      // Relecture même après annulation ou échec partiel : des fichiers ont pu partir.
+      await chargerAlbum(idAlbum, true);
+      // Concaténé, pas écrasé : la relecture a pu poser sa propre erreur, que la grille périmée rend indispensable.
+      if (messages.length > 0 && albumCourant.current === idAlbum) {
+        setErreur((courante) => [courante, ...messages].filter((m): m is string => m !== null && m !== '').join(' '));
+      }
+    });
   };
 
   const surDepot = (e: DragEvent<HTMLDivElement>): void => {
@@ -170,7 +261,7 @@ export function Albums({ groupId }: { groupId: string }) {
         if (photoSelectionnee?.immich_asset_id === photo.immich_asset_id) {
           setPhotoSelectionnee(null);
         }
-        await ouvrirAlbum(albumActif);
+        await chargerAlbum(albumActif.id);
       });
     } catch (err: unknown) {
       setErreur(messageDe(err));
@@ -182,10 +273,7 @@ export function Albums({ groupId }: { groupId: string }) {
     try {
       await retrait.lancer(async () => {
         await supprimerAlbum(groupId, album.id);
-        if (albumActif?.id === album.id) {
-          setAlbumActif(null);
-          setPhotos([]);
-        }
+        if (albumActif?.id === album.id) window.location.hash = lienAlbums(groupId);
         // Retrait local : pas de relecture, donc pas de squelette ni de clignotement.
         majAlbums((courants) => courants.filter((a) => a.id !== album.id));
       });
@@ -205,10 +293,9 @@ export function Albums({ groupId }: { groupId: string }) {
               <button
                 type="button"
                 className="bouton-compact"
+                disabled={envoiEnCours}
                 onClick={() => {
-                  setAlbumActif(null);
-                  setPhotos([]);
-                  setPhotoSelectionnee(null);
+                  window.location.hash = lienAlbums(groupId);
                 }}
               >
                 {t('photos.retour_albums')}
@@ -218,7 +305,7 @@ export function Albums({ groupId }: { groupId: string }) {
                 className="bouton-compact"
                 disabled={synchro.enCours}
                 onClick={() => {
-                  synchro.lancer(() => ouvrirAlbum(albumActif, true)).catch((err: unknown) => setErreur(messageDe(err)));
+                  synchro.lancer(() => chargerAlbum(albumActif.id, true)).catch((err: unknown) => setErreur(messageDe(err)));
                 }}
               >
                 {synchro.enCours ? t('commun.chargement') : t('photos.synchroniser')}
@@ -237,7 +324,11 @@ export function Albums({ groupId }: { groupId: string }) {
           </div>
         ) : albumActif === null ? (
           <>
-            <form onSubmit={(e) => void soumettreCreation(e)} className="carte barre-ajout-ligne">
+            <BarreAjout
+              onSubmit={(e) => void soumettreCreation(e)}
+              libelleBouton={creation.enCours ? t('commun.creation') : t('photos.creer_album')}
+              desactive={nouveauTitre.trim() === '' || creation.enCours}
+            >
               <input
                 type="text"
                 value={nouveauTitre}
@@ -246,26 +337,25 @@ export function Albums({ groupId }: { groupId: string }) {
                 placeholder={t('photos.titre_album_exemple')}
                 required
               />
-              <button type="submit" disabled={nouveauTitre.trim() === '' || creation.enCours}>
-                {creation.enCours ? t('commun.creation') : t('photos.creer_album')}
-              </button>
-            </form>
+            </BarreAjout>
 
             {albums.length === 0 ? (
               <div className="carte">
                 <p className="discret">{t('photos.aucun_album')}</p>
               </div>
             ) : (
-              <div className="grille-cartes-module">
-                {albums.map((a) => (
-                  <div key={a.id} className="carte carte-album">
-                    <button type="button" className="album-ouvrir-btn" onClick={() => void ouvrirAlbum(a)}>
+              <GrilleCartes
+                elements={albums}
+                cle={(a) => a.id}
+                rendu={(a) => (
+                  <div className="carte carte-album">
+                    <button type="button" className="album-ouvrir-btn" onClick={() => ouvrirAlbum(a)}>
                       <span className="kpi-icone-badge module-icone-badge kpi-badge-ambre">
                         <IconeCamera className="icone" />
                       </span>
                       <span className="album-infos">
                         <strong className="carte-module-titre">{a.title}</strong>
-                        <span className="discret ligne-meta">{t('photos.compteur', { n: String(a.asset_count) })}</span>
+                        <span className="discret ligne-meta">{t(cleAccord('photos.compteur', a.asset_count), { n: String(a.asset_count) })}</span>
                       </span>
                     </button>
                     <button
@@ -277,8 +367,8 @@ export function Albums({ groupId }: { groupId: string }) {
                       <IconePoubelle className="icone-mini" />
                     </button>
                   </div>
-                ))}
-              </div>
+                )}
+              />
             )}
           </>
         ) : (
@@ -291,7 +381,8 @@ export function Albums({ groupId }: { groupId: string }) {
                     type="button"
                     className="pilule-nav"
                     aria-pressed={a.id === albumActif.id}
-                    onClick={() => void ouvrirAlbum(a)}
+                    disabled={envoiEnCours}
+                    onClick={() => ouvrirAlbum(a)}
                   >
                     {a.title}
                   </button>
@@ -326,8 +417,29 @@ export function Albums({ groupId }: { groupId: string }) {
                     }}
                   />
                 </label>
-                {envoiEnCours && <span className="pilule pilule-statut-maybe">{t('photos.envoi_en_cours')}</span>}
+                {envoi !== null && (
+                  <button type="button" className="bouton-compact" onClick={() => annulationEnvoi.current?.abort()}>
+                    {t('photos.envoi_annuler')}
+                  </button>
+                )}
               </div>
+              {envoi !== null && (
+                <div className="carte-module-progression">
+                  <p role="status" className="discret ligne-meta">
+                    {t('photos.envoi_progression', { courant: String(Math.min(envoi.fait + 1, envoi.total)), total: String(envoi.total) })}
+                  </p>
+                  <div
+                    className="barre-progression"
+                    role="progressbar"
+                    aria-label={t('photos.envoi_en_cours')}
+                    aria-valuemin={0}
+                    aria-valuemax={envoi.total}
+                    aria-valuenow={envoi.fait}
+                  >
+                    <div className="barre-progression-remplie" style={{ width: `${(envoi.fait / envoi.total) * 100}%` }} />
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="carte">

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import fr from '../../i18n/fr.json' with { type: 'json' };
+import { estGenreNotification, type GenreNotification } from '../../domain/notifications.js';
 import type { Base } from '../base.js';
 import { nouvelIdentifiant } from '../identifiant.js';
 import type { PorteeUtilisateur } from '../portee-utilisateur.js';
@@ -14,23 +15,7 @@ import { enfilerEmail, listerNotificationsEnAttenteResume, mesGroupes } from './
 
 export type EmailMode = 'immediate' | 'daily' | 'off';
 
-export type NotificationKind =
-  | 'invitation_received'
-  | 'member_joined'
-  | 'event_created'
-  | 'event_updated'
-  | 'event_cancelled'
-  | 'poll_opened'
-  | 'poll_closing'
-  | 'item_claimed'
-  | 'task_assigned'
-  | 'message_posted'
-  | 'expense_added'
-  | 'expense_updated'
-  | 'expense_deleted'
-  | 'settlement_created'
-  | 'settlement_confirmed'
-  | 'accounts_closed';
+export type NotificationKind = GenreNotification;
 
 export type SubjectType =
   | 'group'
@@ -73,10 +58,12 @@ export interface ListeNotifications {
   readonly non_lues: number;
 }
 
+// Une colonne NULL n'existe que sur la ligne d'un GROUPE (migration 0008) : « hérite de la ligne globale '*' », champ par champ.
 const lignePreference = z.object({
   group_id: z.string(),
-  channel_email: z.union([z.literal(0), z.literal(1)]),
-  digest: z.enum(['instant', 'daily', 'off']),
+  channel_email: z.union([z.literal(0), z.literal(1)]).nullable(),
+  digest: z.enum(['instant', 'daily', 'off']).nullable(),
+  muted_kinds: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -84,11 +71,19 @@ const lignePreference = z.object({
 export interface PreferenceNotificationVue {
   readonly group_id: string;
   readonly group_name: string | null;
-  readonly email_mode: EmailMode;
+  /** Mode e-mail posé par cette ligne ; `null` : le groupe hérite du mode de la ligne globale (jamais `null` pour `'*'`). */
+  readonly email_mode: EmailMode | null;
+  /**
+   * Genres de notification coupés (aucune notification de ces genres, ni en application ni par e-mail) ; `null` : le groupe hérite des
+   * genres coupés de la ligne globale (jamais `null` pour `'*'`).
+   */
+  readonly muted_kinds: readonly NotificationKind[] | null;
   readonly updated_at: string;
 }
 
-function versEmailMode(channelEmail: 0 | 1, digest: 'instant' | 'daily' | 'off'): EmailMode {
+/** Mode e-mail posé par une ligne, ou `null` si elle ne le pose pas (colonnes NULL : hérité). */
+function versEmailMode(channelEmail: 0 | 1 | null, digest: 'instant' | 'daily' | 'off' | null): EmailMode | null {
+  if (channelEmail === null || digest === null) return null;
   if (channelEmail === 0 || digest === 'off') return 'off';
   return digest === 'daily' ? 'daily' : 'immediate';
 }
@@ -161,30 +156,77 @@ export function lirePreferencesNotifications(portee: PorteeUtilisateur): Prefere
     .map((p) => ({
       group_id: p.group_id,
       group_name: p.group_id === '*' ? null : (noms.get(p.group_id) ?? null),
-      email_mode: versEmailMode(p.channel_email, p.digest),
+      // La ligne globale n'hérite de rien : un NULL y est traité comme le défaut (la base l'interdit, mais le code ne s'y fie pas).
+      email_mode: versEmailMode(p.channel_email, p.digest) ?? (p.group_id === '*' ? 'immediate' : null),
+      muted_kinds: p.muted_kinds === null ? (p.group_id === '*' ? [] : null) : [...parserMutedKinds(p.muted_kinds)].filter(estGenreNotification),
       updated_at: p.updated_at,
     }));
 }
 
-/** Définit la préférence de notification par e-mail pour `'*'` ou un groupe dont le compte est membre actif. */
+/**
+ * Retire des comptes du groupe les notifications d'un genre portant sur un sujet qui n'existe plus (règlement annulé). Sous `GroupScope` :
+ * seuls les comptes membres de CE groupe sont visés, et la ligne doit porter ce `group_id`.
+ */
+export function retirerNotificationsDuSujet(scope: GroupScope, kind: NotificationKind, subjectType: SubjectType, subjectId: string): number {
+  const base = baseDeScope(scope);
+  const supprimer = preparer(
+    base,
+    'DELETE FROM notifications WHERE user_id = ? AND group_id = ? AND kind = ? AND subject_type = ? AND subject_id = ?',
+  );
+  let total = 0;
+  for (const membre of scope.tous<{ user_id: string }>('memberships')) {
+    total += supprimer.run(membre.user_id, scope.groupId, kind, subjectType, subjectId).changes;
+  }
+  return total;
+}
+
+/**
+ * Définit la préférence de notification pour `'*'` ou un groupe dont le compte est membre actif. `emailMode` et `mutedKinds` sont
+ * indépendants : un champ absent n'est pas modifié. Sur la ligne d'un groupe, un champ jamais posé reste à NULL = « hérite de la
+ * ligne `'*'` » : la résolution se fait champ par champ à la lecture (`resoudrePreferenceNotification`), il n'y a donc AUCUNE copie
+ * des valeurs globales — couper un genre globalement atteint tous les groupes qui n'ont pas posé leurs propres genres. Sur la ligne
+ * `'*'`, qui n'hérite de rien, un champ absent à la création prend le défaut (e-mail immédiat, rien de coupé).
+ */
 export function definirPreferenceNotification(
   portee: PorteeUtilisateur,
   groupIdOrStar: string,
-  emailMode: EmailMode,
+  emailMode: EmailMode | undefined,
+  mutedKinds?: readonly NotificationKind[],
 ): PreferenceNotificationVue[] | 'groupe_introuvable' {
   if (groupIdOrStar !== '*') {
     const membre = mesGroupes(portee).some((g) => g.group_id === groupIdOrStar);
     if (!membre) return 'groupe_introuvable';
   }
-  const { channel_email, digest } = versColonnesPreference(emailMode);
+  const mutedJson = mutedKinds === undefined ? undefined : JSON.stringify([...new Set(mutedKinds)]);
   portee.transaction(() => {
-    const existante = portee.tous<unknown>('notification_preferences', [{ colonne: 'group_id', operateur: '=', valeur: groupIdOrStar }]);
-    if (existante.length > 0) {
-      portee.modifierPar('notification_preferences', { group_id: groupIdOrStar }, { channel_email, digest });
-    } else {
-      portee.inserer('notification_preferences', { group_id: groupIdOrStar, channel_email, digest, muted_kinds: '[]' });
+    const existe = portee.tous<unknown>('notification_preferences', [{ colonne: 'group_id', operateur: '=', valeur: groupIdOrStar }]).length > 0;
+    if (existe) {
+      portee.modifierPar('notification_preferences', { group_id: groupIdOrStar }, {
+        ...(emailMode === undefined ? {} : versColonnesPreference(emailMode)),
+        ...(mutedJson === undefined ? {} : { muted_kinds: mutedJson }),
+      });
+      return;
     }
+    const global = groupIdOrStar === '*';
+    const colonnes =
+      emailMode !== undefined
+        ? versColonnesPreference(emailMode)
+        : global
+          ? versColonnesPreference('immediate')
+          : { channel_email: null, digest: null };
+    portee.inserer('notification_preferences', { group_id: groupIdOrStar, ...colonnes, muted_kinds: mutedJson ?? (global ? '[]' : null) });
   });
+  return lirePreferencesNotifications(portee);
+}
+
+/**
+ * « Reprendre le réglage global » : supprime la ligne du groupe, qui n'a alors plus rien de propre et suit la ligne `'*'` sur les deux
+ * champs. Le groupe doit être l'un de ceux dont le compte est membre actif (sinon `'groupe_introuvable'`, comme `definirPreferenceNotification`) ;
+ * sans ligne propre, c'est un succès sans effet. `'*'` n'a pas de niveau au-dessus à reprendre : refusé.
+ */
+export function reprendreReglageGlobal(portee: PorteeUtilisateur, groupId: string): PreferenceNotificationVue[] | 'groupe_introuvable' {
+  if (groupId === '*' || !mesGroupes(portee).some((g) => g.group_id === groupId)) return 'groupe_introuvable';
+  portee.supprimer('notification_preferences', { group_id: groupId });
   return lirePreferencesNotifications(portee);
 }
 
@@ -198,9 +240,9 @@ const destinataireLigne = z.object({
 
 const prefLigneCourte = z.object({
   group_id: z.string(),
-  channel_email: z.union([z.literal(0), z.literal(1)]),
-  digest: z.enum(['instant', 'daily', 'off']),
-  muted_kinds: z.string(),
+  channel_email: z.union([z.literal(0), z.literal(1)]).nullable(),
+  digest: z.enum(['instant', 'daily', 'off']).nullable(),
+  muted_kinds: z.string().nullable(),
 });
 
 function parserMutedKinds(brut: string): ReadonlySet<string> {
@@ -213,6 +255,11 @@ function parserMutedKinds(brut: string): ReadonlySet<string> {
   }
 }
 
+/**
+ * Résolution CHAMP PAR CHAMP : pour le mode e-mail comme pour les genres coupés, la valeur du groupe si elle est posée (colonne non
+ * NULL), sinon celle de la ligne globale `'*'`, sinon le défaut (e-mail immédiat, rien de coupé). Un NULL sur la ligne globale vaut
+ * le défaut (la base l'interdit pour `'*'`, mais on ne s'y fie pas). Le client reproduit cette règle (`preferenceEffective`).
+ */
 function resoudrePreferenceNotification(
   base: Base,
   userId: string,
@@ -225,20 +272,15 @@ function resoudrePreferenceNotification(
     .all(userId)
     .map((l) => prefLigneCourte.parse(l));
   const specifique = prefs.find((p) => p.group_id === groupId);
-  if (specifique !== undefined) {
-    return {
-      emailMode: versEmailMode(specifique.channel_email, specifique.digest),
-      mutedKinds: parserMutedKinds(specifique.muted_kinds),
-    };
-  }
   const global = prefs.find((p) => p.group_id === '*');
-  if (global !== undefined) {
-    return {
-      emailMode: versEmailMode(global.channel_email, global.digest),
-      mutedKinds: parserMutedKinds(global.muted_kinds),
-    };
-  }
-  return { emailMode: 'immediate', mutedKinds: new Set() };
+  const mutedBrut = specifique?.muted_kinds ?? global?.muted_kinds ?? null;
+  return {
+    emailMode:
+      (specifique === undefined ? null : versEmailMode(specifique.channel_email, specifique.digest)) ??
+      (global === undefined ? null : versEmailMode(global.channel_email, global.digest)) ??
+      'immediate',
+    mutedKinds: mutedBrut === null ? new Set() : parserMutedKinds(mutedBrut),
+  };
 }
 
 export interface OptionsNotificationGroupe {

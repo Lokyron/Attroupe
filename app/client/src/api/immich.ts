@@ -141,7 +141,7 @@ export async function listerPhotosAlbum(groupId: string, albumId: string, sync =
   };
 }
 
-export async function televerserPhotosAlbum(groupId: string, albumId: string, fichiers: FileList | readonly File[]): Promise<PhotoAlbum[]> {
+export async function televerserPhotosAlbum(groupId: string, albumId: string, fichiers: FileList | readonly File[], signal?: AbortSignal): Promise<PhotoAlbum[]> {
   const formData = new FormData();
   for (const fichier of Array.from(fichiers)) {
     formData.append('files', fichier, fichier.name);
@@ -150,6 +150,7 @@ export async function televerserPhotosAlbum(groupId: string, albumId: string, fi
     method: 'POST',
     credentials: 'same-origin',
     body: formData,
+    ...(signal !== undefined ? { signal } : {}),
   });
   const json: unknown = await reponse.json().catch(() => null);
   if (!reponse.ok) {

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { creerFilLibre, listerFils, type Fil } from '../api/fils';
+import { BarreAjout } from '../components/BarreAjout';
 import { ChargementPage } from '../components/ChargementPage';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
@@ -35,7 +36,11 @@ export function Fils({ groupId }: { groupId: string }) {
       <EnteteGroupe ongletActif="fils" titre={t('fils.titre')} />
       <Erreur message={premiereErreur(erreur, erreurGroupe)} />
 
-      <form onSubmit={soumettre} className="carte barre-ajout-ligne">
+      <BarreAjout
+        onSubmit={soumettre}
+        libelleBouton={enCours ? t('commun.creation') : t('fils.creer_court')}
+        desactive={titre.trim() === '' || enCours}
+      >
         <input
           type="text"
           value={titre}
@@ -44,10 +49,7 @@ export function Fils({ groupId }: { groupId: string }) {
           onChange={(e) => setTitre(e.target.value)}
           required
         />
-        <button type="submit" disabled={titre.trim() === '' || enCours}>
-          {enCours ? t('commun.creation') : t('fils.creer_court')}
-        </button>
-      </form>
+      </BarreAjout>
 
       <ChargementPage etat={etat} erreur={erreurLecture} onReessayer={recharger}>
       <div className="carte">

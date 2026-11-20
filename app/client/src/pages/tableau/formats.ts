@@ -2,6 +2,7 @@
 import { ajouterJours, jourDeDebut } from '../../agenda/dates';
 import { libelleHoraire } from '../../agenda/format';
 import { t, type CleTexte } from '../../i18n';
+import { exposantIntl, formaterMontantExposant } from '../../lib/montants';
 import type { ElementCalendrier, StatutPresence } from './selecteurs';
 
 export function libellePastilleCalendrier(el: ElementCalendrier): string {
@@ -10,22 +11,9 @@ export function libellePastilleCalendrier(el: ElementCalendrier): string {
     : t('tableau.pastille_perso', { titre: el.title });
 }
 
-/**
- * Même comportement que `formaterMontant` de `Depenses.tsx` : l'exposant est celui de la devise (lu dans Intl,
- * qui connaît les exposants ISO 4217), et non un cas particulier codé en dur. À factoriser dans `lib/`.
- */
+/** Montant du tableau de bord : l'exposant est celui de la devise, lu dans Intl (ISO 4217). */
 export function formaterMontant(montantMineur: number, devise: string, avecSigne = false): string {
-  const exposant = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: devise }).resolvedOptions()
-    .maximumFractionDigits ?? 2;
-  const valeur = montantMineur / 10 ** exposant;
-  const formate = new Intl.NumberFormat('fr-FR', {
-    style: 'currency',
-    currency: devise,
-    minimumFractionDigits: exposant,
-    maximumFractionDigits: exposant,
-  }).format(valeur);
-  if (avecSigne && montantMineur > 0) return `+${formate}`;
-  return formate;
+  return formaterMontantExposant(montantMineur, devise, exposantIntl(devise), avecSigne);
 }
 
 /**

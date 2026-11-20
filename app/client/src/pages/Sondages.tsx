@@ -5,13 +5,17 @@ import { creerSondage, listerSondages, type NouvelleOptionSondage, type ResumeSo
 import { useGroupe, useTempsReelGroupe } from '../components/FournisseurGroupe';
 import { ChargementPage } from '../components/ChargementPage';
 import { ChampFuseau } from '../components/ChampFuseau';
+import { ChampsPeriode } from '../components/ChampsPeriode';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
+import { GrilleCartes } from '../components/GrilleCartes';
 import { IconeSondage } from '../components/Icones';
 import { premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t, type CleTexte } from '../i18n';
+import { lienSondage } from '../lib/liens';
+import { cleAccord } from '../lib/pluriel';
 
 interface CreneauSaisi {
   readonly cle: number;
@@ -19,9 +23,6 @@ interface CreneauSaisi {
   readonly starts_at: string;
   readonly ends_at: string;
 }
-
-export const lienSondage = (groupId: string, sondageId: string): string =>
-  `#/groupe/${encodeURIComponent(groupId)}/sondage/${encodeURIComponent(sondageId)}`;
 
 function classeStatutSondage(statut: ResumeSondage['status']): string {
   if (statut === 'open') return 'pilule pilule-statut-yes';
@@ -152,9 +153,9 @@ export function Sondages({ groupId }: { groupId: string }) {
             </div>
 
             <h4>{t('sondages.creneaux_titre')}</h4>
-            <div className="liste-creneaux-form">
+            <ul className="liste-creneaux-form">
               {creneaux.map((c) => (
-                <div key={c.cle} className="bloc-creneau-form">
+                <li key={c.cle} className="bloc-creneau-form">
                   <label className="ligne-case">
                     <input
                       type="checkbox"
@@ -163,34 +164,23 @@ export function Sondages({ groupId }: { groupId: string }) {
                     />
                     {t('sondages.creneau_journee')}
                   </label>
-                  <div className="grille-champs-2">
-                    <label>
-                      {t('sondages.creneau_debut')}
-                      <input
-                        type={c.all_day ? 'date' : 'datetime-local'}
-                        value={c.starts_at}
-                        onChange={(e) => modifierCreneau(c.cle, { starts_at: e.target.value })}
-                        required
-                      />
-                    </label>
-                    <label>
-                      {t('sondages.creneau_fin')}
-                      <input
-                        type={c.all_day ? 'date' : 'datetime-local'}
-                        value={c.ends_at}
-                        min={c.starts_at}
-                        onChange={(e) => modifierCreneau(c.cle, { ends_at: e.target.value })}
-                      />
-                    </label>
-                  </div>
+                  <ChampsPeriode
+                    journee={c.all_day}
+                    debut={c.starts_at}
+                    fin={c.ends_at}
+                    onDebut={(valeur) => modifierCreneau(c.cle, { starts_at: valeur })}
+                    onFin={(valeur) => modifierCreneau(c.cle, { ends_at: valeur })}
+                    cleLibelleDebut="sondages.creneau_debut"
+                    cleLibelleFin="sondages.creneau_fin"
+                  />
                   {creneaux.length > 1 && (
                     <button type="button" className="bouton-compact bouton-danger-discret" onClick={() => retirerLigneCreneau(c.cle)}>
                       {t('sondages.retirer_creneau')}
                     </button>
                   )}
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
             <div className="barre">
               <button type="button" onClick={ajouterLigneCreneau}>
                 {t('sondages.ajouter_creneau')}
@@ -216,9 +206,11 @@ export function Sondages({ groupId }: { groupId: string }) {
             </div>
           </div>
         ) : (
-          <div className="grille-cartes-module">
-            {(sondages ?? []).map((s) => (
-              <a key={s.id} className="carte carte-lien-module" href={lienSondage(groupId, s.id)}>
+          <GrilleCartes
+            elements={sondages ?? []}
+            cle={(s) => s.id}
+            rendu={(s) => (
+              <a className="carte carte-lien-module" href={lienSondage(groupId, s.id)}>
                 <div className="carte-module-haut">
                   <span className="kpi-icone-badge module-icone-badge kpi-badge-ambre">
                     <IconeSondage className="icone" />
@@ -226,10 +218,10 @@ export function Sondages({ groupId }: { groupId: string }) {
                   <span className={classeStatutSondage(s.status)}>{t(`sondages.statut_${s.status}` as CleTexte)}</span>
                 </div>
                 <strong className="carte-module-titre">{s.title}</strong>
-                <span className="discret ligne-meta">{t('sondages.nb_creneaux', { n: String(s.options_count) })}</span>
+                <span className="discret ligne-meta">{t(cleAccord('sondages.nb_creneaux', s.options_count), { n: String(s.options_count) })}</span>
               </a>
-            ))}
-          </div>
+            )}
+          />
         )}
       </ChargementPage>
     </section>

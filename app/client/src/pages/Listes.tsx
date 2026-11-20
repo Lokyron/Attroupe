@@ -3,9 +3,11 @@ import type { FormEvent } from 'react';
 import { creerListe, listerListes, type ResumeListe, type TypeListe } from '../api/listes';
 import { useRechargement } from '../api/rechargement';
 import { useGroupe, useTempsReelGroupe } from '../components/FournisseurGroupe';
+import { BarreAjout } from '../components/BarreAjout';
 import { ChargementPage } from '../components/ChargementPage';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
+import { GrilleCartes } from '../components/GrilleCartes';
 import { IconeListe } from '../components/Icones';
 import { premiereErreur } from '../hooks/etatsLecture';
 import { useLecture } from '../hooks/useLecture';
@@ -71,7 +73,11 @@ export function Listes({ groupId }: { groupId: string }) {
       <EnteteGroupe ongletActif="listes" titre={t('listes.titre')} />
       <Erreur message={premiereErreur(erreur, erreurGroupe)} />
 
-      <form className="carte barre-ajout-ligne" onSubmit={creer}>
+      <BarreAjout
+        onSubmit={creer}
+        libelleBouton={enCours ? t('commun.creation') : t('listes.creer_court')}
+        desactive={titre.trim() === '' || enCours}
+      >
         <input
           ref={champTitre}
           type="text"
@@ -91,10 +97,7 @@ export function Listes({ groupId }: { groupId: string }) {
           <option value="affaires">{t('listes.type_affaires')}</option>
           <option value="taches">{t('listes.type_taches')}</option>
         </select>
-        <button type="submit" disabled={titre.trim() === '' || enCours}>
-          {enCours ? t('commun.creation') : t('listes.creer_court')}
-        </button>
-      </form>
+      </BarreAjout>
 
       <ChargementPage etat={lecture.etat} erreur={lecture.erreur} onReessayer={lecture.recharger}>
         {listes !== null && listes.length === 0 ? (
@@ -107,12 +110,14 @@ export function Listes({ groupId }: { groupId: string }) {
             </div>
           </div>
         ) : (
-          <div className="grille-cartes-module">
-            {(listes ?? []).map((l) => {
+          <GrilleCartes
+            elements={listes ?? []}
+            cle={(l) => l.id}
+            rendu={(l) => {
               const { cleType, titrePropre } = extraireTypeListe(l);
               const pct = l.articles_total === 0 ? 0 : Math.round((l.articles_faits / l.articles_total) * 100);
               return (
-                <a key={l.id} className="carte carte-lien-module" href={lienListe(groupId, l.id)}>
+                <a className="carte carte-lien-module" href={lienListe(groupId, l.id)}>
                   <div className="carte-module-haut">
                     <span className="kpi-icone-badge module-icone-badge kpi-badge-emeraude">
                       <IconeListe className="icone" />
@@ -130,8 +135,8 @@ export function Listes({ groupId }: { groupId: string }) {
                   </div>
                 </a>
               );
-            })}
-          </div>
+            }}
+          />
         )}
       </ChargementPage>
     </section>

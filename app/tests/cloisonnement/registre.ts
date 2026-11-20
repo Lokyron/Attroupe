@@ -54,7 +54,8 @@ export type Ressource =
   | 'message'
   | 'album'
   | 'photo'
-  | 'utilisateur';
+  | 'utilisateur'
+  | 'groupe';
 
 export interface EntreeRoute {
   readonly methode: Methode;
@@ -106,6 +107,7 @@ export const INTROUVABLE: Readonly<Record<Ressource, string>> = {
   album: 'album.introuvable',
   photo: 'photo.introuvable',
   utilisateur: 'avatar.introuvable',
+  groupe: 'groupe.introuvable',
 };
 
 export const PREFIXE_GROUPE = '/api/groupes/:groupId';
@@ -157,6 +159,8 @@ export const REGISTRE: readonly EntreeRoute[] = [
   { methode: 'POST', chemin: '/api/moi/notifications/lecture', exige: 'session', corps: { tout: true } },
   { methode: 'GET', chemin: '/api/moi/preferences-notifications', exige: 'session' },
   { methode: 'PUT', chemin: '/api/moi/preferences-notifications', exige: 'session', corps: { group_id: '*', email_mode: 'daily' } },
+  // « Reprendre le réglage global » : supprime la ligne du groupe. L'identifiant du groupe est dans l'URL, donc forgeable.
+  { methode: 'DELETE', chemin: '/api/moi/preferences-notifications/:groupeId', exige: 'session', ressources: { groupeId: 'groupe' } },
   // Photo de profil et Web Push (lot 12).
   { methode: 'GET', chemin: '/api/moi/avatar', exige: 'session' },
   {

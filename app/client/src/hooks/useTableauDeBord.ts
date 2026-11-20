@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { lireTableauDeBord } from '../api/tableau-de-bord';
 import { ajouterJours, aujourdhui } from '../agenda/dates';
 import { useLecture } from './useLecture';
@@ -19,6 +20,6 @@ const HORIZON_JOURS = 90;
  */
 export function useTableauDeBord() {
   const du = aujourdhui();
-  const au = ajouterJours(du, HORIZON_JOURS);
+  const au = useMemo(() => ajouterJours(du, HORIZON_JOURS), [du]);
   return useLecture(() => lireTableauDeBord({ du, au }), [du, au]);
 }

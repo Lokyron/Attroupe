@@ -48,6 +48,8 @@ import { NouveauGroupe } from './pages/NouveauGroupe';
 import { Sondage } from './pages/Sondage';
 import { Sondages } from './pages/Sondages';
 import { TableauDeBord } from './pages/TableauDeBord';
+import { decoderSegment, estFragmentDeRoute, separerFragment } from './lib/fragment-route';
+import { initialesDe } from './lib/initiales';
 
 type Route =
   | { type: 'accueil' }
@@ -65,7 +67,7 @@ type Route =
   | { type: 'depenses'; id: string }
   | { type: 'fils'; id: string }
   | { type: 'fil'; id: string; filId: string }
-  | { type: 'albums'; id: string }
+  | { type: 'albums'; id: string; albumId?: string }
   | { type: 'evenement'; id: string; evenementId: string }
   | { type: 'evenement-nouveau'; id: string }
   | { type: 'introuvable' };
@@ -75,7 +77,9 @@ type Etat = { type: 'chargement' } | { type: 'anonyme' } | { type: 'connecte'; m
 function lireRoute(): Route {
   const hash = window.location.hash;
   if (hash === '' || hash === '#' || hash === '#/') return { type: 'accueil' };
-  const [, premier, second, troisieme, quatrieme] = hash.split('/');
+  // État de consultation dans l'URL : chaîne de requête après le chemin (`#/groupe/g1/agenda?vue=semaine&date=2027-03-12`),
+  // lue par la page elle-même ; seul le chemin est routé ici. Un album ouvert est un SEGMENT (`…/albums/:albumId`).
+  const [premier, second, troisieme, quatrieme] = separerFragment(hash).segments;
   if (premier === undefined || premier === '') return { type: 'accueil' };
   if (premier === 'nouveau') return { type: 'nouveau' };
   if (premier === 'invitations') return { type: 'invitations' };
@@ -83,27 +87,24 @@ function lireRoute(): Route {
   if (premier === 'compte') return { type: 'compte' };
   if (premier === 'exploitation') return { type: 'exploitation' };
   if (premier === 'groupe' && second !== undefined && second !== '') {
-    const id = decodeURIComponent(second);
+    // Un `%` mal formé dans un segment n'est pas une route : `decoderSegment` rend `null` au lieu de lever.
+    const id = decoderSegment(second);
+    if (id === null) return { type: 'introuvable' };
     if (troisieme === undefined || troisieme === '') return { type: 'groupe', id };
     if (troisieme === 'agenda') return { type: 'agenda', id };
     if (troisieme === 'listes') return { type: 'listes', id };
-    if (troisieme === 'liste' && quatrieme !== undefined && quatrieme !== '') {
-      return { type: 'liste', id, listeId: decodeURIComponent(quatrieme) };
-    }
     if (troisieme === 'sondages') return { type: 'sondages', id };
-    if (troisieme === 'sondage' && quatrieme !== undefined && quatrieme !== '') {
-      return { type: 'sondage', id, sondageId: decodeURIComponent(quatrieme) };
-    }
     if (troisieme === 'depenses') return { type: 'depenses', id };
     if (troisieme === 'fils') return { type: 'fils', id };
-    if (troisieme === 'fil' && quatrieme !== undefined && quatrieme !== '') {
-      return { type: 'fil', id, filId: decodeURIComponent(quatrieme) };
-    }
-    if (troisieme === 'albums') return { type: 'albums', id };
     if (troisieme === 'evenement-nouveau') return { type: 'evenement-nouveau', id };
-    if (troisieme === 'evenement' && quatrieme !== undefined && quatrieme !== '') {
-      return { type: 'evenement', id, evenementId: decodeURIComponent(quatrieme) };
-    }
+    const sousId = quatrieme !== undefined && quatrieme !== '' ? decoderSegment(quatrieme) : undefined;
+    if (sousId === null) return { type: 'introuvable' };
+    if (troisieme === 'albums') return sousId !== undefined ? { type: 'albums', id, albumId: sousId } : { type: 'albums', id };
+    if (sousId === undefined) return { type: 'introuvable' };
+    if (troisieme === 'liste') return { type: 'liste', id, listeId: sousId };
+    if (troisieme === 'sondage') return { type: 'sondage', id, sondageId: sousId };
+    if (troisieme === 'fil') return { type: 'fil', id, filId: sousId };
+    if (troisieme === 'evenement') return { type: 'evenement', id, evenementId: sousId };
     return { type: 'introuvable' };
   }
   return { type: 'introuvable' };
@@ -150,15 +151,6 @@ function titreDeRoute(route: Route): string {
 
 function aller(hash: string): void {
   window.location.hash = hash;
-}
-
-function initialesDe(nom: string): string {
-  const morceaux = nom.trim().split(/\s+/).filter(Boolean);
-  if (morceaux.length === 0) return '?';
-  if (morceaux.length === 1) return (morceaux[0] ?? '?').slice(0, 2).toUpperCase();
-  const premier = morceaux[0]?.[0] ?? '';
-  const dernier = morceaux[morceaux.length - 1]?.[0] ?? '';
-  return `${premier}${dernier}`.toUpperCase();
 }
 
 export function App() {
@@ -237,6 +229,9 @@ export function App() {
 
   useEffect(() => {
     const surChangement = (): void => {
+      // Une ancre de page (lien d'évitement) n'est pas une route : sans ce garde, `#contenu-principal` serait lu
+      // comme « accueil » et ferait perdre sa saisie à l'utilisateur au clavier.
+      if (!estFragmentDeRoute(window.location.hash)) return;
       setRoute(lireRoute());
       setAvis(null);
       // Toute navigation ferme l'écran d'invitation, y compris après « Reprendre l'invitation » (le chemin est alors
@@ -336,7 +331,15 @@ export function App() {
 
   return (
     <div className="coque-app">
-      <a href="#contenu-principal" className="lien-evitement">
+      <a
+        href="#contenu-principal"
+        className="lien-evitement"
+        onClick={(e) => {
+          // Pas de changement de fragment : l'historique reste intact et le routeur n'est pas sollicité.
+          e.preventDefault();
+          document.getElementById('contenu-principal')?.focus();
+        }}
+      >
         {t('nav.evitement')}
       </a>
       <aside className="barre-laterale" aria-label={t('nav.laterale')}>
@@ -408,11 +411,9 @@ export function App() {
             </a>
           </nav>
 
-          {groupeCourant !== '' && (
+          {groupeCourant !== '' && groupeActifObj !== undefined && (
             <div className="bloc-groupe-actif">
-              <p className="bloc-groupe-actif-titre">
-                {groupeActifObj !== undefined ? groupeActifObj.name : t('nav.groupe_actif')}
-              </p>
+              <p className="bloc-groupe-actif-titre">{groupeActifObj.name}</p>
               <nav className="nav-laterale-groupe" aria-label={t('nav.groupe')}>
                 <a
                   href={baseGroupe}
@@ -614,7 +615,7 @@ export function App() {
               {route.type === 'depenses' && <Depenses key={route.id} groupId={route.id} />}
               {route.type === 'fils' && <Fils key={route.id} groupId={route.id} />}
               {route.type === 'fil' && <Fil key={route.filId} groupId={route.id} filId={route.filId} />}
-              {route.type === 'albums' && <Albums key={route.id} groupId={route.id} />}
+              {route.type === 'albums' && <Albums key={route.id} groupId={route.id} albumId={route.albumId} />}
               {route.type === 'evenement-nouveau' && <NouvelEvenement key={route.id} groupId={route.id} />}
               {route.type === 'evenement' && (
                 <Evenement key={route.evenementId} groupId={route.id} evenementId={route.evenementId} />

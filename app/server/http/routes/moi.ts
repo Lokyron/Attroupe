@@ -34,6 +34,7 @@ import { decoderBase64Url, validerEndpointPush } from '../../domain/push.js';
 import { changerMotDePasse, renvoyerVerification } from '../../services/authentification.js';
 import {
   definirMaPreferenceNotification,
+  reprendreMonReglageGlobal,
   marquerLues,
   mesNotifications,
   mesPreferencesNotifications,
@@ -360,8 +361,13 @@ export function routesMoi(contexte: Contexte): Router {
 
   routeur.put('/preferences-notifications', (req, res) => {
     const { portee } = exigerSession(req);
-    const { group_id, email_mode } = analyser(schemaPreferenceNotification, req.body);
-    res.json({ preferences: definirMaPreferenceNotification(portee, group_id, email_mode) });
+    const { group_id, email_mode, muted_kinds } = analyser(schemaPreferenceNotification, req.body);
+    res.json({ preferences: definirMaPreferenceNotification(portee, group_id, email_mode, muted_kinds) });
+  });
+
+  routeur.delete('/preferences-notifications/:groupeId', (req, res) => {
+    const { portee } = exigerSession(req);
+    res.json({ preferences: reprendreMonReglageGlobal(portee, parametre(req, 'groupeId')) });
   });
 
   // Photo de profil utilisateur.

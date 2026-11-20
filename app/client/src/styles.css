@@ -24,6 +24,10 @@
   /* Texte indigo (liens, légendes) : séparé de `--primaire` pour qu'un thème sombre éclaircisse le texte
      sans éclaircir les boutons à texte blanc. */
   --primaire-texte: var(--primaire);
+  /* Rôles « trait » et « texte au survol » : anneau de focus, bordure de champ actif, filet, lien survolé. En thème sombre
+     ils s'éclaircissent (3:1 / 4,5:1 sur surface sombre) alors que `--primaire` reste un fond à texte blanc. */
+  --primaire-trait: var(--primaire);
+  --primaire-texte-survol: var(--primaire-hover);
   --primaire-clair: color-mix(in srgb, var(--primaire) 10%, transparent);
   /* Fin du dégradé des avatars (indigo plus clair que `--primaire`). */
   --primaire-degrade: #6366f1;
@@ -197,9 +201,13 @@
     --teinte-verre: #1e293b;
     --teinte-gris: #64748b;
     --teinte-ombre: #020617;
-    --primaire: #818cf8;
-    --primaire-hover: #6366f1;
+    /* Indigo foncé : le texte blanc des boutons, de l'onglet actif et du lien d'évitement garde 6,3:1. */
+    --primaire: #4f46e5;
+    --primaire-hover: #4338ca;
+    --primaire-degrade: #5457e8;
     --primaire-texte: #c7d2fe;
+    --primaire-trait: #818cf8;
+    --primaire-texte-survol: #e0e7ff;
     --primaire-clair: rgba(129, 140, 248, 0.22);
     --verre-fond: rgba(17, 24, 39, 0.78);
     --verre-fond-fort: rgba(17, 24, 39, 0.92);
@@ -208,18 +216,16 @@
     --verre-carte: rgba(30, 41, 59, 0.78);
     --verre-survol: rgba(30, 41, 59, 0.92);
     --neutre-fond: rgba(148, 163, 184, 0.16);
-    --accent-indigo-clair: rgba(129, 140, 248, 0.2);
-    --accent-indigo-texte: #c7d2fe;
-    --accent-cyan-clair: rgba(34, 211, 238, 0.18);
-    --accent-cyan-texte: #a5f3fc;
-    --accent-emeraude-clair: rgba(52, 211, 153, 0.18);
-    --accent-emeraude-texte: #a7f3d0;
-    --accent-ambre-clair: rgba(251, 191, 36, 0.18);
-    --accent-ambre-texte: #fde68a;
-    --accent-rose-clair: rgba(251, 113, 133, 0.18);
-    --accent-rose-texte: #fecdd3;
-    --accent-violet-clair: rgba(167, 139, 250, 0.18);
-    --accent-violet-texte: #ddd6fe;
+    /* Les remplissages vifs (`--accent-*`, `--accent-*-fort`) gardent leur valeur claire : ils portent du texte blanc
+       (4,7:1 au pire) et les `*-clair` en dérivent. Seuls les textes posés sur surface sombre sont éclaircis. */
+    --accent-agenda-texte: #93c5fd;
+    --accent-positif-texte: #6ee7b7;
+    --accent-negatif-texte: #fda4af;
+    --accent-photos-texte: #fcd34d;
+    --accent-cyan-texte: #67e8f9;
+    --accent-perso-texte: #c4b5fd;
+    --accent-negatif-profond: #fda4af;
+    --accent-positif-profond: #6ee7b7;
   }
 
   @supports (color: color-mix(in srgb, red 50%, transparent)) {
@@ -386,11 +392,11 @@ a {
 }
 
 a:hover {
-  color: var(--primaire-hover);
+  color: var(--primaire-texte-survol);
 }
 
 :focus-visible {
-  outline: 2px solid var(--primaire);
+  outline: 2px solid var(--primaire-trait);
   outline-offset: 2px;
 }
 
@@ -506,7 +512,8 @@ h4 {
 .accueil {
   max-width: 82rem;
   margin: 0 auto;
-  padding: var(--espace-4) var(--espace-4) calc(5.5rem + env(safe-area-inset-bottom));
+  padding: var(--espace-4) calc(var(--espace-4) + env(safe-area-inset-right)) calc(5.5rem + env(safe-area-inset-bottom))
+    calc(var(--espace-4) + env(safe-area-inset-left));
 }
 
 @media (min-width: 1024px) {
@@ -702,7 +709,8 @@ h4 {
   flex-wrap: nowrap;
   gap: var(--espace-2);
   align-items: center;
-  padding: calc(var(--espace-2) + env(safe-area-inset-top)) var(--espace-3) var(--espace-2);
+  padding: calc(var(--espace-2) + env(safe-area-inset-top)) calc(var(--espace-3) + env(safe-area-inset-right)) var(--espace-2)
+    calc(var(--espace-3) + env(safe-area-inset-left));
   background: var(--verre-fond-fort);
   backdrop-filter: blur(var(--flou-xl));
   -webkit-backdrop-filter: blur(var(--flou-xl));
@@ -784,14 +792,16 @@ h4 {
 
 .pilule-nav:hover,
 .pilule-nav.actif,
-.pilule-nav[aria-current='page'] {
+.pilule-nav[aria-current='page'],
+.pilule-nav[aria-pressed='true'] {
   background: var(--primaire-clair);
   border-color: color-mix(in srgb, var(--primaire) 28%, transparent);
   color: var(--primaire-texte);
 }
 
 .pilule-nav.actif,
-.pilule-nav[aria-current='page'] {
+.pilule-nav[aria-current='page'],
+.pilule-nav[aria-pressed='true'] {
   font-weight: 600;
 }
 
@@ -805,7 +815,8 @@ h4 {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--espace-demi);
-  padding: var(--espace-1) var(--espace-1) calc(var(--espace-1) + env(safe-area-inset-bottom));
+  padding: var(--espace-1) calc(var(--espace-1) + env(safe-area-inset-right)) calc(var(--espace-1) + env(safe-area-inset-bottom))
+    calc(var(--espace-1) + env(safe-area-inset-left));
   background: var(--verre-fond-fort);
   backdrop-filter: blur(var(--flou-xl));
   -webkit-backdrop-filter: blur(var(--flou-xl));
@@ -992,7 +1003,7 @@ button.lien {
 
 button.lien:hover {
   background: none;
-  color: var(--primaire-hover);
+  color: var(--primaire-texte-survol);
 }
 
 button[aria-pressed='true'] {
@@ -1027,7 +1038,7 @@ textarea {
 input:not([type='checkbox']):not([type='radio']):not([type='file']):focus,
 select:focus,
 textarea:focus {
-  border-color: var(--primaire);
+  border-color: var(--primaire-trait);
   box-shadow: 0 0 0 3px var(--primaire-clair);
   outline: none;
 }
@@ -1035,7 +1046,7 @@ textarea:focus {
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid var(--primaire);
+  outline: 2px solid var(--primaire-trait);
   outline-offset: 2px;
 }
 
@@ -1650,7 +1661,7 @@ a.kpi-tuile:hover {
 
 .lien-entete-widget:hover,
 .bouton-lien:hover {
-  color: var(--primaire-hover);
+  color: var(--primaire-texte-survol);
   background: none;
 }
 
@@ -2426,7 +2437,7 @@ dialog.dialogue-confirmation .dialogue-definitif {
   background: var(--primaire-clair);
   color: var(--primaire-texte);
   text-decoration: none;
-  border-left: 2px solid var(--primaire);
+  border-left: 2px solid var(--primaire-trait);
 }
 
 /* Le conteneur est en `overflow: hidden` : l'anneau de focus doit rentrer à l'intérieur. */
@@ -2932,6 +2943,14 @@ dialog.dialogue-confirmation .dialogue-definitif {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--espace-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Les cartes-liens remplissent leur `<li>` pour garder la même hauteur par rangée. */
+.grille-cartes-module > li {
+  display: grid;
 }
 
 @media (min-width: 640px) {
@@ -3053,6 +3072,9 @@ dialog.dialogue-confirmation .dialogue-definitif {
 .liste-creneaux-form {
   display: grid;
   gap: var(--espace-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .bloc-creneau-form {
@@ -3431,7 +3453,7 @@ dialog.dialogue-confirmation .dialogue-definitif {
 }
 
 .zone-depot-active {
-  border-color: var(--primaire);
+  border-color: var(--primaire-trait);
   background: var(--primaire-clair);
 }
 
@@ -3445,7 +3467,7 @@ dialog.dialogue-confirmation .dialogue-definitif {
 }
 
 .label-fichier:focus-within {
-  outline: 2px solid var(--primaire);
+  outline: 2px solid var(--primaire-trait);
   outline-offset: 2px;
 }
 
@@ -3609,7 +3631,7 @@ dialog.visionneuse::backdrop {
 }
 
 .bouton-fichier:focus-within {
-  outline: 2px solid var(--primaire);
+  outline: 2px solid var(--primaire-trait);
   outline-offset: 2px;
 }
 

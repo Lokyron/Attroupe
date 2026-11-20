@@ -60,9 +60,15 @@ export function modifierGroupe(
 }
 
 export function supprimerGroupeService(contexte: Contexte, scope: GroupScope): void {
+  // Diffusion AVANT la suppression : le diffuseur revérifie l'appartenance au groupe avant chaque envoi, et elle échoue dès que le
+  // groupe est supprimé — l'événement serait perdu. Tout est synchrone (écriture SSE, puis UPDATE better-sqlite3) dans un seul
+  // processus : aucune autre requête ne s'intercale, et un client qui recharge sur l'événement trouve déjà le groupe disparu.
+  // `exigerAdminGroupe` vient de relire le groupe, donc la suppression ne peut échouer que par une anomalie interne (0 ligne
+  // modifiée) : le 404 ci-dessous est une garde défensive, pas un cas attendu. Dans ce cas seulement, les membres auraient reçu
+  // un événement sans effet, qui ne leur ferait recharger que ce 404.
+  contexte.diffuseur.diffuser(scope, { type: 'groupe.supprime', ressource: 'groupe', id: scope.groupId, parent_id: null });
   const ok = supprimerGroupeEnBase(scope, versInstant(contexte.horloge()));
   if (!ok) throw new ErreurHttp(404, 'groupe.introuvable');
-  contexte.diffuseur.diffuser(scope, { type: 'groupe.supprime', ressource: 'groupe', id: scope.groupId, parent_id: null });
 }
 
 /** Crée un groupe dont l'appelant devient administrateur. Un compte peut en avoir plusieurs. */

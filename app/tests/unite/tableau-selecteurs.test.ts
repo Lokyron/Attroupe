@@ -98,6 +98,44 @@ describe('événements à venir', () => {
   });
 });
 
+describe('regroupement par jour (grouperParJour)', () => {
+  const elements = elementsCalendrier(
+    {
+      evenements: [groupe('a', 'Long', '2027-03-10', { ends_at: '2027-03-12' }), groupe('a', 'Court', '2027-03-11')],
+      evenements_perso: [perso('Seul', '2027-03-20')],
+    },
+    '',
+    'tous',
+  );
+
+  it('range chaque élément dans chacun de ses jours, en gardant l’ordre d’entrée', () => {
+    const parJour = grouperParJour(elements);
+    expect([...parJour.keys()]).toEqual(['2027-03-10', '2027-03-11', '2027-03-12', '2027-03-20']);
+    expect(parJour.get('2027-03-11')?.map((e) => e.title)).toEqual(['Long', 'Court']);
+    expect(parJour.get('2027-03-12')?.map((e) => e.title)).toEqual(['Long']);
+  });
+
+  it('ne partage aucun tableau entre deux jours et ne modifie pas l’entrée', () => {
+    const copie = [...elements];
+    const parJour = grouperParJour(elements);
+    expect(parJour.get('2027-03-10')).not.toBe(parJour.get('2027-03-11'));
+    expect(elements).toEqual(copie);
+  });
+
+  it('rend une table vide pour une entrée vide et reste linéaire sur un grand volume', () => {
+    expect(grouperParJour([]).size).toBe(0);
+    const beaucoup = elementsCalendrier(
+      { evenements: [], evenements_perso: Array.from({ length: 20000 }, (_, i) => perso(`E${i}`, '2027-03-12')) },
+      '',
+      'tous',
+    );
+    const debut = performance.now();
+    const parJour = grouperParJour(beaucoup);
+    expect(parJour.get('2027-03-12')).toHaveLength(20000);
+    expect(performance.now() - debut).toBeLessThan(1000);
+  });
+});
+
 describe('fenêtre du calendrier', () => {
   it('la liste n’en demande aucune', () => {
     expect(fenetreCalendrier('liste', '2027-03-10')).toBeUndefined();

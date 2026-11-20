@@ -65,8 +65,9 @@ describe('PorteeUtilisateur : un compte ne lit ni n’écrit les lignes d’un a
   });
 
   it('notification_preferences : upsert par clé (compte, groupe) sans toucher au compte voisin', () => {
-    alice.inserer('notification_preferences', { group_id: '*', digest: 'daily' });
-    bob.inserer('notification_preferences', { group_id: '*', digest: 'off' });
+    // Depuis la migration 0008, la ligne globale doit poser ses trois colonnes (plus de valeurs par défaut en base).
+    alice.inserer('notification_preferences', { group_id: '*', channel_email: 1, digest: 'daily', muted_kinds: '[]' });
+    bob.inserer('notification_preferences', { group_id: '*', channel_email: 0, digest: 'off', muted_kinds: '[]' });
     expect(alice.modifierPar('notification_preferences', { group_id: '*' }, { digest: 'instant' })).toBe(true);
     expect(bob.tous<{ digest: string }>('notification_preferences')[0]?.digest).toBe('off');
     expect(alice.tous<{ digest: string }>('notification_preferences')[0]?.digest).toBe('instant');

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   changerMaVisibiliteDefaut,
   listerDisponibilitesGroupe,
@@ -13,12 +13,14 @@ import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { useGroupe } from '../components/FournisseurGroupe';
 import { premiereErreur } from '../hooks/etatsLecture';
+import { remplacerFragment, useFragment } from '../hooks/useFragment';
 import { t } from '../i18n';
+import { JOURS_LISTE_DEFAUT, JOURS_LISTE_MAX, lireEtatAgenda, requeteAgenda, VUES_AGENDA, type EtatAgenda, type VueAgenda } from '../lib/etat-agenda';
+import { separerFragment } from '../lib/fragment-route';
+import { lienEvenement } from '../lib/liens';
+import { cleAccord } from '../lib/pluriel';
 
-type Vue = 'liste' | 'semaine' | 'mois';
-const VUES: readonly Vue[] = ['liste', 'semaine', 'mois'];
-
-const lienEvenement = (groupId: string, id: string): string => `#/groupe/${encodeURIComponent(groupId)}/evenement/${encodeURIComponent(id)}`;
+type Vue = VueAgenda;
 
 /** Fenêtre à demander au serveur : la grille affichée, élargie d'un jour (les jours sont lus dans le fuseau de l'événement, la fenêtre en UTC). */
 function fenetre(vue: Vue, ancre: string, joursListe: number): { du: string; au?: string } {
@@ -33,7 +35,10 @@ function fenetre(vue: Vue, ancre: string, joursListe: number): { du: string; au?
 function LigneEvenement({ groupId, e, court }: { groupId: string; e: Evenement; court?: boolean }) {
   return (
     <a className={`evenement${e.status === 'cancelled' ? ' evenement-annule' : ''}`} href={lienEvenement(groupId, e.id)}>
-      <span className="evenement-heure">{libelleHoraire(e)}</span> {e.title}
+      <time className="evenement-heure" dateTime={e.starts_at}>
+        {libelleHoraire(e)}
+      </time>{' '}
+      {e.title}
       {e.status === 'cancelled' && court !== true && ` (${t('agenda.annule')})`}
     </a>
   );
@@ -50,9 +55,22 @@ function LigneDisponibilite({ d }: { d: DisponibiliteMembre }) {
 
 /** L'agenda du groupe : liste, semaine, mois. La grille est calculée à la main (agenda/dates.ts), sans dépendance. */
 export function Agenda({ groupId }: { groupId: string }) {
-  const [vue, setVue] = useState<Vue>(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'liste' : 'mois'));
-  const [ancre, setAncre] = useState(aujourdhui);
-  const [joursListe, setJoursListe] = useState(30);
+  // Vue, ancre et horizon de la liste vivent dans le fragment d'URL (`?vue=…&date=…&jours=…`) : un lien collé rouvre la même
+  // vue, et le rechargement ne perd pas la position. Une valeur absente ou invalide retombe sur le défaut.
+  const fragment = useFragment();
+  const { vue, ancre, joursListe } = useMemo(
+    () =>
+      lireEtatAgenda(separerFragment(fragment).requete, {
+        vue: window.innerWidth < 640 ? 'liste' : 'mois',
+        ancre: aujourdhui(),
+        joursListe: JOURS_LISTE_DEFAUT,
+      }),
+    [fragment],
+  );
+  const changerEtat = (suite: Partial<EtatAgenda>): void =>
+    remplacerFragment(`#/groupe/${encodeURIComponent(groupId)}/agenda${requeteAgenda({ vue, ancre, joursListe, ...suite })}`);
+  const setVue = (v: Vue): void => changerEtat({ vue: v });
+  const setAncre = (a: string): void => changerEtat({ ancre: a });
   const [evenements, setEvenements] = useState<Evenement[]>([]);
   const [disponibilites, setDisponibilites] = useState<DisponibiliteMembre[]>([]);
   // Choix de l'utilisateur, tant qu'il n'en a pas fait : la valeur par défaut du groupe (contexte).
@@ -91,21 +109,33 @@ export function Agenda({ groupId }: { groupId: string }) {
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  const parJour = new Map<string, Evenement[]>();
-  for (const e of evenements) {
-    for (const jour of vue === 'liste' ? [jourDeDebut(e)] : joursDe(e)) parJour.set(jour, [...(parJour.get(jour) ?? []), e]);
-  }
-
-  const disposParJour = new Map<string, DisponibiliteMembre[]>();
-  for (const d of disponibilites) {
-    for (const jour of vue === 'liste' ? [jourDeDebut(d)] : joursDe(d)) {
-      disposParJour.set(jour, [...(disposParJour.get(jour) ?? []), d]);
+  const parJour = useMemo(() => {
+    const regroupes = new Map<string, Evenement[]>();
+    for (const e of evenements) {
+      for (const jour of vue === 'liste' ? [jourDeDebut(e)] : joursDe(e)) {
+        const duJour = regroupes.get(jour);
+        if (duJour === undefined) regroupes.set(jour, [e]);
+        else duJour.push(e);
+      }
     }
-  }
+    return regroupes;
+  }, [evenements, vue]);
+
+  const disposParJour = useMemo(() => {
+    const regroupees = new Map<string, DisponibiliteMembre[]>();
+    for (const d of disponibilites) {
+      for (const jour of vue === 'liste' ? [jourDeDebut(d)] : joursDe(d)) {
+        const duJour = regroupees.get(jour);
+        if (duJour === undefined) regroupees.set(jour, [d]);
+        else duJour.push(d);
+      }
+    }
+    return regroupees;
+  }, [disponibilites, vue]);
 
   const precedent = (): void => setAncre(vue === 'mois' ? moisVoisin(ancre, -1) : ajouterJours(ancre, -7));
   const suivant = (): void => setAncre(vue === 'mois' ? moisVoisin(ancre, 1) : ajouterJours(ancre, 7));
-  const semaine = joursDeSemaine(ancre);
+  const semaine = useMemo(() => joursDeSemaine(ancre), [ancre]);
   const titre =
     vue === 'mois'
       ? libelleMois(ancre)
@@ -131,7 +161,7 @@ export function Agenda({ groupId }: { groupId: string }) {
         <div className="calendrier-barre-outils">
           <div className="agenda-outils-haut">
             <div className="barre-onglets" role="group" aria-label={t('agenda.vues')}>
-              {VUES.map((v) => (
+              {VUES_AGENDA.map((v) => (
                 <button key={v} type="button" aria-pressed={vue === v} onClick={() => setVue(v)}>
                   {t(`agenda.vue_${v}` as const)}
                 </button>
@@ -186,7 +216,9 @@ export function Agenda({ groupId }: { groupId: string }) {
                       role="cell"
                       className={`grille-jour${jour.slice(0, 7) === ancre.slice(0, 7) ? '' : ' hors-mois'}${jour === aujourdhui() ? ' aujourdhui' : ''}`}
                     >
-                      <span className="numero">{Number(jour.slice(8))}</span>
+                      <time className="numero" dateTime={jour}>
+                        {Number(jour.slice(8))}
+                      </time>
                       {(parJour.get(jour) ?? []).map((e) => (
                         <LigneEvenement key={e.id} groupId={groupId} e={e} court />
                       ))}
@@ -194,7 +226,7 @@ export function Agenda({ groupId }: { groupId: string }) {
                         <LigneDisponibilite key={`${d.id}-${d.membership_id}`} d={d} />
                       ))}
                       {resteDispos > 0 && (
-                        <span className="discret ligne-meta">{t('agenda.plus_autres', { count: String(resteDispos) })}</span>
+                        <span className="discret ligne-meta">{t(cleAccord('agenda.plus_autres', resteDispos), { n: String(resteDispos) })}</span>
                       )}
                     </div>
                   );
@@ -208,7 +240,9 @@ export function Agenda({ groupId }: { groupId: string }) {
           <ul className="jours semaine">
             {semaine.map((jour) => (
               <li key={jour} className={jour === aujourdhui() ? 'aujourdhui' : undefined}>
-                <h3>{libelleJour(jour, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
+                <h3>
+                  <time dateTime={jour}>{libelleJour(jour, { weekday: 'long', day: 'numeric', month: 'long' })}</time>
+                </h3>
                 {(parJour.get(jour) ?? []).length === 0 && (disposParJour.get(jour) ?? []).length === 0 && (
                   <p className="discret">{t('agenda.rien')}</p>
                 )}
@@ -230,7 +264,9 @@ export function Agenda({ groupId }: { groupId: string }) {
             <ul className="jours">
               {[...new Set([...parJour.keys(), ...disposParJour.keys()])].sort().map((jour) => (
                 <li key={jour}>
-                  <h3>{libelleJour(jour)}</h3>
+                  <h3>
+                    <time dateTime={jour}>{libelleJour(jour)}</time>
+                  </h3>
                   {(parJour.get(jour) ?? []).map((e) => (
                     <LigneEvenement key={e.id} groupId={groupId} e={e} />
                   ))}
@@ -241,7 +277,8 @@ export function Agenda({ groupId }: { groupId: string }) {
               ))}
             </ul>
             <p className="barre-compacte">
-              <button type="button" className="bouton-compact" onClick={() => setJoursListe((n) => n + 30)}>
+              <button type="button" className="bouton-compact" disabled={joursListe >= JOURS_LISTE_MAX}
+                onClick={() => changerEtat({ joursListe: Math.min(JOURS_LISTE_MAX, joursListe + JOURS_LISTE_DEFAUT) })}>
                 {t('agenda.jours_suivants')}
               </button>
             </p>

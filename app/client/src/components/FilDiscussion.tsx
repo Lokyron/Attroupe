@@ -177,7 +177,7 @@ export function FilDiscussion({ groupId, filId }: { groupId: string; filId: stri
                 <div className="fil-message-entete">
                   <strong className="fil-message-auteur">{m.author_name}</strong>
                   <span className="fil-message-heure">
-                    {horodatage(m.created_at)}
+                    <time dateTime={m.created_at}>{horodatage(m.created_at)}</time>
                     {m.edited_at !== null && ` ${t('fil.modifie')}`}
                   </span>
                 </div>

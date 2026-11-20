@@ -3,6 +3,78 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-20 — Vérification de la phase 3, puis solde réel
+
+**La phase 3 n'était pas bouclée, contrairement à ce que l'entrée du dessous annonce.** Une
+vérification point par point l'a mesurée : **3 points sur 12 réellement faits**, 7 partiels, et 2
+absents — la **mémoïsation** (aucun `useMemo` dans le tableau de bord ni l'agenda) et l'**état de
+consultation dans l'URL**. Manquaient aussi `<time dateTime>`, `aria-current="date"`, la détection
+de liens dans les descriptions, l'adresse cliquable, la progression par fichier, et les
+factorisations `lib/montants.ts` / `lib/initiales.ts`.
+
+**Deux défauts bloquants dormaient dans le diff de la phase 3**, trouvés en relecture et confirmés
+dans le code :
+
+1. **Le lien d'évitement renvoyait au tableau de bord.** `lireRoute` faisait `hash.split('/')` :
+   pour `#contenu-principal`, le premier segment valait `undefined`, donc la route devenait
+   « accueil ». Le **premier élément focusable de chaque page** éjectait l'utilisateur clavier hors de
+   sa page et lui faisait perdre sa saisie — précisément l'utilisateur que ce lien doit servir.
+   Corrigé par le prédicat `estFragmentDeRoute` plus un `preventDefault` qui pose le focus.
+2. **Le mode sombre rendait les erreurs illisibles.** Le bloc `prefers-color-scheme: dark`
+   redéfinissait cinq familles de tokens **qui n'existent pas** en clair (`--accent-indigo/emeraude/
+   ambre/rose/violet-*`) et oubliait celles réellement utilisées : `#9f1239` sur `#111827` donne
+   **2,2:1**. Les avertissements de suppression définitive et les erreurs de champ étaient presque
+   invisibles.
+
+**Ce qui a été livré ensuite**, en six lots, chacun relu par un `reviewer` :
+
+- **Les deux bloquants**, plus le bloc « Groupe actif » fantôme, `aria-current="date"`, le style de
+  l'état `aria-pressed` des albums, les insets latéraux et les listes en `<ul>/<li>`.
+- **La phase 3 complétée** : mémoïsation du tableau de bord et de l'agenda (`grouperParJour` passe de
+  quadratique à linéaire), état de consultation dans l'URL
+  (`#/groupe/:id/agenda?vue=…&date=…&jours=…` et `#/groupe/:id/albums/:albumId`), `<time dateTime>`,
+  détection de liens rendue en **nœuds React** (jamais de HTML par chaîne, `http`/`https` seuls),
+  adresse cliquable vers OpenStreetMap, progression par fichier à l'envoi de photos, pluriels,
+  « Heure de {fuseau} », bouton « Copier le lien », et les factorisations `montants`, `initiales`,
+  `liens`, `BarreAjout`, `GrilleCartes`, `ChampsPeriode`.
+- **La moitié visible de `muted_kinds`** : la dette soldée côté serveur n'avait **aucun effet**, car
+  aucune interface ne permettait de couper un genre. Elle existe maintenant, hiérarchie
+  global/groupe explicitée.
+- **L'héritage des préférences, refait** (`ADR-0016`, migration `0008`). L'héritage à la création
+  n'était qu'une copie : une fois la ligne du groupe née, couper un genre pour **tous** les groupes
+  n'avait plus d'effet sur lui. C'était le même défaut dans l'ordre inverse. Désormais `NULL` veut
+  dire « hérite », la résolution se fait champ par champ, et « suivre le global » est un état réel
+  (`DELETE /api/moi/preferences-notifications/:groupeId`) au lieu d'une recopie.
+
+**Trois constats de méthode, à garder.**
+
+- **Une régression a été introduite par un correctif d'accessibilité.** Assombrir `--primaire` à
+  `#4f46e5` pour que le texte blanc des boutons atteigne 6,3:1 a fait tomber l'**anneau de focus** à
+  2,82:1, sous le seuil de 3:1 — `--primaire` servait aussi à des traits. D'où les rôles séparés :
+  `--primaire` pour les fonds, `--primaire-trait` et `--primaire-texte-survol` pour le reste.
+- **Trois tests de cloisonnement rouges ont d'abord été pris pour l'épuisement de ports connu.** Ils
+  l'étaient, mais la cause était à nous : le décor ajoutait deux requêtes `PUT` par monde, soit ~246
+  sockets, et la suite tenait déjà à **2 % du plafond** (pic mesuré 16 033 sur 16 384 ports
+  éphémères). Les deux `PUT` sont passés en insertion SQL directe. **La signature `EADDRNOTAVAIL`
+  n'excuse pas de ne pas chercher.**
+- **Dette de test connue** : le client de test ouvre un vrai serveur TCP **par requête**
+  (`app/tests/fixtures/comptes.ts`), soit ~16 349 sockets pour la seule suite de cloisonnement. Une
+  quinzaine de routes de plus la refera tomber. La correction durable est un serveur d'écoute unique
+  par décor avec un agent `keepAlive` — elle touche des fixtures dont 1 369 tests dépendent, donc
+  elle se décide à froid.
+
+**Vérifié par l'orchestrateur, pas par rapport** : `npm run typecheck`, `npm run lint`,
+`npm run build` verts, et les trois suites lancées séparément et espacées — **913** tests schéma +
+unité, **461** de cloisonnement (1 ignoré, un `skipIf` volontaire), **456** d'intégration, soit
+**1 830 tests verts**. Rien n'a été commité.
+
+**Restent ouverts.** Le **lien d'invitation copié** n'est pas un vrai lien : le serveur ne renvoie
+jamais le jeton, il n'en garde que l'empreinte, donc le bouton copie l'adresse de l'application —
+suffisant pour une invitation par nom d'utilisateur, pas pour quelqu'un sans compte. Un vrai lien
+demande que le serveur rende le jeton à la création, côté administrateur seulement : décision
+produit, pas technique. Et **rien n'a toujours été ouvert dans un navigateur** : mode sombre,
+`<ul>/<li>`, retour arrière et envoi de photos sont validés au typage et aux tests, pas à l'œil.
+
 ## 2026-11-20 — Phase 3 : mode sombre, accessibilité structurelle, tablette et finitions
 
 - **Mode sombre** : tokens `prefers-color-scheme: dark` dans `app/client/src/styles.css` (avec redéfinition du bloc `@supports` des voiles photo) et `<meta name="theme-color" media="...">` dans `app/client/index.html`.

@@ -22,7 +22,7 @@ import {
   type Remboursement,
 } from '../db/queries/depenses.js';
 import { lireEvenement, peutModifierEvenement } from '../db/queries/evenements.js';
-import { notifierMembresGroupe } from '../db/queries/notifications.js';
+import { notifierMembresGroupe, retirerNotificationsDuSujet } from '../db/queries/notifications.js';
 import type { GroupScope } from '../db/scope.js';
 import { additionnerMontants, convertirMontant, creerMontant, ErreurArgent, UNITE_TAUX_PPM } from '../domain/argent.js';
 import { versInstant } from '../domain/instant.js';
@@ -576,7 +576,13 @@ export function supprimerRemboursementService(contexte: Contexte, scope: GroupSc
     throw new ErreurHttp(409, 'remboursement.deja_confirme');
   }
   verifierNonCloture(scope, actuel.event_id);
-  supprimerRemboursementEnBase(scope, remboursementId);
+  // La notification « un règlement attend votre confirmation » déjà envoyée est retirée avec le règlement : sinon elle pointerait vers
+  // un objet disparu. On supprime plutôt que d'ajouter une notification d'annulation (qui n'ajouterait que du bruit à une demande
+  // devenue sans objet) ; l'e-mail et la notification Push déjà partis ne se rappellent pas.
+  scope.transaction(() => {
+    supprimerRemboursementEnBase(scope, remboursementId);
+    retirerNotificationsDuSujet(scope, 'settlement_created', 'settlement', remboursementId);
+  });
   contexte.diffuseur?.diffuser(scope, {
     type: 'remboursement.supprime',
     ressource: 'remboursement',

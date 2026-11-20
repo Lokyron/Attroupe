@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { joursDeSemaine } from '../../agenda/dates';
 import { libelleJour, libelleMois } from '../../agenda/format';
 import type { GroupeTableauDeBord } from '../../api/tableau-de-bord';
@@ -51,8 +52,10 @@ export function WidgetAgenda({
   onAujourdhui: () => void;
   onSuivant: () => void;
 }) {
-  const parJour = grouperParJour(elements);
-  const semaine = joursDeSemaine(ancre);
+  // `elements` est stable tant que la fenêtre et les filtres ne changent pas (mémoïsé par l'appelant) :
+  // basculer de vue ou sélectionner un jour ne regroupe donc pas les événements à nouveau.
+  const parJour = useMemo(() => grouperParJour(elements), [elements]);
+  const semaine = useMemo(() => joursDeSemaine(ancre), [ancre]);
   const elementsListe = jourSelectionne !== null ? (parJour.get(jourSelectionne) ?? []) : elements;
   const libellePeriode =
     vue === 'mois'

@@ -8,6 +8,7 @@ import {
   testerNotificationPush,
 } from '../api/notifications';
 import { t } from '../i18n';
+import { cleAccord } from '../lib/pluriel';
 import { Erreur, messageDe } from './Erreur';
 
 type EtatPush = 'chargement' | 'non_supporte' | 'https_requis' | 'bloquee' | 'inactive' | 'active';
@@ -157,7 +158,7 @@ export function CarteNotificationsPush() {
       .lancer(async () => {
         const res = await testerNotificationPush();
         if (res.appareils > 0) {
-          setInfo(t('push.test_demande', { n: String(res.appareils) }));
+          setInfo(t(cleAccord('push.test_demande', res.appareils), { n: String(res.appareils) }));
         } else {
           setErreur(t('push.test_aucun_appareil'));
         }

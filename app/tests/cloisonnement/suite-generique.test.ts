@@ -166,6 +166,8 @@ describe('suite générique de cloisonnement : une attaque par route du registre
           // Un compte n'est pas cloisonné par le groupe de l'URL mais par un groupe commun avec l'appelant : Manon, membre de B,
           // lit légitimement la photo d'un membre de B. Seule Alice (aucun groupe commun avec lui) joue cette attaque.
           if (nature === 'utilisateur' && client !== w.alice.client) continue;
+          // Idem pour un groupe : Manon est membre de B, le réglage de SON groupe B lui est légitimement ouvert. Seule Alice est étrangère à B.
+          if (nature === 'groupe' && client !== w.alice.client) continue;
           const forges: Identifiants = { ...idsA, [endroit]: { ...idsA[endroit], [cleForgee]: w.ressources.b[nature] } };
           await attaquer(`${libelle} (${cleForgee}), par ${attaquante}`, client, forges, 404, INTROUVABLE[nature]);
         }

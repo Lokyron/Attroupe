@@ -34,7 +34,7 @@ trois sections suivantes existent pour que cette couture ne coûte rien.
 | [`Dossier de conception/04 - Architecture.md`](Dossier%20de%20conception/04%20-%20Architecture.md) | L'architecture, et au §4 le détail du cloisonnement |
 | [`docs/decisions/`](docs/decisions/) | Une ADR par décision structurante. **Elles sont prises : ne les re-débats pas**, et n'en contredis aucune sans en écrire une nouvelle |
 | [`Avancement du projet/AVANCEMENT.md`](Avancement%20du%20projet/AVANCEMENT.md) | Où on en est, et les défauts déjà rencontrés avec leur leçon |
-| [`docs/audits/2026-11-18-ui-ux-frontend.md`](docs/audits/2026-11-18-ui-ux-frontend.md) | L'audit de l'interface et son plan d'action priorisé. **Les phases 1, 2, 2 bis et 2 ter sont appliquées** ; ce qui reste est listé au §9 |
+| [`docs/audits/2026-11-18-ui-ux-frontend.md`](docs/audits/2026-11-18-ui-ux-frontend.md) | L'audit de l'interface et son plan d'action priorisé. **Les phases 1, 2, 2 bis, 2 ter et 3 sont appliquées** ; ce qui reste est listé au §9 |
 
 ## 3. Ce qui est déjà passé à travers — ne le refais pas
 
@@ -79,10 +79,10 @@ Ils sont corrigés ; ils sont listés ici parce que **chacun est un piège de ce
    groupe et 8 personnels **tous groupes confondus**, contre 200 avec
    (`db/queries/tableau-de-bord.ts`). Un appel qui « marche » peut tronquer en silence : lis la
    requête avant d'omettre un paramètre.
-7. **Les écritures qui font bouger un solde doivent notifier.** C'est le défaut structurel du
-   module dépenses : la création notifie désormais, mais modifier, supprimer et régler ne
-   notifient toujours pas (§9). Si tu touches à une de ces écritures, règle-le au passage plutôt
-   que d'ajouter une quatrième dette.
+7. **Les écritures qui font bouger un solde doivent notifier.** C'était le défaut structurel du
+   module dépenses : seule la création notifiait. Modifier, supprimer, créer et confirmer un
+   règlement notifient désormais, par `notifierMouvementSolde` (`app/server/services/depenses.ts`).
+   Toute nouvelle écriture de solde doit passer par le même chemin.
 
 ## 4. Conventions
 
@@ -131,14 +131,23 @@ image n'est publiée si l'une échoue.
 > du code. Réduire la consommation de `suite-generique` reste à faire.
 >
 > **En pratique, ce qui marche** : lancer les trois répertoires séparément **et espacés**, en
-> laissant les ports se drainer entre deux. La référence verte au 20/11/2026 est
-> **593 unité + 458 cloisonnement + 431 intégration = 1 482 tests**.
+> laissant les ports se drainer entre deux. La référence verte au 20/11/2026, après la phase 3, est
+> **913 schéma + unité, 461 cloisonnement (1 ignoré), 456 intégration = 1 830 tests**.
 >
 > ```bash
-> npx vitest run app/tests/unite
+> npx vitest run app/tests/schema app/tests/unite
 > npx vitest run app/tests/cloisonnement
 > npx vitest run app/tests/integration
 > ```
+>
+> **La marge est de 2 %, et la signature n'excuse rien.** Le pic mesuré est de 16 033 sockets en
+> `TIME_WAIT` sur les 16 384 ports éphémères de macOS, parce que le client de test
+> (`app/tests/fixtures/comptes.ts`) ouvre un vrai serveur TCP **par requête** — ~16 349 pour la seule
+> suite de cloisonnement, dont 70 % pour construire les décors. Trois tests sont déjà tombés en
+> `EADDRNOTAVAIL` à cause de **deux requêtes** ajoutées au décor : avant de classer un échec comme
+> « c'est l'environnement », compare au dernier run vert et compte les requêtes. La correction
+> durable est un serveur d'écoute unique par décor avec un agent `keepAlive` ; elle touche des
+> fixtures dont 1 830 tests dépendent, donc elle ne s'improvise pas au milieu d'autre chose.
 
 **Trois tests portent un délai explicite, et ce n'est pas un contournement.** Ils sont lents par
 construction (un verrou de base de données, deux mesures de temps constant sur l'authentification)
@@ -190,9 +199,20 @@ réellement vérifié par opposition à ce que tu supposes.
 
 ## 9. Où on en est — état au 20 novembre 2026
 
-Branche de travail : `beta`. Les trois dettes bloquantes et l'ensemble de la phase 2 de l'audit
-ont été soldés. Vérification verte : `typecheck`, `lint`, `build`, et 1 753 tests verts
-(862 schéma + unité, 460 cloisonnement dont 1 ignoré préexistant, 431 intégration).
+Branche de travail : `beta`. Les trois dettes bloquantes, la phase 2 et la phase 3 de l'audit sont
+**appliquées**. La phase 3 avait été annoncée comme appliquée avant vérification : deux de ses douze
+points n'étaient pas faits du tout (mémoïsation, état dans l'URL) et sept l'étaient partiellement.
+Ils ont été soldés depuis. Les défauts trouvés en relecture sont corrigés :
+- le lien d'évitement `#contenu-principal` renvoyait à l'accueil, parce que le routeur lisait tout
+  fragment comme une route (garde `estFragmentDeRoute`, `app/client/src/lib/fragment-route.ts`) ;
+- des contrastes du mode sombre étaient sous le seuil AA : le trait de focus et le texte utilisaient
+  `--primaire` (il faut `--primaire-trait` et `--primaire-texte-survol`) ;
+- l'héritage des préférences de notification : une ligne de groupe copiait le réglage global à sa
+  création puis le primait en bloc. Désormais `NULL` veut dire « hérite de `'*'` », champ par champ
+  (migration `0008`).
+
+Les contrôles (`typecheck`, `lint`, `build`, tests) sont à relancer avant toute publication ; les
+chiffres de tests sont consignés dans `Avancement du projet/AVANCEMENT.md`.
 
 **Ce qui a été livré depuis `678ec6f`** :
 1. **`muted_kinds` lue dans `notifierMembresGroupe`** après le filtre SQL (`app/server/db/queries/notifications.ts`).

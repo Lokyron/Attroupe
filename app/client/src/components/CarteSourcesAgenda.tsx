@@ -14,6 +14,7 @@ import { Erreur, messageDe } from '../components/Erreur';
 import { useLecture } from '../hooks/useLecture';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
+import { cleAccord } from '../lib/pluriel';
 
 // Sources d'agenda externe (ADR-0013). Deux choses que cet écran doit dire, et qu'il dit AVANT le champ d'URL :
 //  - iCloud ne convient pas. Apple n'offre aucune URL privée : seul un « calendrier public » existe, lisible par
@@ -78,7 +79,7 @@ function FormulaireSource({ onAjoutee, onAnnuler }: { onAjoutee: (message: strin
         // pas un succès de façade.
         onAjoutee(
           s.synchronisation.statut === 'ok'
-            ? t('source.ajoutee', { nombre: String(s.synchronisation.creneaux_importes) })
+            ? t(cleAccord('source.ajoutee', s.synchronisation.creneaux_importes), { n: String(s.synchronisation.creneaux_importes) })
             : t('source.ajoutee_mais', { raison: libelleStatut(s.synchronisation.statut) }),
         );
       })
@@ -165,7 +166,7 @@ export function CarteSourcesAgenda() {
       .then((maj) => {
         setInfo(
           maj.synchronisation.statut === 'ok'
-            ? t('source.synchronisee', { nombre: String(maj.synchronisation.creneaux_importes) })
+            ? t(cleAccord('source.synchronisee', maj.synchronisation.creneaux_importes), { n: String(maj.synchronisation.creneaux_importes) })
             : t('source.synchro_echec', { raison: libelleStatut(maj.synchronisation.statut) }),
         );
         rafraichir();
@@ -240,7 +241,7 @@ export function CarteSourcesAgenda() {
                   <span className="ligne-meta">{s.url_host}</span>
                   <span className="ligne-badges">
                     <span className={pilule.classe}>{pilule.texte}</span>
-                    <span className="ligne-meta">{t('source.creneaux', { nombre: String(s.slots_imported) })}</span>
+                    <span className="ligne-meta">{t(cleAccord('source.creneaux', s.slots_imported), { n: String(s.slots_imported) })}</span>
                   </span>
                   <span className="ligne-meta">
                     {s.last_success_at === null
@@ -248,7 +249,7 @@ export function CarteSourcesAgenda() {
                       : t('source.derniere_reussite', { date: dateCourte(s.last_success_at) })}
                   </span>
                   {s.slots_skipped > 0 && (
-                    <span className="ligne-meta">{t('source.ignores', { nombre: String(s.slots_skipped) })}</span>
+                    <span className="ligne-meta">{t(cleAccord('source.ignores', s.slots_skipped), { n: String(s.slots_skipped) })}</span>
                   )}
                   {explication !== null && <span className="ligne-meta">{explication}</span>}
                   {s.disabled_at !== null && <span className="ligne-meta">{t('source.desactivee_aide')}</span>}

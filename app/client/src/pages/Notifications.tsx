@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { GroupeResume } from '../api/groupes';
 import {
-  definirPreferenceNotification,
   listerNotifications,
-  listerPreferencesNotifications,
   marquerNotificationsLues,
-  type EmailMode,
   type Notification,
-  type PreferenceNotification,
 } from '../api/notifications';
 import { CarteNotificationsPush } from '../components/CarteNotificationsPush';
 import { Erreur, messageDe } from '../components/Erreur';
+import { PreferencesNotifications } from '../components/PreferencesNotifications';
 import { t } from '../i18n';
 
 function horodatage(iso: string): string {
@@ -30,17 +27,15 @@ function lienNotification(n: Notification): string | null {
 export function Notifications({ groupes, onChange }: { groupes: GroupeResume[]; onChange?: () => void }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [nonLues, setNonLues] = useState(0);
-  const [preferences, setPreferences] = useState<PreferenceNotification[]>([]);
   const [limite, setLimite] = useState(20);
   const [erreur, setErreur] = useState<string | null>(null);
 
   const charger = useCallback((): void => {
     setErreur(null);
-    Promise.all([listerNotifications(), listerPreferencesNotifications()])
-      .then(([notifs, prefs]) => {
+    listerNotifications()
+      .then((notifs) => {
         setNotifications(notifs.notifications);
         setNonLues(notifs.non_lues);
-        setPreferences(prefs);
       })
       .catch((err: unknown) => setErreur(messageDe(err)));
   }, []);
@@ -67,17 +62,6 @@ export function Notifications({ groupes, onChange }: { groupes: GroupeResume[]; 
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  const changerPreference = (groupId: string, mode: EmailMode): void => {
-    setErreur(null);
-    definirPreferenceNotification(groupId, mode)
-      .then(setPreferences)
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  };
-
-  const modePour = (groupId: string): EmailMode => {
-    return preferences.find((p) => p.group_id === groupId)?.email_mode ?? 'immediate';
-  };
-
   return (
     <section className="page-pile">
       <h2>{t('notifications.titre')}</h2>
@@ -101,11 +85,12 @@ export function Notifications({ groupes, onChange }: { groupes: GroupeResume[]; 
               return (
                 <li key={n.id}>
                   <span>
-                    {t('notifications.ligne', {
+                    {t('notifications.ligne_sans_date', {
                       marque: lue ? '' : '● ',
                       groupe: n.group_name ?? t('notifications.groupe_inconnu'),
-                      date: horodatage(n.created_at),
                     })}
+                    {t('commun.separateur_tiret')}
+                    <time dateTime={n.created_at}>{horodatage(n.created_at)}</time>
                   </span>
                   {lien !== null && (
                     <>
@@ -135,27 +120,7 @@ export function Notifications({ groupes, onChange }: { groupes: GroupeResume[]; 
         </>
       )}
 
-      <h3>{t('notifications.preferences_titre')}</h3>
-      <div className="formulaire">
-        <label>
-          {t('notifications.preference_globale')}
-          <select value={modePour('*')} onChange={(e) => changerPreference('*', e.target.value as EmailMode)}>
-            <option value="immediate">{t('notifications.mode_immediate')}</option>
-            <option value="daily">{t('notifications.mode_daily')}</option>
-            <option value="off">{t('notifications.mode_off')}</option>
-          </select>
-        </label>
-        {groupes.map((g) => (
-          <label key={g.group_id}>
-            {g.name}
-            <select value={modePour(g.group_id)} onChange={(e) => changerPreference(g.group_id, e.target.value as EmailMode)}>
-              <option value="immediate">{t('notifications.mode_immediate')}</option>
-              <option value="daily">{t('notifications.mode_daily')}</option>
-              <option value="off">{t('notifications.mode_off')}</option>
-            </select>
-          </label>
-        ))}
-      </div>
+      <PreferencesNotifications groupes={groupes} />
     </section>
   );
 }

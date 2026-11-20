@@ -91,12 +91,30 @@ export function FormulaireEvenement({
       </label>
       <label>
         {t('evenement_form.debut')}
-        <input type={journee ? 'date' : 'datetime-local'} value={debut} onChange={(e) => setDebut(e.target.value)} required />
+        <input
+          type={journee ? 'date' : 'datetime-local'}
+          value={debut}
+          onChange={(e) => setDebut(e.target.value)}
+          aria-describedby={journee ? undefined : 'aide-heure-fuseau'}
+          required
+        />
       </label>
       <label>
         {t('evenement_form.fin')}
-        <input type={journee ? 'date' : 'datetime-local'} value={fin} min={debut} onChange={(e) => setFin(e.target.value)} />
+        <input
+          type={journee ? 'date' : 'datetime-local'}
+          value={fin}
+          min={debut}
+          onChange={(e) => setFin(e.target.value)}
+          aria-describedby={journee ? undefined : 'aide-heure-fuseau'}
+        />
       </label>
+      {/* L'heure se saisit dans le fuseau choisi plus bas, pas dans celui de l'appareil : on le dit à côté des champs. */}
+      {!journee && (
+        <small id="aide-heure-fuseau" className="texte-doux">
+          {t('agenda.heure_de', { fuseau: fuseau.trim() === '' ? t('evenement_form.fuseau') : fuseau.trim() })}
+        </small>
+      )}
       <label>
         {t('evenement_form.fuseau')}
         <ChampFuseau value={fuseau} onChange={setFuseau} />

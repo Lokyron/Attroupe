@@ -28,6 +28,8 @@ import { DialogueConfirmation } from '../components/DialogueConfirmation';
 import { Erreur, messageDe } from '../components/Erreur';
 import { useSoumission } from '../hooks/useSoumission';
 import { t } from '../i18n';
+import { ChampsPeriode } from '../components/ChampsPeriode';
+import { initialesDe } from '../lib/initiales';
 
 const LOCALE = 'fr-FR';
 
@@ -404,16 +406,15 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
             />
             {t('agenda_perso.champ_journee')}
           </label>
-          <div className="grille-champs-2">
-            <label>
-              {t('agenda_perso.champ_debut')}
-              <input type={journeeEntiere ? 'date' : 'datetime-local'} value={debut} onChange={(e) => setDebut(e.target.value)} required />
-            </label>
-            <label>
-              {t('agenda_perso.champ_fin')}
-              <input type={journeeEntiere ? 'date' : 'datetime-local'} value={fin} min={debut} onChange={(e) => setFin(e.target.value)} />
-            </label>
-          </div>
+          <ChampsPeriode
+            journee={journeeEntiere}
+            debut={debut}
+            fin={fin}
+            onDebut={setDebut}
+            onFin={setFin}
+            cleLibelleDebut="agenda_perso.champ_debut"
+            cleLibelleFin="agenda_perso.champ_fin"
+          />
           <div className="grille-champs-2">
             <label>
               {t('agenda_perso.champ_fuseau')}
@@ -515,15 +516,6 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
   );
 }
 
-function initialesProfil(nom: string): string {
-  const morceaux = nom.trim().split(/\s+/).filter(Boolean);
-  if (morceaux.length === 0) return '?';
-  if (morceaux.length === 1) return (morceaux[0] ?? '?').slice(0, 2).toUpperCase();
-  const premier = morceaux[0]?.[0] ?? '';
-  const dernier = morceaux[morceaux.length - 1]?.[0] ?? '';
-  return `${premier}${dernier}`.toUpperCase();
-}
-
 /** Carte de gestion de la photo de profil utilisateur. */
 function CartePhotoProfil({ moi, onProfilChange }: { moi: Moi; onProfilChange?: (() => void) | undefined }) {
   const [enCours, setEnCours] = useState(false);
@@ -578,7 +570,7 @@ function CartePhotoProfil({ moi, onProfilChange }: { moi: Moi; onProfilChange?: 
           />
         ) : (
           <span className="avatar-initiales avatar-initiales-apercu" aria-hidden="true">
-            {initialesProfil(moi.display_name)}
+            {initialesDe(moi.display_name)}
           </span>
         )}
         <div className="carte-avatar-details">

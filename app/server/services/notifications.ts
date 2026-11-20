@@ -6,6 +6,7 @@ import {
   lirePreferencesNotifications,
   listerMesNotifications,
   marquerNotificationsLues,
+  reprendreReglageGlobal,
   type DestinatairePush,
   type EmailMode,
   type NotificationKind,
@@ -43,9 +44,17 @@ export function mesPreferencesNotifications(portee: PorteeUtilisateur): Preferen
 export function definirMaPreferenceNotification(
   portee: PorteeUtilisateur,
   groupIdOrStar: string,
-  emailMode: EmailMode,
+  emailMode: EmailMode | undefined,
+  mutedKinds?: readonly NotificationKind[],
 ): PreferenceNotificationVue[] {
-  const resultat = definirPreferenceNotification(portee, groupIdOrStar, emailMode);
+  const resultat = definirPreferenceNotification(portee, groupIdOrStar, emailMode, mutedKinds);
+  if (resultat === 'groupe_introuvable') throw new ErreurHttp(404, 'groupe.introuvable');
+  return resultat;
+}
+
+/** Le groupe n'a plus de réglage propre : il suit de nouveau le réglage global, champ par champ. */
+export function reprendreMonReglageGlobal(portee: PorteeUtilisateur, groupId: string): PreferenceNotificationVue[] {
+  const resultat = reprendreReglageGlobal(portee, groupId);
   if (resultat === 'groupe_introuvable') throw new ErreurHttp(404, 'groupe.introuvable');
   return resultat;
 }

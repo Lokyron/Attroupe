@@ -1,5 +1,6 @@
 import { IconeBalance, IconeCalendrier, IconeCamera, IconeGroupes } from '../../components/Icones';
 import { t } from '../../i18n';
+import { cleAccord } from '../../lib/pluriel';
 import { formaterDateRelative, formaterMontant } from './formats';
 import { lienElementCalendrier, type ElementCalendrier, type ResumeSoldes } from './selecteurs';
 
@@ -107,8 +108,8 @@ export function BarreKpis({
           </strong>
           <span className="kpi-sous kpi-ambre">
             {invitationsEnAttente > 0
-              ? t('tableau.kpi_invitations_attente', { n: String(invitationsEnAttente) })
-              : t('tableau.kpi_evenements_mois', { n: String(nbEvenementsMois) })}
+              ? t(cleAccord('tableau.kpi_invitations_attente', invitationsEnAttente), { n: String(invitationsEnAttente) })
+              : t(cleAccord('tableau.kpi_evenements_mois', nbEvenementsMois), { n: String(nbEvenementsMois) })}
           </span>
         </div>
         <span className="kpi-icone-badge kpi-badge-ambre" aria-hidden="true">

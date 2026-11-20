@@ -324,9 +324,19 @@ export async function monde(): Promise<Monde> {
     manonRestreintA: await creerFlux(manon, { group_id: a.groupId }),
     manonRestreintB: await creerFlux(manon, { group_id: b.groupId }),
   };
+  // Un réglage propre à chaque groupe : sans ligne chez Bob, la suppression forgée d'Alice ne trouverait de toute façon rien à supprimer.
+  // Insérées en base, pas par la route : chaque requête HTTP du décor ouvre un vrai socket (supertest), et la suite en rejoue ~94 par monde
+  // pour ~120 routes. La plage de ports éphémères de macOS (16 384, TIME_WAIT 30 s) est déjà presque épuisée : deux requêtes de plus
+  // par monde suffisaient à faire échouer les derniers tests. La preuve de cloisonnement porte sur l'attaque, pas sur la construction du décor.
+  const maintenant = d.temps.maintenant().toISOString();
+  for (const [personne, g] of [[alice, a], [bob, b]] as const) {
+    d.sql
+      .prepare("INSERT INTO notification_preferences (user_id, group_id, channel_email, digest, muted_kinds, created_at, updated_at) VALUES (?, ?, 0, 'off', NULL, ?, ?)")
+      .run(personne.userId, g.groupId, maintenant, maintenant);
+  }
   const ressources = {
-    a: { membre: membreDe(a, carole), membreAutre: membreDe(a, erin), evenement: evenementA, invitation: invitationA, session: await idSession(alice), abonnement: abonnementAlice.id, jetonFlux: flux.erin.jeton, sondage: sondageA.sondage, optionSondage: sondageA.optionSondage, creneauPerso: creneauPersoA, sourceAgenda: sourceAgendaA, ...coursesA, ...financeA, ...filA, ...photosA, ...recueA, utilisateur: alice.userId },
-    b: { membre: membreDe(b, dave), membreAutre: membreDe(b, manon), evenement: evenementB, invitation: invitationB, session: await idSession(bob), abonnement: abonnementBob.id, jetonFlux: flux.dave.jeton, sondage: sondageB.sondage, optionSondage: sondageB.optionSondage, creneauPerso: creneauPersoB, sourceAgenda: sourceAgendaB, ...coursesB, ...financeB, ...filB, ...photosB, ...recueB, utilisateur: bob.userId },
+    a: { membre: membreDe(a, carole), membreAutre: membreDe(a, erin), evenement: evenementA, invitation: invitationA, session: await idSession(alice), abonnement: abonnementAlice.id, jetonFlux: flux.erin.jeton, sondage: sondageA.sondage, optionSondage: sondageA.optionSondage, creneauPerso: creneauPersoA, sourceAgenda: sourceAgendaA, ...coursesA, ...financeA, ...filA, ...photosA, ...recueA, utilisateur: alice.userId, groupe: a.groupId },
+    b: { membre: membreDe(b, dave), membreAutre: membreDe(b, manon), evenement: evenementB, invitation: invitationB, session: await idSession(bob), abonnement: abonnementBob.id, jetonFlux: flux.dave.jeton, sondage: sondageB.sondage, optionSondage: sondageB.optionSondage, creneauPerso: creneauPersoB, sourceAgenda: sourceAgendaB, ...coursesB, ...financeB, ...filB, ...photosB, ...recueB, utilisateur: bob.userId, groupe: b.groupId },
   };
   const marquesDeB = [
     b.groupId,

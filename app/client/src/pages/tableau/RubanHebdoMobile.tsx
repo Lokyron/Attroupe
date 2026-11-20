@@ -1,5 +1,6 @@
 import { libelleJourCourt } from '../../agenda/format';
 import { t } from '../../i18n';
+import { cleAccord } from '../../lib/pluriel';
 import { compterSurJours, type CouleurGroupe, type ElementCalendrier, type VueCalendrier } from './selecteurs';
 
 export function RubanHebdoMobile({
@@ -57,7 +58,7 @@ export function RubanHebdoMobile({
       <div className="ruban-hebdo-pied">
         <span className="discret">
           {nbEvenementsSemaine > 0
-            ? t('tableau.ruban_hebdo_compte', { n: String(nbEvenementsSemaine) })
+            ? t(cleAccord('tableau.ruban_hebdo_compte', nbEvenementsSemaine), { n: String(nbEvenementsSemaine) })
             : t('tableau.ruban_hebdo_aucun')}
         </span>
         <div className="ruban-hebdo-liens">

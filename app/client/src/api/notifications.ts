@@ -1,6 +1,7 @@
+import { corpsPreference, estGenreNotification, type ChangementPreference, type EmailMode, type GenreNotification } from '../lib/preferences-notifications';
 import { appeler, champ, liste, nombre, texte, texteOuNul } from './client';
 
-export type EmailMode = 'immediate' | 'daily' | 'off';
+export type { EmailMode, GenreNotification };
 
 export interface Notification {
   id: string;
@@ -22,7 +23,10 @@ export interface ListeNotifications {
 export interface PreferenceNotification {
   group_id: string;
   group_name: string | null;
-  email_mode: EmailMode;
+  /** Mode posé par cette ligne ; `null` : le groupe hérite du mode global (jamais `null` pour `'*'`). */
+  email_mode: EmailMode | null;
+  /** Genres coupés par cette ligne (aucune notification de ce genre n'est créée) ; `null` : hérités de la ligne globale (jamais `null` pour `'*'`). */
+  muted_kinds: GenreNotification[] | null;
   updated_at: string;
 }
 
@@ -43,11 +47,20 @@ function notification(n: unknown): Notification {
 
 function preference(p: unknown): PreferenceNotification {
   const mode = champ(p, 'email_mode');
-  if (mode !== 'immediate' && mode !== 'daily' && mode !== 'off') throw new Error('Mode e-mail inconnu.');
+  if (mode !== null && mode !== 'immediate' && mode !== 'daily' && mode !== 'off') throw new Error('Mode e-mail inconnu.');
+  const brut = champ(p, 'muted_kinds');
+  const coupes =
+    brut === null
+      ? null
+      : liste(brut).map((g) => {
+          if (!estGenreNotification(g)) throw new Error('Genre de notification inconnu.');
+          return g;
+        });
   return {
     group_id: texte(champ(p, 'group_id')),
     group_name: texteOuNul(champ(p, 'group_name')),
     email_mode: mode,
+    muted_kinds: coupes,
     updated_at: texte(champ(p, 'updated_at')),
   };
 }
@@ -70,8 +83,15 @@ export async function listerPreferencesNotifications(): Promise<PreferenceNotifi
   return liste(champ(r, 'preferences')).map(preference);
 }
 
-export async function definirPreferenceNotification(groupId: string, emailMode: EmailMode): Promise<PreferenceNotification[]> {
-  const r = await appeler('PUT', '/api/moi/preferences-notifications', { group_id: groupId, email_mode: emailMode });
+/** Envoie seulement les champs fournis : un champ absent n'est pas modifié côté serveur. */
+export async function definirPreferenceNotification(groupId: string, changement: ChangementPreference): Promise<PreferenceNotification[]> {
+  const r = await appeler('PUT', '/api/moi/preferences-notifications', corpsPreference(groupId, changement));
+  return liste(champ(r, 'preferences')).map(preference);
+}
+
+/** « Reprendre le réglage global » : supprime la ligne du groupe, qui suit alors la ligne globale (champs à NULL), sans recopie. */
+export async function reprendreReglageGlobal(groupId: string): Promise<PreferenceNotification[]> {
+  const r = await appeler('DELETE', `/api/moi/preferences-notifications/${encodeURIComponent(groupId)}`);
   return liste(champ(r, 'preferences')).map(preference);
 }
 

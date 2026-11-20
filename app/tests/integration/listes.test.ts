@@ -30,6 +30,32 @@ describe('listes de courses', () => {
       expect((await c.alice.client.get(c.chemin(`/listes/${id}`))).corps['title']).toBe('Courses du dimanche');
     });
 
+    it('le type de liste (`kind`) se choisit à la création et se change par PATCH, seul ou avec le titre ; une valeur inconnue est refusée', async () => {
+      const cree = await c.carole.client.post(c.chemin('/listes'), { title: 'Valise' });
+      expect(cree.corps['kind']).toBe('courses'); // défaut
+      const id = cree.corps['id'] as string;
+
+      const seul = await c.erin.client.patch(c.chemin(`/listes/${id}`), { kind: 'affaires' });
+      expect(seul.statut, JSON.stringify(seul.corps)).toBe(200);
+      expect(seul.corps).toMatchObject({ kind: 'affaires', title: 'Valise' });
+
+      const avecTitre = await c.alice.client.patch(c.chemin(`/listes/${id}`), { title: 'À faire', kind: 'taches' });
+      expect(avecTitre.corps).toMatchObject({ kind: 'taches', title: 'À faire' });
+      expect((await c.carole.client.get(c.chemin(`/listes/${id}`))).corps['kind']).toBe('taches');
+      expect(c.d.sql.prepare('SELECT kind FROM shopping_lists WHERE id = ?').pluck().get(id)).toBe('taches');
+
+      // Le titre seul ne touche pas au type.
+      expect((await c.alice.client.patch(c.chemin(`/listes/${id}`), { title: 'Autre' })).corps).toMatchObject({ kind: 'taches', title: 'Autre' });
+
+      for (const corps of [{ kind: 'inconnu' }, { kind: '' }, { kind: null }, {}]) {
+        expect((await c.alice.client.patch(c.chemin(`/listes/${id}`), corps)).statut, JSON.stringify(corps)).toBe(400);
+      }
+      expect((await c.alice.client.get(c.chemin(`/listes/${id}`))).corps['kind']).toBe('taches');
+      // Cloisonnement : un étranger au groupe ne change pas le type, identifiant exact fourni.
+      expect((await c.bob.client.patch(c.chemin(`/listes/${id}`), { kind: 'courses' })).statut).toBe(404);
+      expect(c.d.sql.prepare('SELECT kind FROM shopping_lists WHERE id = ?').pluck().get(id)).toBe('taches');
+    });
+
     it('la liste des listes porte les compteurs, et se filtre par événement', async () => {
       const soiree = await c.creerEvenement(c.alice, 'Soirée');
       const autreSoiree = await c.creerEvenement(c.alice, 'Autre soirée');

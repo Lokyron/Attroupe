@@ -45,6 +45,16 @@ client ; la base est un fichier dans `/data`. Le cloisonnement entre groupes rep
 verrous dont deux font échouer la compilation et un l'écriture en base
 ([`ADR-0006`](docs/decisions/ADR-0006-cloisonnement-structurel.md)).
 
+**Client (`app/client/src/`)**, modules ajoutés depuis la phase 2 :
+- `lib/` : `montants.ts`, `initiales.ts`, `liens.ts`, `liens-texte.ts` (détection des liens dans un texte libre, rendue en nœuds React), `fuseaux.ts`, `pluriel.ts`, `etat-agenda.ts`, `fragment-route.ts`, `preferences-notifications.ts`.
+- `hooks/useFragment.ts` : le fragment d'URL courant, relu à chaque changement.
+- `components/` : `BarreAjout.tsx`, `ChampsPeriode.tsx`, `GrilleCartes.tsx`, `TexteAvecLiens.tsx`, `ChampFuseau.tsx`, `PreferencesNotifications.tsx`.
+
+**Routage par fragment et couleurs (client)** :
+- Le fragment porte l'état de consultation en **requête** : `#/groupe/:id/agenda?vue=semaine&date=2027-03-12`, ou `?vue=liste&jours=60`. L'album ouvert est une **route** : `#/groupe/:id/albums/:albumId`.
+- Un fragment qui ne commence pas par `#/` (par exemple `#contenu-principal`, le lien d'évitement) **n'est pas une route** : `estFragmentDeRoute` (`lib/fragment-route.ts`) l'écarte. Sans ce garde, le lien d'évitement renvoyait à l'accueil. Un segment mal encodé (`%E0`) donne la page « introuvable », sans lever d'erreur.
+- Mode sombre : `--primaire` (`#4f46e5` en sombre) est réservé aux **fonds** qui portent du texte blanc. Les traits, comme l'anneau de focus, utilisent `--primaire-trait` ; le texte au survol, `--primaire-texte-survol`. Utiliser `--primaire` pour un trait ou un texte sur fond sombre casse le contraste : c'est déjà arrivé.
+
 ## 3 bis. Hébergement
 
 | Canal | Conteneur LXC | IP | Image |
@@ -221,6 +231,7 @@ Lot 3 (groupes, membres, invitations). Tout ce qui est sous `/api/groupes/:group
 | POST | `/api/invitations/apercu` | Aperçu par lien, `{token}` dans le corps, jamais dans l'URL (*sans session*) : groupe, invitant, rôle. 410 `invitation.revoquee` / `expiree` / `deja_utilisee`. |
 | POST | `/api/invitations/acceptation` | Accepter par lien, `{token}` dans le corps : session, adresse **vérifiée** et identique (403 `invitation.adresse_non_verifiee`, 404 sinon). |
 | GET / PATCH | `/api/groupes/:groupId` | Détail (avec `mon_role`) ; renommer, devise, fuseau *(admin)*. 409 `groupe.archive` si archivé. |
+| DELETE | `/api/groupes/:groupId` | Supprime le groupe *(admin)*. Diffuse `groupe.supprime` aux membres avant la suppression. |
 | GET | `/api/groupes/:groupId/membres` | Actifs d'abord, puis anciens membres. Ni e-mail ni nom d'utilisateur. |
 | PATCH | `/api/groupes/:groupId/membres/:membreId` | `{role}` *(admin)*. 409 `groupe.dernier_admin`, `membre.inactif`. |
 | DELETE | `/api/groupes/:groupId/membres/:membreId` | Retire *(admin)* : `status = 'removed'`, historique conservé. 409 `membre.retrait_de_soi`. |
@@ -285,7 +296,7 @@ articles. `category` (V2) n'est ni écrite ni exposée.
 | Méthode | Chemin | Rôle |
 |---|---|---|
 | GET / POST | `/api/groupes/:groupId/listes` | Lister avec compteurs (`articles_total`, `articles_faits`), filtrable par `?event_id=` (404 si l'événement n'est pas du groupe) ; créer `{title, event_id?}`. |
-| GET / PATCH / DELETE | `/api/groupes/:groupId/listes/:listeId` | Détail (avec `articles`, ordre `position` puis `id`) ; renommer `{title}` ; supprimer. |
+| GET / PATCH / DELETE | `/api/groupes/:groupId/listes/:listeId` | Détail (avec `articles`, ordre `position` puis `id`) ; modifier `{title?, kind?}` (`kind` : `courses`, `affaires` ou `taches`, le type sorti du titre) ; supprimer. |
 | POST | `/api/groupes/:groupId/listes/:listeId/articles` | `{label, quantity?}` → 201, ajouté en fin de liste. 409 `liste.pleine` au-delà de 500 articles. |
 | PATCH / DELETE | `/api/groupes/:groupId/listes/:listeId/articles/:articleId` | `{label?, quantity?, after_item_id?}` : `after_item_id` = placer **après** cet article (`null` : en tête), ce doit être un autre article de la même liste (404 sinon). |
 | PUT | `…/articles/:articleId/preneur` | `{prend: boolean}`. Toujours **mon** marquage. `UPDATE` conditionnel : le second preneur reçoit **409** `article.deja_pris` avec `pris_par: {membership_id, display_name}` ; retirer le marquage d'un autre : 409 `article.pas_le_votre`. Refaire ce qui est fait : 200 sans changement. Le marquage d'un membre qui a quitté le groupe est libre : tout membre peut le libérer ou le reprendre. |
@@ -301,6 +312,14 @@ recharge par les routes ci-dessus. Types : `liste.creee|renommee|supprimee`, `ar
 **Révocation active** : l'appartenance, la session et l'état du compte (ni suspendu ni anonymisé) sont relus en base **avant chaque envoi** (et à chaque battement) ; un membre retiré ne
 reçoit rien et son flux se ferme. Pas de reprise par `Last-Event-ID` : le client recharge tout à chaque (re)connexion. Proxy : prévoir un
 `proxy_read_timeout` supérieur à 25 s (celui de Nginx Proxy Manager, 60 s par défaut, convient).
+
+Routes ajoutées depuis la phase 2 (notifications, dépenses). Même préfixe `/api/groupes/:groupId` pour les remboursements.
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| DELETE | `/api/groupes/:groupId/remboursements/:remboursementId` | Annule un règlement **non confirmé** et supprime la notification `settlement_created` déjà envoyée au bénéficiaire. 403 `droit.auteur_requis` pour un membre qui n'est ni l'auteur ni administrateur ; 409 `remboursement.deja_confirme` si le bénéficiaire a déjà confirmé ; 404 `remboursement.introuvable`. |
+| PUT | `/api/moi/preferences-notifications` | `{group_id, email_mode?, muted_kinds?}` : au moins un des deux champs, sinon 400 `requete.invalide`. `email_mode` est optionnel. Un champ absent n'est pas modifié ; `muted_kinds: []` est un choix explicite (aucun genre coupé), distinct d'un champ absent. `muted_kinds` est une liste fermée de genres, définie dans `app/server/domain/notifications.ts`. `group_id` `'*'` désigne le réglage global ; 404 `groupe.introuvable` si l'appartenance n'est pas active. |
+| DELETE | `/api/moi/preferences-notifications/:groupeId` | Supprime la ligne de préférence du groupe : le groupe revient à l'héritage du réglage global, champ par champ. Idempotent. 404 `groupe.introuvable` si l'appartenance n'est pas active, ou pour `'*'`. |
 
 Registre de cloisonnement : `app/tests/cloisonnement/registre.ts` recense chaque route et son exigence ; le test de
 complétude échoue si une route montée n'y figure pas (les routeurs se montent avec `monter()`, `http/montage.ts`).
@@ -555,27 +574,32 @@ ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
     n'est exposé dans l'e-mail ou le push — choix plus strict que celui du message. Coût **mesuré** de
     `notifierMembresGroupe` dans la transaction : 17,6 ms médians pour 50 destinataires sous
     `BEGIN IMMEDIATE`, ~3 à 4 ms pour 10 membres.
-- **Trois dettes à traiter avant d'ouvrir au groupe réel :**
-  - **`notification_preferences.muted_kinds` n'est lue nulle part.** Avec un seul genre émis, sans
-    conséquence ; avec trois, un trésorier qui saisit 30 dépenses un dimanche soir envoie 30
-    notifications, 30 pushs et 30 e-mails à chaque participant, et le seul levier est tout ou rien.
-    La réaction prévisible est de tout couper, messages compris. Minimum utile : lire `muted_kinds`
-    dans `notifierMembresGroupe` après le filtre SQL, sans changer de schéma.
-  - **Les écritures suivantes ne notifient pas** : `modifierDepenseService`, `supprimerDepenseService`,
-    `creerRemboursementService` et `confirmerRemboursementService` font bouger les soldes en silence.
-    Une part qui passe de 0 à 50 € par modification ne prévient personne.
-  - **La notification de règlement demande une migration** : ni `settlement` dans le `CHECK kind`, ni
-    dans `CHECK subject_type`. SQLite ne modifie pas un `CHECK`, et aucune migration du projet n'a
-    jamais reconstruit une table (0002 à 0005 ne font que `CREATE TABLE` et `ADD COLUMN`). Il faudrait
-    une 0006 par table neuve + `INSERT … SELECT` + `DROP` + `RENAME`, soit ~8 fichiers touchés ; et
-    `app/tests/schema/migrations.test.ts:101` liste les versions attendues en dur, il faudra le
-    toucher. Risque principal : un `INSERT … SELECT` qui oublie une colonne perd des données en
-    silence. `VACUUM INTO` sauvegarde avant migration.
-- **Restent la phase 2 ter (fin) et la phase 3** : mode sombre (les tokens le permettent désormais ;
-  attention, le bloc `@supports` des voiles doit être redéfini lui aussi, et `theme-color` est figé
-  dans `index.html`), validation champ par champ des dépenses, pagination des six listes non bornées,
-  suppression de groupe, remboursements actionnables, sortie du type de liste hors du titre,
-  accessibilité structurelle et route `introuvable`.
+- **Trois dettes bloquantes, soldées avant l'ouverture au groupe réel** (état au 20/11/2026) :
+  - **`notification_preferences.muted_kinds` est lue** par `notifierMembresGroupe`
+    (`app/server/db/queries/notifications.ts`), après le filtre SQL. Un genre coupé n'envoie plus rien,
+    ni push ni e-mail : on peut couper un genre sans tout couper.
+  - **Les mouvements de solde notifient** : `modifierDepenseService` (`expense_updated`),
+    `supprimerDepenseService` (`expense_deleted`), `creerRemboursementService` (`settlement_created`) et
+    `confirmerRemboursementService` (`settlement_confirmed`) passent par `notifierMouvementSolde`
+    (`app/server/services/depenses.ts`).
+  - **Le genre `settlement` est admis** par la migration `0006_notifications_reglement.sql`, qui reconstruit
+    `notifications` pour étendre les `CHECK` de `kind` et `subject_type` (`CREATE`, `INSERT … SELECT`, `DROP`,
+    `RENAME`). C'est la première migration à reconstruire une table existante. Le piège est connu : une colonne
+    oubliée dans le `INSERT … SELECT` perd des données sans rien signaler. `VACUUM INTO` sauvegarde avant
+    migration. La liste des versions attendues est en dur à `app/tests/schema/migrations.test.ts:101`.
+  - **Migrations 0007 et 0008.** `0007_listes_type.sql` ajoute `shopping_lists.kind` (`courses`, `affaires`,
+    `taches`) et sort le type de liste du titre, en retirant le préfixe des titres existants.
+    `0008_preferences_notifications_heritage.sql` reconstruit `notification_preferences` : `channel_email`,
+    `digest` et `muted_kinds` deviennent nullables sur une ligne de groupe, où `NULL` veut dire « hérite de la
+    ligne globale `'*'` ». Deux `CHECK` tiennent : `channel_email` et `digest` sont nuls ensemble ou posés
+    ensemble, et la ligne `'*'` a ses trois colonnes non nulles.
+- **Phase 2 ter et phase 3 de l'audit : appliquées au 20/11/2026.** Phase 2 ter (fin) : validation champ par
+  champ des dépenses et règlements (`pages/Depenses.tsx`), remboursements actionnables (préremplissage depuis
+  les suggestions, mention d'absence de flux bancaire, annulation d'un règlement non confirmé), suppression de
+  groupe (`DELETE /api/groupes/:groupId`, admin), pagination et bornage des listes, type de liste sorti du titre.
+  Phase 3 : mode sombre, accessibilité structurelle et routage (lien d'évitement, `<h1>` unique, `document.title`
+  par route, route `introuvable`), responsive tablette, finitions, mémoïsation, et état de consultation de
+  l'agenda dans l'URL (`lib/etat-agenda.ts`).
 - **Fragilité de test confirmée, et sa signature** : un `npm test` lancé juste après un
   `npm run typecheck` a donné 42 échecs sur 2 fichiers, puis deux runs espacés ont été entièrement
   verts (1659 tests). Rejoué sur la phase 2 bis : `npx vitest run` en un seul bloc donne 49 échecs,

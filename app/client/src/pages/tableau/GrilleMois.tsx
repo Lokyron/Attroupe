@@ -1,6 +1,7 @@
 import { grilleMois } from '../../agenda/dates';
 import { libelleJourCourt } from '../../agenda/format';
 import { t } from '../../i18n';
+import { cleAccord } from '../../lib/pluriel';
 import { libellePastilleCalendrier } from './formats';
 import { lienElementCalendrier, type CouleurGroupe, type ElementCalendrier } from './selecteurs';
 
@@ -36,6 +37,7 @@ export function GrilleMois({
               key={jour}
               role="cell"
               className={`grille-jour${jour.slice(0, 7) === ancre.slice(0, 7) ? '' : ' hors-mois'}${jour === jourActuel ? ' aujourdhui' : ''}`}
+              aria-current={jour === jourActuel ? 'date' : undefined}
             >
               <span className="numero">{Number(jour.slice(8))}</span>
               {(() => {
@@ -58,7 +60,7 @@ export function GrilleMois({
                         </a>
                       );
                     })}
-                    {reste > 0 && <span className="discret ligne-meta">{t('agenda.plus_autres', { count: String(reste) })}</span>}
+                    {reste > 0 && <span className="discret ligne-meta">{t(cleAccord('agenda.plus_autres', reste), { n: String(reste) })}</span>}
                   </>
                 );
               })()}
