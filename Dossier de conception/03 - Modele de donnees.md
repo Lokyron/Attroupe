@@ -104,6 +104,7 @@ d'unicité et les index. Le SQL exécutable complet est en §5.
 | `birthday` | TEXT | NULL | `AAAA-MM-JJ` ou `--MM-JJ` si l'année n'est pas donnée. Alimente B8 en V2. |
 | `locale` | TEXT | NOT NULL DEFAULT `'fr'` | |
 | `time_zone` | TEXT | NOT NULL DEFAULT `'Europe/Paris'` | Fuseau d'affichage par défaut (§4.1). |
+| `personal_agenda_visibility` | TEXT | NOT NULL DEFAULT `'busy'`, `CHECK IN ('none','busy','details')` | Plafond de visibilité de **tout** l'agenda personnel, appliqué à la lecture (§3.6, ADR-0017). |
 | `is_instance_admin` | INTEGER | NOT NULL DEFAULT 0, booléen | Administrateur **de l'instance**. Ce drapeau ne donne **aucun** accès au contenu des groupes : il n'est jamais consulté par la couche de cloisonnement. |
 | `created_at`, `updated_at` | TEXT | NOT NULL | |
 | `disabled_at` | TEXT | NULL | Compte suspendu par l'administrateur d'instance. |
@@ -304,7 +305,7 @@ Colonnes : `event_id` + `group_id` (FK composite → `events`), `membership_id` 
 **PK `(event_id, membership_id)`** : l'unicité est structurelle, pas une règle de code. Index
 `idx_attendances_membership (group_id, membership_id)` pour « mes prochaines sorties » et le flux iCal.
 
-### 3.6 Agenda personnel et ses deux niveaux de visibilité (B4)
+### 3.6 Agenda personnel et sa visibilité (B4)
 
 C'est **la seule exception** à la règle « chaque table métier porte son groupe », et elle est
 assumée : un événement personnel appartient à une personne, pas à un groupe. Il serait faux de
@@ -366,18 +367,35 @@ ne supprime pas la ligne (§4.4) : la projection « occupé » ne retient que le
 clé étrangère : la couche d'accès le vérifie à l'insertion (`personal_events.user_id` = auteur).
 Index `idx_pes_group (group_id, visibility)`.
 
-**Décision** : le niveau de visibilité vit sur le **partage**, pas sur l'événement. Motif :
-quelqu'un accepte volontiers de montrer « Dîner chez les parents » à la bande et seulement
-« Occupé » aux collègues. Un `default_personal_visibility` sur `memberships` (valeurs
-`none` / `busy` / `details`) permet à l'interface de créer les lignes de partage
-automatiquement à la création d'un créneau, pour que personne n'ait à cocher quatre cases.
+**Décision (révisée le 2026-11-21, ADR-0017)** : la visibilité se règle **une seule fois, par compte**,
+dans « Mon compte » : `users.personal_agenda_visibility` (`none` / `busy` / `details`). C'est un
+**plafond** posé au-dessus des partages. La visibilité effective d'un créneau pour un autre membre est
+`min(users.personal_agenda_visibility, personal_event_shares.visibility)`, sur l'ordre
+`none < busy < details`. Le calcul se fait **à la lecture** : abaisser le réglage masque tout de suite,
+pour les créneaux existants comme pour les futurs.
 
-> **Garde-fou côté serveur** : la projection « occupé » est faite **en SQL**, par une requête
-> dédiée (`GroupScope.creneauxOccupes`) qui ne sélectionne jamais les colonnes de texte de
-> `personal_events`. La garde du SQL brut n'admet une lecture de `personal_events` que par
-> `user_id = ?` (son propre agenda, `PorteeUtilisateur`) ou par jointure avec les partages du groupe. On ne
-> charge pas l'objet complet pour le masquer ensuite : une fuite d'affichage serait alors à
-> un oubli de `delete obj.title` de distance.
+- Élargir le réglage réaligne les partages existants dans la **même transaction** (ils deviennent
+  visibles). Abaisser ne supprime aucune ligne.
+- Un créneau **importé** d'un agenda externe (ADR-0013) ne dépasse jamais `busy`.
+- Le flux iCal sortant n'est **pas** plafonné : il lit l'agenda du propriétaire.
+- La migration `0009` amorce le réglage avec le choix le plus restrictif des appartenances actives, et
+  ne touche à aucune ligne de `personal_event_shares`.
+- `memberships.default_personal_visibility` reste en base, **dormante** : plus aucun chemin ne la lit.
+
+L'ancien modèle, un partage réglé par créneau et par groupe avec un défaut par appartenance, a été
+abandonné : un compte dans trois groupes avec deux cents créneaux importés aurait eu six cents réglages
+à tenir.
+
+> **Garde-fou côté serveur** : la projection « occupé » est faite **en SQL**, par
+> `listerDisponibilitesGroupe` (`app/server/db/queries/agenda-personnel.ts`). Sa requête « occupé » ne
+> sélectionne jamais `title`, `description` ni `location_name` ; ces colonnes ne sont lues que pour une
+> visibilité effective `details`, dans une requête distincte. La garde du SQL brut n'admet une lecture de
+> `personal_events` que par `user_id = ?` (son propre agenda, `PorteeUtilisateur`) ou par jointure avec les
+> partages du groupe, et cette jointure doit porter le plafond de compte (`users.personal_agenda_visibility = ?`)
+> et le rapprochement `users.id = memberships.user_id` : c'est le **verrou n° 6** (ADR-0017), refusé au
+> `preparer` sinon. La fonction `creneauxOccupes` de `GroupScope` a été supprimée. On ne charge pas l'objet
+> complet pour le masquer ensuite : une fuite d'affichage serait alors à un oubli de `delete obj.title` de
+> distance.
 >
 > Cette table est aussi le socle de **B6** (détection des disponibilités, V2) : le calcul se
 > fait sur les intervalles, sans jamais lire les titres. Aucune évolution de schéma ne sera
@@ -972,6 +990,7 @@ CREATE TABLE IF NOT EXISTS users (
   birthday           TEXT,
   locale             TEXT NOT NULL DEFAULT 'fr',
   time_zone          TEXT NOT NULL DEFAULT 'Europe/Paris',
+  personal_agenda_visibility TEXT NOT NULL DEFAULT 'busy',
   is_instance_admin  INTEGER NOT NULL DEFAULT 0,
   created_at         TEXT NOT NULL,
   updated_at         TEXT NOT NULL,
@@ -1047,7 +1066,7 @@ CREATE TABLE IF NOT EXISTS memberships (
   role        TEXT NOT NULL DEFAULT 'member',
   status      TEXT NOT NULL DEFAULT 'active',
   nickname    TEXT,
-  default_personal_visibility TEXT NOT NULL DEFAULT 'busy',
+  default_personal_visibility TEXT NOT NULL DEFAULT 'busy',  -- DORMANTE (ADR-0017) : plus rien ne la lit
   joined_at   TEXT NOT NULL,
   ended_at    TEXT,
   created_at  TEXT NOT NULL,

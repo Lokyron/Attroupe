@@ -156,6 +156,17 @@
   --z-entete: 25;
   --z-nav: 30;
   --z-modale: 1000;
+  /* Grille de la semaine : empilement INTERNE à sa zone de défilement (blocs < en-têtes < colonne des heures). */
+  --z-grille-bloc: 1;
+  --z-grille-entete: 2;
+  --z-grille-heures: 3;
+
+  /* ===== Grille horaire de la semaine ===== */
+  --grille-hauteur-heure: 3.5rem;
+  --grille-entete-hauteur: 3.5rem;
+  --grille-heures-largeur: 3rem;
+  /* Cible tactile minimale (44 px) : hauteur d'une ligne de la bande « journée entière » (celle d'un bloc horaire vient de DUREE_MINIMALE_MIN). */
+  --grille-cible: 2.75rem;
 
   /* ===== Transitions ===== */
   --duree-rapide: 0.1s;
@@ -280,12 +291,9 @@
    L'indigo est aussi la teinte par défaut des composants qui n'ont pas de classe de couleur. */
 .couleur-indigo,
 .icone-indigo,
-.kpi-indigo,
 .kpi-badge-indigo,
 .bordure-indigo,
-.vignette-date,
-.vignette-badge,
-.tuile-evenement-source {
+.vignette-badge {
   --c: var(--primaire);
   --c-clair: var(--primaire-clair);
   --c-texte: var(--primaire-texte);
@@ -293,8 +301,6 @@
 }
 
 .couleur-cyan,
-.vignette-date-cyan,
-.source-cyan,
 .badge-cyan,
 .bordure-cyan {
   --c: var(--accent-cyan);
@@ -304,8 +310,6 @@
 }
 
 .couleur-violet,
-.vignette-date-violet,
-.source-violet,
 .badge-violet,
 .bordure-violet {
   --c: var(--accent-perso);
@@ -316,10 +320,8 @@
 
 .couleur-emeraude,
 .icone-emeraude,
-.kpi-positif,
+.solde-positif,
 .kpi-badge-emeraude,
-.vignette-date-emeraude,
-.source-emeraude,
 .badge-emeraude,
 .bordure-emeraude {
   --c: var(--accent-positif);
@@ -330,10 +332,7 @@
 
 .couleur-ambre,
 .icone-ambre,
-.kpi-ambre,
 .kpi-badge-ambre,
-.vignette-date-ambre,
-.source-ambre,
 .badge-ambre,
 .bordure-ambre {
   --c: var(--accent-photos);
@@ -344,11 +343,8 @@
 
 .couleur-rose,
 .icone-rose,
-.kpi-negatif,
-.kpi-rose,
+.solde-negatif,
 .kpi-badge-rose,
-.vignette-date-rose,
-.source-rose,
 .badge-rose,
 .bordure-rose {
   --c: var(--accent-negatif);
@@ -594,6 +590,25 @@ h4 {
     font-weight: 600;
   }
 
+  /* Entrée « Créer » : un bouton (il ouvre la feuille de choix), à l'aspect d'un lien de la barre. */
+  button.nav-laterale-lien {
+    width: 100%;
+    /* Les boutons du projet centrent leur contenu ; ici il doit s'aligner sur les liens voisins. */
+    justify-content: flex-start;
+    border-color: transparent;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  button.nav-laterale-lien:hover {
+    background: color-mix(in srgb, var(--teinte-verre) 75%, transparent);
+  }
+
+  button.nav-laterale-lien.actif {
+    background: var(--primaire-clair);
+  }
+
   .nav-laterale-badge {
     margin-left: auto;
   }
@@ -813,7 +828,7 @@ h4 {
   right: 0;
   z-index: var(--z-nav);
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--espace-demi);
   padding: var(--espace-1) calc(var(--espace-1) + env(safe-area-inset-right)) calc(var(--espace-1) + env(safe-area-inset-bottom))
     calc(var(--espace-1) + env(safe-area-inset-left));
@@ -856,6 +871,13 @@ h4 {
   font-weight: 500;
   color: var(--texte-doux);
   transition: background-color var(--duree) ease, color var(--duree) ease;
+}
+
+/* Entrée « Créer » : un bouton (il ouvre la feuille de choix), à l'aspect d'un lien du bandeau. */
+button.nav-mobile-lien {
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
 }
 
 .nav-mobile-lien:active {
@@ -1094,7 +1116,7 @@ input[type='radio'] {
 section > p:first-child > a,
 .pied a,
 .tableau-de-bord button,
-.tableau-de-bord a:not(.ligne-interactive):not(.vignette-photo-bento):not(.evenement):not(.kpi-tuile):not(.tuile-evenement) {
+.tableau-de-bord a:not(.ligne-interactive):not(.vignette-photo-bento):not(.evenement):not(.ligne-a-faire):not(.ligne-solde) {
   min-height: 44px;
   display: inline-flex;
   align-items: center;
@@ -1195,51 +1217,287 @@ ul:not([class]) li {
   margin: var(--espace-3) 0;
 }
 
-/* Dashboard d'accueil Bento */
+/* Tableau de bord d'accueil, mobile d'abord : une colonne, dans l'ordre de lecture du DOM (prochain événement, à faire,
+   semaine, solde, replié). Les rangées s'élargissent en colonnes d'elles-mêmes quand la place le permet (`auto-fit`). */
 .tableau-de-bord {
   display: grid;
-  gap: var(--espace-5);
-  min-width: 0;
-  max-width: 100%;
-}
-
-.dashboard-entete {
-  display: flex;
-  flex-direction: column;
   gap: var(--espace-4);
   min-width: 0;
   max-width: 100%;
 }
 
-.dashboard-entete-gauche {
+.tableau-haut,
+.tableau-replie {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: var(--espace-4);
+  align-items: start;
   min-width: 0;
 }
 
-.dashboard-entete-gauche h2 {
-  margin: 0 0 var(--espace-1);
-  font-size: var(--taille-xxl);
-  font-weight: 800;
+.tableau-replie {
+  gap: var(--espace-3);
 }
 
-.dashboard-entete-gauche p {
+@media (min-width: 1024px) {
+  .tableau-de-bord,
+  .tableau-haut {
+    gap: var(--espace-6);
+  }
+}
+
+.bloc-titre {
+  display: flex;
+  align-items: center;
+  gap: var(--espace-2);
+  margin: 0;
+  font-size: var(--taille-l);
+}
+
+/* Grande carte du prochain événement : la teinte du groupe (`bordure-*` pose `--c`) borde son début. */
+.carte-prochain {
+  display: grid;
+  gap: var(--espace-2);
+  align-content: start;
+  border-inline-start: var(--espace-1) solid var(--c, var(--primaire));
+}
+
+.prochain-etiquette {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--espace-2);
+  margin: 0;
+  font-size: var(--taille-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--texte-doux);
+}
+
+.prochain-icone {
+  width: 1rem;
+  height: 1rem;
+  color: var(--c-texte, var(--primaire-texte));
+}
+
+.prochain-date {
   margin: 0;
   font-size: var(--taille-m);
+  font-weight: 700;
+  color: var(--c-texte, var(--primaire-texte));
 }
 
-.dashboard-entete-droite {
+.prochain-date::first-letter {
+  text-transform: uppercase;
+}
+
+.prochain-titre {
+  margin: 0;
+  font-size: var(--taille-titre);
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.prochain-vide-texte {
+  margin: 0;
+  font-size: var(--taille-l);
+  font-weight: 600;
+}
+
+.prochain-meta {
   display: flex;
-  flex-direction: column;
-  gap: var(--espace-3);
-  width: 100%;
-  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--espace-2);
   min-width: 0;
 }
 
-.filtre-groupe-local {
-  width: 100%;
-  max-width: 100%;
+.prochain-lieu {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--espace-1);
   min-width: 0;
-  font-size: var(--taille-base);
+  font-size: var(--taille-s);
+  color: var(--texte-doux);
+  overflow-wrap: anywhere;
+}
+
+/* Pleine largeur au pouce sur téléphone, à sa taille dès que la place le permet. */
+.carte-prochain .prochain-action {
+  justify-content: center;
+  margin-top: var(--espace-2);
+}
+
+@media (min-width: 640px) {
+  .carte-prochain .prochain-action {
+    justify-self: start;
+  }
+}
+
+/* Ce qui attend une action, et le solde par groupe : des lignes entières à toucher (44 px minimum). */
+.bloc-a-faire,
+.bloc-solde {
+  display: grid;
+  gap: var(--espace-3);
+  align-content: start;
+}
+
+.bloc-a-faire-liste,
+.bloc-solde-liste {
+  display: grid;
+  gap: var(--espace-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bloc-solde-liste {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+}
+
+.ligne-a-faire,
+.ligne-solde {
+  min-height: 44px;
+  padding: var(--espace-2) var(--espace-3);
+  border-radius: var(--rayon-m);
+  background: var(--verre-carte);
+  border: 1px solid var(--bordure);
+  color: var(--texte);
+  text-decoration: none;
+}
+
+.ligne-a-faire:hover,
+.ligne-solde:hover {
+  background: var(--verre-survol);
+  border-color: var(--primaire-bord-survol);
+  color: var(--texte);
+}
+
+.ligne-a-faire {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espace-3);
+}
+
+.ligne-a-faire-texte {
+  display: grid;
+  gap: var(--espace-demi);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ligne-a-faire-action {
+  flex-shrink: 0;
+  font-size: var(--taille-s);
+  font-weight: 700;
+  color: var(--primaire-texte);
+}
+
+.ligne-solde {
+  display: grid;
+  gap: var(--espace-1);
+}
+
+.ligne-solde-groupe {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Une partie par devise : étiquette à gauche, montant à droite, chacune avec sa couleur. */
+.ligne-solde-partie {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--espace-3);
+}
+
+.ligne-solde-etiquette {
+  font-size: var(--taille-s);
+  color: var(--texte-doux);
+}
+
+.ligne-solde-montant {
+  font-size: var(--taille-xl);
+  font-weight: 800;
+  text-align: end;
+}
+
+.solde-positif .ligne-solde-montant,
+.solde-negatif .ligne-solde-montant {
+  color: var(--c-texte);
+}
+
+/* « Sa semaine » : liens sous le ruban (grille de la semaine, mois, effacer le jour). */
+.widget-agenda-liens {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--espace-1) var(--espace-4);
+  margin-top: var(--espace-2);
+}
+
+.widget-agenda-liens .lien {
+  font-size: var(--taille-s);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+/* Blocs repliés (`<details>`) : le titre de section est dans le `summary`, tout le bandeau se touche. */
+.pli {
+  padding: 0;
+}
+
+.pli > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espace-3);
+  min-height: 44px;
+  padding: var(--espace-2) var(--espace-5);
+  cursor: pointer;
+  list-style: none;
+}
+
+.pli > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pli-signe::after {
+  content: '+';
+  font-size: var(--taille-xl);
+  font-weight: 700;
+  color: var(--texte-doux);
+}
+
+.pli[open] .pli-signe::after {
+  content: '−';
+}
+
+.pli-titre {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--espace-2);
+  margin: 0;
+  font-size: var(--taille-l);
+}
+
+.pli-contenu {
+  display: grid;
+  gap: var(--espace-3);
+  padding: 0 var(--espace-5) var(--espace-5);
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .pli > summary {
+    padding-inline: var(--espace-6);
+  }
+
+  .pli-contenu {
+    padding: 0 var(--espace-6) var(--espace-6);
+  }
 }
 
 .actions-rapides {
@@ -1269,11 +1527,6 @@ ul:not([class]) li {
   font-size: var(--taille-s);
 }
 
-.icone-action {
-  width: 1rem;
-  height: 1rem;
-}
-
 .icone-indigo,
 .icone-emeraude,
 .icone-ambre,
@@ -1282,135 +1535,17 @@ ul:not([class]) li {
 }
 
 @media (min-width: 768px) {
-  .dashboard-entete {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .dashboard-entete-droite {
-    width: auto;
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
   .actions-rapides {
     width: auto;
   }
-
-  .filtre-groupe-local {
-    width: auto;
-    min-width: 12rem;
-    max-width: 15rem;
-  }
 }
 
-/* Barre de 4 KPIs (2x2 sur mobile, 4 colonnes sur >= 1280px) */
-.barre-kpis {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--espace-3);
-  min-width: 0;
-  max-width: 100%;
-}
-
-@media (min-width: 768px) {
-  .barre-kpis {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: var(--espace-4);
-  }
-}
-
-.kpi-tuile {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--espace-2);
-  min-width: 0;
-  max-width: 100%;
-  padding: var(--espace-3) var(--espace-4);
-  text-decoration: none;
-  color: var(--texte);
-  transition: transform var(--duree) ease, box-shadow var(--duree) ease, border-color var(--duree) ease;
-}
-
-/* Seul un lien réagit au survol : la tuile « Prochain événement » est rendue en `<div>` quand
-   elle n'a nulle part où mener, et ne doit alors promettre aucun clic. */
-a.kpi-tuile:hover {
-  border-color: color-mix(in srgb, var(--primaire) 32%, transparent);
-  box-shadow: var(--ombre-survol);
-  color: var(--texte);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  a.kpi-tuile:hover {
-    transform: translateY(-2px);
-  }
-}
-
-.kpi-texte {
-  display: grid;
-  gap: var(--espace-demi);
-  min-width: 0;
-}
-
-.kpi-etiquette {
-  font-size: var(--taille-xxs);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--texte-doux);
-}
-
-.kpi-valeur {
-  font-size: var(--taille-base);
-  font-weight: 800;
-  line-height: 1.25;
-  color: var(--texte);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-}
-
-.kpi-sous {
-  font-size: var(--taille-xs);
-  line-height: 1.3;
-  color: var(--texte-doux);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.kpi-positif,
-.kpi-negatif,
-.kpi-indigo,
-.kpi-ambre,
-.kpi-rose {
-  color: var(--c-texte);
-}
-
-.kpi-neutre {
-  color: var(--texte);
-}
-
+/* Badge d'icône teinté : tuiles de modules de la page de groupe (et listes, sondages, albums). */
 .kpi-icone-badge {
   display: none;
 }
 
 @media (min-width: 640px) {
-  .kpi-tuile {
-    padding: var(--espace-4) var(--espace-5);
-  }
-
-  .kpi-valeur {
-    font-size: var(--taille-l);
-  }
-
   .kpi-icone-badge {
     display: inline-flex;
     align-items: center;
@@ -1435,15 +1570,7 @@ a.kpi-tuile:hover {
   }
 }
 
-/* Grille Bento principale : 12 cols sur >= 1280px (8 gauche / 4 droite) */
-.grille-bento {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--espace-5);
-  min-width: 0;
-  max-width: 100%;
-}
-
+/* Colonnes des pages de groupe et d'événement (le tableau de bord n'en a plus). */
 .bento-colonne-gauche,
 .bento-colonne-droite {
   display: grid;
@@ -1454,11 +1581,6 @@ a.kpi-tuile:hover {
 }
 
 @media (min-width: 1280px) {
-  .grille-bento {
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: var(--espace-6);
-  }
-
   .bento-colonne-gauche {
     grid-column: span 8;
     gap: var(--espace-6);
@@ -1468,13 +1590,6 @@ a.kpi-tuile:hover {
     grid-column: span 4;
     gap: var(--espace-6);
   }
-}
-
-.widget-titre-groupe {
-  display: flex;
-  align-items: center;
-  gap: var(--espace-2);
-  flex-wrap: wrap;
 }
 
 .widget-titre {
@@ -1488,40 +1603,6 @@ a.kpi-tuile:hover {
 .widget-titre-icone {
   width: 1.15rem;
   height: 1.15rem;
-}
-
-.badge-mois {
-  display: inline-flex;
-  align-items: center;
-  padding: var(--espace-1) var(--espace-2);
-  border-radius: var(--rayon-s);
-  background: var(--verre-fond);
-  border: 1px solid var(--bordure);
-  font-size: var(--taille-xs);
-  font-weight: 600;
-  color: var(--texte-doux);
-  text-transform: capitalize;
-}
-
-.legende-sources {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--espace-3);
-  font-size: var(--taille-xs);
-  color: var(--texte-doux);
-}
-
-.legende-item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--espace-1);
-}
-
-.pastille-couleur {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: var(--rayon-pilule);
-  flex-shrink: 0;
 }
 
 .couleur-indigo,
@@ -1541,18 +1622,12 @@ a.kpi-tuile:hover {
   max-width: 100%;
 }
 
-/* Ruban hebdomadaire tactile sur mobile (< 640px) */
+/* Ruban des sept jours de la semaine (tableau de bord) */
 .ruban-hebdo-mobile {
   margin-bottom: var(--espace-4);
   width: 100%;
   max-width: 100%;
   min-width: 0;
-}
-
-@media (min-width: 640px) {
-  .ruban-hebdo-mobile {
-    display: none;
-  }
 }
 
 .ruban-hebdo-jours {
@@ -1621,27 +1696,6 @@ a.kpi-tuile:hover {
 
 .ruban-jour.selectionne .ruban-jour-point {
   background: var(--texte-inverse);
-}
-
-.ruban-hebdo-pied {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--espace-2);
-  font-size: var(--taille-xs);
-  margin-top: var(--espace-1);
-}
-
-.ruban-hebdo-liens {
-  display: flex;
-  gap: var(--espace-3);
-  align-items: center;
-}
-
-.ruban-hebdo-liens .lien {
-  font-size: var(--taille-xs);
-  text-decoration: none;
-  font-weight: 600;
 }
 
 .lien-entete-widget,
@@ -1764,16 +1818,7 @@ a.kpi-tuile:hover {
   font-size: var(--taille-xs);
 }
 
-.etat-vide-widget {
-  display: grid;
-  gap: var(--espace-1);
-}
-
-.etat-vide-widget p {
-  margin: 0;
-}
-
-/* État vide générique : message + bouton d'action éventuel (généralise `.etat-vide-widget`). */
+/* État vide générique : message + bouton d'action éventuel. */
 .etat-vide {
   display: grid;
   justify-items: start;
@@ -1896,135 +1941,6 @@ dialog.dialogue-confirmation .dialogue-definitif {
     flex-direction: row;
     justify-content: flex-end;
   }
-}
-
-/* Widget Événements à venir */
-.liste-tuiles-evenements {
-  display: grid;
-  gap: var(--espace-3);
-}
-
-.tuile-evenement {
-  display: grid;
-  gap: var(--espace-2);
-  padding: var(--espace-3) var(--espace-3);
-  min-width: 0;
-  max-width: 100%;
-  border-radius: var(--rayon-m);
-  background: color-mix(in srgb, var(--teinte-verre) 68%, transparent);
-  border: 1px solid var(--bordure);
-  text-decoration: none;
-  color: var(--texte);
-  transition: transform var(--duree) ease, border-color var(--duree) ease, background-color var(--duree) ease;
-}
-
-.tuile-evenement:hover {
-  background: var(--verre-survol);
-  border-color: var(--primaire-bord-survol);
-  color: var(--texte);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .tuile-evenement:hover {
-    transform: translateY(-1px);
-  }
-}
-
-.tuile-evenement-haut {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--espace-2);
-}
-
-.tuile-evenement-gauche {
-  display: flex;
-  gap: var(--espace-3);
-  min-width: 0;
-  align-items: center;
-}
-
-.vignette-date {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-width: 2.75rem;
-  padding: var(--espace-1) var(--espace-2);
-  border-radius: var(--rayon-s);
-  background: var(--c-clair);
-  border: 1px solid color-mix(in srgb, var(--c) 22%, transparent);
-  color: var(--c-texte);
-  flex-shrink: 0;
-}
-
-.vignette-date-cyan,
-.vignette-date-violet,
-.vignette-date-emeraude,
-.vignette-date-ambre,
-.vignette-date-rose {
-  border-color: color-mix(in srgb, var(--c) 24%, transparent);
-}
-
-.vignette-date-mois {
-  font-size: var(--taille-xxs);
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  line-height: 1.1;
-}
-
-.vignette-date-jour {
-  font-size: var(--taille-base);
-  font-weight: 800;
-  line-height: 1.15;
-}
-
-.tuile-evenement-info {
-  display: grid;
-  gap: var(--espace-demi);
-  min-width: 0;
-}
-
-.tuile-evenement-titre {
-  font-size: var(--taille-m);
-  font-weight: 700;
-  line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-}
-
-.tuile-evenement-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--espace-1);
-  font-size: var(--taille-xs);
-  line-height: 1.3;
-  color: var(--texte-doux);
-  min-width: 0;
-}
-
-.tuile-evenement-meta span {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.tuile-evenement-pied {
-  padding-top: var(--espace-2);
-  border-top: 1px solid var(--bordure);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--taille-xs);
-}
-
-.tuile-evenement-source {
-  font-weight: 600;
-  color: var(--c-texte);
 }
 
 .depense-icone-rond {
@@ -2208,9 +2124,14 @@ dialog.dialogue-confirmation .dialogue-definitif {
   gap: var(--espace-2);
 }
 
+/* Une phrase (« semaine du 16 novembre »), pas une liste de noms : seule la première lettre prend la majuscule. */
 .calendrier-periode {
+  display: inline-block;
   font-size: var(--taille-m);
-  text-transform: capitalize;
+}
+
+.calendrier-periode::first-letter {
+  text-transform: uppercase;
 }
 
 .barre-onglets {
@@ -2447,14 +2368,12 @@ dialog.dialogue-confirmation .dialogue-definitif {
 
 /* Couleur de repli par type d'événement. Elle est déclarée AVANT les `bordure-*` : à spécificité
    égale, c'est la couleur propre au groupe qui doit l'emporter (le TSX pose les deux classes). */
-.grille-jour .evenement.evenement-groupe,
-.semaine .evenement.evenement-groupe {
+.grille-jour .evenement.evenement-groupe {
   background: var(--accent-agenda-clair);
   color: var(--accent-agenda-texte);
 }
 
-.grille-jour .evenement.evenement-perso,
-.semaine .evenement.evenement-perso {
+.grille-jour .evenement.evenement-perso {
   background: var(--accent-perso-clair);
   color: var(--accent-perso-texte);
 }
@@ -2501,18 +2420,188 @@ dialog.dialogue-confirmation .dialogue-definitif {
   overflow-wrap: anywhere;
 }
 
-.semaine .evenement + .evenement {
-  margin-top: var(--espace-1);
+/* Grille horaire de la semaine (components/GrilleSemaine.tsx). Une seule zone défile, dans les deux sens : la colonne des
+   heures y est collée à gauche, l'en-tête des jours et la bande « journée entière » collés en haut. Sous 640 px, une
+   colonne de jour occupe toute la largeur restante et le défilement horizontal s'aimante sur elle. Le seuil porte sur le
+   CONTENEUR (`.semaine`), pas sur la fenêtre : le même composant vit dans le widget du tableau de bord comme en pleine page.
+   Le JS ne répète pas ce seuil, il lit `scroll-snap-type` (voir `unSeulJour` dans GrilleSemaine.tsx). */
+.semaine {
+  container: semaine / inline-size;
 }
 
-.semaine > li h3 {
-  margin: 0 0 var(--espace-2);
+.semaine-vide {
+  margin: var(--espace-3) 0 0;
+}
+
+.semaine-defilement {
+  --grille-bande-hauteur: calc(var(--bande-lignes) * (var(--grille-cible) + var(--espace-1)) + var(--espace-1));
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: var(--grille-heures-largeur);
+  grid-auto-flow: column;
+  grid-auto-columns: calc(100% - var(--grille-heures-largeur));
+  max-height: min(
+    70dvh,
+    calc(var(--plage-heures) * var(--grille-hauteur-heure) + var(--grille-entete-hauteur) + var(--grille-bande-hauteur))
+  );
+  overflow: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-left: var(--grille-heures-largeur);
+  background: var(--surface);
+  border: 1px solid var(--bordure);
+  border-radius: var(--rayon-l);
+}
+
+.semaine-jour,
+.semaine-heures {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.semaine-jour {
+  scroll-snap-align: start;
+  border-left: 1px solid var(--bordure);
+}
+
+.semaine-heures {
+  position: sticky;
+  left: 0;
+  z-index: var(--z-grille-heures);
+  background: var(--surface);
+}
+
+.semaine-entete {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-grille-entete);
+  box-sizing: border-box;
+  height: var(--grille-entete-hauteur);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: var(--taille-m);
   text-transform: capitalize;
+  background: var(--surface);
+  border-bottom: 1px solid var(--bordure);
 }
 
-.semaine > li.aujourdhui h3 {
+.semaine-jour.aujourdhui .semaine-entete {
   color: var(--primaire-texte);
+  box-shadow: inset 0 -3px 0 var(--primaire);
+}
+
+.semaine-bande {
+  position: sticky;
+  top: var(--grille-entete-hauteur);
+  z-index: var(--z-grille-entete);
+  box-sizing: border-box;
+  height: var(--grille-bande-hauteur);
+  padding: var(--espace-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--espace-1);
+  overflow-y: auto;
+  background: var(--surface);
+  border-bottom: 1px solid var(--bordure);
+}
+
+.semaine-corps {
+  position: relative;
+  height: calc(24 * var(--grille-hauteur-heure));
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--bordure) 0,
+    var(--bordure) 1px,
+    transparent 1px,
+    transparent var(--grille-hauteur-heure)
+  );
+}
+
+.semaine-jour.aujourdhui .semaine-corps {
+  background-color: var(--primaire-clair);
+}
+
+.semaine-heures .semaine-corps {
+  background-image: none;
+}
+
+.semaine-heure-ligne {
+  position: absolute;
+  top: calc(var(--heure) * var(--grille-hauteur-heure));
+  right: var(--espace-1);
+  transform: translateY(-50%);
+  font-size: var(--taille-xxs);
+  font-variant-numeric: tabular-nums;
+  color: var(--texte-doux);
+}
+
+/* Position et taille viennent de variables posées par le composant (en minutes) : le calcul est dans agenda/grille-semaine.ts,
+   y compris la hauteur minimale (DUREE_MINIMALE_MIN) : pas de `min-height` ici, une seule source. */
+.semaine-bloc {
+  position: absolute;
+  top: calc(var(--decalage) / 60 * var(--grille-hauteur-heure));
+  height: calc(var(--hauteur) / 60 * var(--grille-hauteur-heure));
+  left: calc(var(--colonne) / var(--colonnes) * 100%);
+  width: calc(100% / var(--colonnes));
+  z-index: var(--z-grille-bloc);
+  box-sizing: border-box;
+  padding: var(--espace-1);
+  overflow: hidden;
+  border: 1px solid var(--bordure);
+  border-left: 3px solid var(--c);
+  border-radius: var(--rayon-s);
+  background: var(--c-clair);
+  color: var(--c-texte);
+  font-size: var(--taille-xs);
+  line-height: 1.25;
+  text-decoration: none;
+}
+
+/* Le bloc est en `overflow: hidden` : l'anneau de focus doit rentrer à l'intérieur. */
+.semaine-bloc:focus-visible {
+  outline-offset: -2px;
+}
+
+.semaine-bande .semaine-bloc {
+  position: static;
+  flex: 0 0 var(--grille-cible);
+  width: auto;
+}
+
+.semaine-heure {
+  display: block;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.semaine-titre {
+  overflow-wrap: anywhere;
+}
+
+/* Créneau « occupé » d'un membre : ni lien ni couleur de groupe, hachuré et en tirets pour ne pas passer pour un événement. */
+.semaine-occupe {
+  --c: var(--texte-doux);
+  --c-clair: color-mix(in srgb, var(--texte-doux) 10%, transparent);
+  --c-texte: var(--texte-doux);
+  border-style: dashed;
+  background: repeating-linear-gradient(135deg, var(--c-clair) 0, var(--c-clair) 4px, transparent 4px, transparent 8px);
+}
+
+/* Sept colonnes de 6 rem + la colonne des heures (3 rem) : 45 rem. En deçà, un jour à la fois et le ruban ; au-delà, le ruban
+   n'a plus de raison d'être (tous les jours sont visibles). */
+@container semaine (min-width: 45rem) {
+  .semaine-defilement {
+    grid-auto-columns: minmax(6rem, 1fr);
+    scroll-snap-type: none;
+  }
+
+  .semaine .ruban-hebdo-mobile {
+    display: none;
+  }
 }
 
 .evenement-annule {
@@ -3682,7 +3771,7 @@ dialog.visionneuse::backdrop {
   font-size: var(--taille-base);
 }
 
-/* Une ligne dont le contenu de gauche peut devenir haut (créneau avec partages par groupe) :
+/* Une ligne dont le contenu de gauche peut devenir haut (créneau avec lieu et description) :
    les actions se calent en haut plutôt qu'au centre d'un bloc de plusieurs lignes. */
 .ligne-pile {
   align-items: flex-start;
@@ -3760,9 +3849,7 @@ dialog.visionneuse::backdrop {
   }
 
   .avatar-lien:hover,
-  a.kpi-tuile:hover,
   .vignette-photo-bento:hover img,
-  .tuile-evenement:hover,
   .tuile-groupe:hover,
   .tuile-module:hover,
   .carte-lien-module:hover {
@@ -3797,4 +3884,178 @@ input[aria-invalid='true'] {
 /* Second titre d'une carte (liste d'appareils sous le formulaire de mot de passe). */
 .carte-sous-titre {
   margin: var(--espace-6) 0 var(--espace-1);
+}
+
+/* Feuille « Créer » du bandeau du bas : panneau qui monte du bas (A2). `<dialog>` modal : le fond, Échap et le piège à focus sont natifs. */
+dialog.feuille-creation {
+  z-index: var(--z-modale);
+  width: min(32rem, 100%);
+  max-width: 100%;
+  max-height: calc(100% - var(--espace-8));
+  margin: auto auto 0;
+  padding: 0;
+  color: var(--texte);
+  background: var(--verre-fond-fort);
+  backdrop-filter: blur(var(--flou-xl));
+  -webkit-backdrop-filter: blur(var(--flou-xl));
+  border: 1px solid var(--verre-bordure);
+  border-bottom: 0;
+  border-radius: var(--rayon-l) var(--rayon-l) 0 0;
+  box-shadow: var(--ombre-modale);
+  overflow: auto;
+}
+
+dialog.feuille-creation[open] {
+  animation: feuille-creation-montee var(--duree-lente) ease-out;
+}
+
+dialog.feuille-creation::backdrop {
+  background: color-mix(in srgb, var(--teinte-ombre) 45%, transparent);
+  backdrop-filter: blur(var(--flou-s));
+  -webkit-backdrop-filter: blur(var(--flou-s));
+}
+
+@keyframes feuille-creation-montee {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.feuille-creation-corps {
+  display: grid;
+  gap: var(--espace-3);
+  padding: var(--espace-5) var(--espace-4) calc(var(--espace-4) + env(safe-area-inset-bottom));
+}
+
+.feuille-creation-corps h2 {
+  margin: 0;
+  font-size: var(--taille-l);
+}
+
+.feuille-creation-corps p {
+  margin: 0;
+}
+
+.feuille-creation-groupe {
+  display: grid;
+  gap: var(--espace-1);
+  font-size: var(--taille-s);
+  color: var(--texte-doux);
+}
+
+.feuille-creation-groupe select {
+  min-height: 44px;
+}
+
+.feuille-creation-liste {
+  display: grid;
+  gap: var(--espace-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Cible de touche de 44 px au moins, pleine largeur ; une entrée désactivée garde sa hauteur et reste lisible. */
+.feuille-creation-entree {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  gap: var(--espace-3);
+  min-height: 44px;
+  padding: var(--espace-2) var(--espace-4);
+  text-align: left;
+  border-radius: var(--rayon-m);
+  border: 1px solid var(--bordure);
+  background: var(--surface);
+  color: var(--texte);
+  font: inherit;
+  font-size: var(--taille-base);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+a.feuille-creation-entree:hover {
+  background: var(--primaire-clair);
+  color: var(--primaire-texte);
+}
+
+.feuille-creation-entree[aria-disabled='true'] {
+  color: var(--texte-doux);
+  background: var(--surface-douce);
+  cursor: not-allowed;
+}
+
+.feuille-creation-icone {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.feuille-creation-fermer {
+  width: 100%;
+  min-height: 44px;
+}
+
+/* Notifications : historique, repère des non lues, actions sur place (A3). */
+.groupe-pilules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--espace-2);
+}
+
+.liste-notifications {
+  display: grid;
+  gap: var(--espace-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notification-ligne {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espace-2) var(--espace-3);
+  padding: var(--espace-3) var(--espace-4);
+  border: 1px solid var(--bordure);
+  border-left: var(--espace-1) solid transparent;
+  border-radius: var(--rayon-m);
+  background: var(--surface);
+  color: var(--texte-doux);
+}
+
+/* Non lue : barre d'accent à gauche et texte plein, en plus du texte masqué « Non lue » pour les lecteurs d'écran. */
+.notification-ligne.non-lue {
+  border-left-color: var(--primaire);
+  color: var(--texte);
+  font-weight: 600;
+}
+
+.notification-texte {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--espace-1) var(--espace-2);
+  min-width: 0;
+}
+
+.notification-texte blockquote {
+  flex-basis: 100%;
+  margin: 0;
+  font-weight: 400;
+}
+
+.notification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--espace-2);
+}
+
+.notification-statut {
+  margin-left: var(--espace-1);
 }

@@ -1,28 +1,36 @@
 import { useMemo } from 'react';
 import { joursDeSemaine } from '../../agenda/dates';
 import { libelleJour, libelleMois } from '../../agenda/format';
-import type { GroupeTableauDeBord } from '../../api/tableau-de-bord';
 import { ChargementPage, SqueletteListe } from '../../components/ChargementPage';
 import { Erreur } from '../../components/Erreur';
-import { IconeCalendrier } from '../../components/Icones';
+import { GrilleSemaine } from '../../components/GrilleSemaine';
 import type { EtatLecture } from '../../hooks/useLecture';
 import { t } from '../../i18n';
+import { cleAccord } from '../../lib/pluriel';
 import { BarreOutilsCalendrier } from './BarreOutilsCalendrier';
-import { badgeMoisCourt } from './formats';
+import { libellePastilleCalendrier } from './formats';
 import { GrilleMois } from './GrilleMois';
 import { ListeAgenda } from './ListeAgenda';
 import { RubanHebdoMobile } from './RubanHebdoMobile';
-import { grouperParJour, type CouleurGroupe, type ElementCalendrier, type FiltreCalendrier, type VueCalendrier } from './selecteurs';
-import { VueSemaine } from './VueSemaine';
+import {
+  compterSurJours,
+  entreesGrilleDepuisElements,
+  grouperParJour,
+  type CouleurGroupe,
+  type ElementCalendrier,
+  type FiltreCalendrier,
+  type VueCalendrier,
+} from './selecteurs';
 
 /**
- * Agenda consolidé. `elements` vient de la lecture de la FENÊTRE (`useFenetreCalendrier`) : c'est le seul bloc du
- * tableau de bord qui suit la navigation. `lecture` décrit l'état de cette lecture, pas celui de la page.
+ * Sa semaine. `elements` vient de la lecture de la FENÊTRE (`useFenetreCalendrier`) : c'est le seul bloc du tableau de
+ * bord qui suit la navigation. `lecture` décrit l'état de cette lecture, pas celui de la page.
+ * Vue « liste » (celle d'arrivée) : le ruban des sept jours, qui montre les événements du jour touché. De là, on ouvre la
+ * grille horaire de la semaine ou le mois ; ces deux vues portent la barre d'outils (source, vue, navigation).
  */
 export function WidgetAgenda({
   elements,
   lecture,
-  groupesVisibles,
   couleurParGroupe,
   jourActuel,
   ancre,
@@ -38,7 +46,6 @@ export function WidgetAgenda({
 }: {
   elements: readonly ElementCalendrier[];
   lecture: { etat: EtatLecture; erreur: string | null; recharger: () => void; enCours: boolean };
-  groupesVisibles: readonly GroupeTableauDeBord[];
   couleurParGroupe: ReadonlyMap<string, CouleurGroupe>;
   jourActuel: string;
   ancre: string;
@@ -56,70 +63,63 @@ export function WidgetAgenda({
   // basculer de vue ou sélectionner un jour ne regroupe donc pas les événements à nouveau.
   const parJour = useMemo(() => grouperParJour(elements), [elements]);
   const semaine = useMemo(() => joursDeSemaine(ancre), [ancre]);
-  const elementsListe = jourSelectionne !== null ? (parJour.get(jourSelectionne) ?? []) : elements;
+  const entreesGrille = useMemo(
+    () => entreesGrilleDepuisElements(elements, couleurParGroupe, libellePastilleCalendrier),
+    [elements, couleurParGroupe],
+  );
+  const duJour = jourSelectionne !== null ? (parJour.get(jourSelectionne) ?? []) : [];
   const libellePeriode =
     vue === 'mois'
       ? libelleMois(ancre)
       : t('agenda.semaine_du', { jour: libelleJour(semaine[0] ?? ancre, { day: 'numeric', month: 'long' }) });
+  const nbEvenementsSemaine = compterSurJours(semaine, parJour);
 
   return (
-    <section className="carte widget-agenda" aria-busy={lecture.enCours}>
+    <section className="carte widget-agenda" aria-busy={lecture.enCours} aria-labelledby="semaine-titre">
       <div className="carte-entete">
-        <div className="widget-titre-groupe">
-          <h3 className="widget-titre">
-            <IconeCalendrier className="widget-titre-icone icone-indigo" />
-            <span>{t('tableau.agenda_consolide')}</span>
-          </h3>
-          <span className="badge-mois">{badgeMoisCourt(ancre)}</span>
-        </div>
-
-        <div className="legende-sources">
-          {filtre !== 'groupes' && (
-            <span className="legende-item">
-              <span className="pastille-couleur couleur-violet" aria-hidden="true" />
-              <span>{t('tableau.badge_perso')}</span>
-            </span>
-          )}
-          {filtre !== 'perso' &&
-            groupesVisibles.slice(0, 4).map((g) => (
-              <span key={g.group_id} className="legende-item">
-                <span
-                  className={`pastille-couleur couleur-${couleurParGroupe.get(g.group_id) ?? 'indigo'}`}
-                  aria-hidden="true"
-                />
-                <span>{g.name}</span>
-              </span>
-            ))}
-        </div>
+        <h2 id="semaine-titre" className="bloc-titre">
+          <span>{t('tableau.semaine_titre')}</span>
+        </h2>
+        {/* Le compteur est celui de la semaine affichée : en vue « mois », il ne dirait plus rien de ce qu'on regarde. */}
+        {vue !== 'mois' && (
+          <span className="discret">
+            {nbEvenementsSemaine > 0
+              ? t(cleAccord('tableau.ruban_hebdo_compte', nbEvenementsSemaine), { n: String(nbEvenementsSemaine) })
+              : t('tableau.ruban_hebdo_aucun')}
+          </span>
+        )}
       </div>
 
-      <BarreOutilsCalendrier
-        filtre={filtre}
-        onFiltre={onFiltre}
-        vue={vue}
-        onVue={onVue}
-        libellePeriode={libellePeriode}
-        onPrecedent={onPrecedent}
-        onAujourdhui={onAujourdhui}
-        onSuivant={onSuivant}
-      />
+      {vue !== 'liste' && (
+        <BarreOutilsCalendrier
+          filtre={filtre}
+          onFiltre={onFiltre}
+          vue={vue}
+          onVue={onVue}
+          libellePeriode={libellePeriode}
+          onPrecedent={onPrecedent}
+          onAujourdhui={onAujourdhui}
+          onSuivant={onSuivant}
+        />
+      )}
 
       <ChargementPage etat={lecture.etat} erreur={lecture.erreur} onReessayer={lecture.recharger} squelette={<SqueletteListe />}>
         {/* Une relecture de fenêtre ratée garde l'ancienne grille à l'écran : le message s'affiche à côté. */}
         {lecture.etat === 'pret' && <Erreur message={lecture.erreur} onReessayer={lecture.recharger} />}
 
-        <RubanHebdoMobile
-          semaine={semaine}
-          parJour={parJour}
-          couleurParGroupe={couleurParGroupe}
-          jourActuel={jourActuel}
-          jourSelectionne={jourSelectionne}
-          vue={vue}
-          onJour={onJour}
-          onVue={onVue}
-        />
-
-        {vue === 'liste' && <ListeAgenda elements={elementsListe} />}
+        {vue === 'liste' && (
+          <>
+            <RubanHebdoMobile
+              semaine={semaine}
+              parJour={parJour}
+              couleurParGroupe={couleurParGroupe}
+              jourActuel={jourActuel}
+              jourSelectionne={jourSelectionne}
+              onJour={onJour}
+            />
+            {jourSelectionne !== null && <ListeAgenda elements={duJour} />}
+          </>
+        )}
         {vue === 'mois' && (
           <GrilleMois
             ancre={ancre}
@@ -129,8 +129,26 @@ export function WidgetAgenda({
             libellePeriode={libellePeriode}
           />
         )}
-        {vue === 'semaine' && <VueSemaine semaine={semaine} parJour={parJour} jourActuel={jourActuel} />}
+        {vue === 'semaine' && <GrilleSemaine semaine={semaine} entrees={entreesGrille} jourActuel={jourActuel} periode={libellePeriode} />}
       </ChargementPage>
+
+      {vue !== 'mois' && (
+        <div className="widget-agenda-liens">
+          {vue === 'liste' && jourSelectionne !== null && (
+            <button type="button" className="lien" onClick={() => onJour(null)}>
+              {t('tableau.jour_filtre_effacer')}
+            </button>
+          )}
+          {vue === 'liste' && (
+            <button type="button" className="lien" onClick={() => onVue('semaine')}>
+              {t('tableau.voir_semaine')}
+            </button>
+          )}
+          <button type="button" className="lien" onClick={() => onVue('mois')}>
+            {t('tableau.ouvrir_mois')}
+          </button>
+        </div>
+      )}
     </section>
   );
 }

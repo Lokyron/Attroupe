@@ -1,15 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type RefObject } from 'react';
 import { instantDepuisHeureLocale } from '../agenda/dates';
 import { libelleDateHoraire } from '../agenda/format';
 import {
   creerCreneauPersonnel,
-  definirPartagesCreneau,
   listerMonAgenda,
   supprimerCreneauPersonnel,
   visibilitePartage,
   type CreneauPersonnel,
-  type VisibilitePartage,
 } from '../api/agenda-personnel';
+import { modifierProfil } from '../api/compte';
 import { creerAbonnement, listerAbonnements, revoquerAbonnement, type Abonnement, type AbonnementCree } from '../api/flux';
 import { lienGoogleAgenda } from '../api/lien-google';
 import {
@@ -277,8 +276,11 @@ function NouvelAbonnement({
   );
 }
 
-/** Mon agenda personnel : liste des créneaux, création, suppression et partage par groupe. */
-function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
+/** Mon agenda personnel : le réglage de visibilité (unique, pour tous les créneaux), la liste des créneaux, la création et la suppression. */
+function MonAgendaPersonnel({ moi, onProfilChange }: { moi: Moi; onProfilChange?: (() => void) | undefined }) {
+  const [visibilite, setVisibilite] = useState(moi.personal_agenda_visibility);
+  const reglage = useSoumission();
+  const idVisibilite = useId();
   const [creneaux, setCreneaux] = useState<CreneauPersonnel[] | null>(null);
   const [etat, setEtat] = useState<EtatChargement>('chargement');
   const [titre, setTitre] = useState('');
@@ -355,12 +357,15 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
-  const changerPartage = (creneauId: string, groupId: string, visibility: VisibilitePartage): void => {
+  const changerVisibilite = (nouvelle: typeof visibilite): void => {
     setErreur(null);
-    definirPartagesCreneau(creneauId, [{ group_id: groupId, visibility }])
-      .then((maj) => {
-        setCreneaux((actuels) => (actuels === null ? actuels : actuels.map((c) => (c.id === maj.id ? maj : c))));
-      })
+    reglage
+      .lancer(() =>
+        modifierProfil({ personal_agenda_visibility: nouvelle }).then((profil) => {
+          setVisibilite(profil.personal_agenda_visibility);
+          onProfilChange?.();
+        }),
+      )
       .catch((err: unknown) => setErreur(messageDe(err)));
   };
 
@@ -380,6 +385,25 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
         )}
       </div>
       <p className="texte-doux">{t('agenda_perso.explication')}</p>
+      <div>
+        <label className="agenda-visibilite-champ" htmlFor={idVisibilite}>
+          <span>{t('agenda_perso.visibilite_titre')}</span>
+          <select
+            id={idVisibilite}
+            value={visibilite}
+            disabled={reglage.enCours}
+            aria-describedby={`${idVisibilite}-aide`}
+            onChange={(e) => changerVisibilite(visibilitePartage(e.target.value))}
+          >
+            <option value="none">{t('agenda_perso.visibilite_none')}</option>
+            <option value="busy">{t('agenda_perso.visibilite_busy')}</option>
+            <option value="details">{t('agenda_perso.visibilite_details')}</option>
+          </select>
+        </label>
+        <p id={`${idVisibilite}-aide`} className="texte-doux">
+          {t('agenda_perso.visibilite_aide')}
+        </p>
+      </div>
       <Erreur message={erreur} {...(etat === 'erreur' ? { onReessayer: charger } : {})} />
 
       {formulaireVisible && (
@@ -457,28 +481,6 @@ function MonAgendaPersonnel({ groupes }: { groupes: GroupeResume[] }) {
                 <span className="ligne-meta">{libelleDateHoraire(c)}</span>
                 {c.location_name !== null && <span className="ligne-meta">{t('evenement.lieu', { lieu: c.location_name })}</span>}
                 {c.description !== null && <span className="ligne-meta">{c.description}</span>}
-                {groupes.length > 0 && (
-                  <div className="agenda-visibilite-champ">
-                    <span className="ligne-meta">{t('agenda_perso.partages_titre')}</span>
-                    {groupes.map((g) => {
-                      const partage = c.partages.find((p) => p.group_id === g.group_id)?.visibility ?? 'none';
-                      return (
-                        <label key={g.group_id} className="agenda-visibilite-champ">
-                          <span className="ligne-meta">{g.name}</span>
-                          <select value={partage} onChange={(e) => changerPartage(c.id, g.group_id, visibilitePartage(e.target.value))}>
-                            <option value="none">{t('agenda_perso.visibilite_none')}</option>
-                            <option value="busy">{t('agenda_perso.visibilite_busy')}</option>
-                            {/* « Avec détails » est IMPOSSIBLE sur un créneau importé (deux déclencheurs le refusent
-                                en base) : on ne propose pas un choix que le serveur rejettera. */}
-                            {c.calendar_source_id === null && (
-                              <option value="details">{t('agenda_perso.visibilite_details')}</option>
-                            )}
-                          </select>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
               {c.calendar_source_id === null ? (
                 <button type="button" className="bouton bouton-compact bouton-danger-discret" aria-label={`${t('agenda_perso.supprimer')} ${c.title}`} disabled={suppression.enCours} onClick={() => setCible(c)}>
@@ -702,7 +704,7 @@ export function Compte({
       <CarteSecurite />
       <CartePhotoProfil moi={moi} onProfilChange={onProfilChange} />
       <CarteNotificationsPush />
-      <MonAgendaPersonnel groupes={groupes} />
+      <MonAgendaPersonnel moi={moi} onProfilChange={onProfilChange} />
       <CarteSourcesAgenda />
 
       <section className="carte">

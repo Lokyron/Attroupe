@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  changerMaVisibiliteDefaut,
-  listerDisponibilitesGroupe,
-  visibilitePartage,
-  type DisponibiliteMembre,
-  type VisibilitePartage,
-} from '../api/agenda-personnel';
+import { listerDisponibilitesGroupe, type DisponibiliteMembre } from '../api/agenda-personnel';
 import { listerEvenements, type Evenement } from '../api/evenements';
 import { ajouterJours, aujourdhui, grilleMois, jourDeDebut, joursDe, joursDeSemaine, moisVoisin } from '../agenda/dates';
 import { libelleHoraire, libelleJour, libelleJourCourt, libelleMois } from '../agenda/format';
+import { entreesDepuisGroupe } from '../agenda/grille-semaine-groupe';
 import { EnteteGroupe } from '../components/EnteteGroupe';
 import { Erreur, messageDe } from '../components/Erreur';
 import { useGroupe } from '../components/FournisseurGroupe';
+import { GrilleSemaine } from '../components/GrilleSemaine';
 import { premiereErreur } from '../hooks/etatsLecture';
 import { remplacerFragment, useFragment } from '../hooks/useFragment';
 import { t } from '../i18n';
@@ -73,11 +69,8 @@ export function Agenda({ groupId }: { groupId: string }) {
   const setAncre = (a: string): void => changerEtat({ ancre: a });
   const [evenements, setEvenements] = useState<Evenement[]>([]);
   const [disponibilites, setDisponibilites] = useState<DisponibiliteMembre[]>([]);
-  // Choix de l'utilisateur, tant qu'il n'en a pas fait : la valeur par défaut du groupe (contexte).
-  const [visibiliteChoisie, setVisibiliteChoisie] = useState<VisibilitePartage | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
-  const { groupe, erreur: erreurGroupe, rafraichirGroupe } = useGroupe();
-  const maVisibilite = visibiliteChoisie ?? groupe?.ma_visibilite_defaut ?? 'busy';
+  const { erreur: erreurGroupe } = useGroupe();
 
   useEffect(() => {
     setErreur(null);
@@ -97,17 +90,6 @@ export function Agenda({ groupId }: { groupId: string }) {
       abandonne = true;
     };
   }, [groupId, vue, ancre, joursListe]);
-
-  const modifierVisibilite = (nouvelle: VisibilitePartage): void => {
-    setErreur(null);
-    changerMaVisibiliteDefaut(groupId, nouvelle)
-      .then((v) => {
-        setVisibiliteChoisie(v);
-        // Le contexte garde l'ancien défaut sinon : revenu sur l'agenda, le sélecteur réafficherait l'ancienne valeur.
-        rafraichirGroupe();
-      })
-      .catch((err: unknown) => setErreur(messageDe(err)));
-  };
 
   const parJour = useMemo(() => {
     const regroupes = new Map<string, Evenement[]>();
@@ -132,6 +114,16 @@ export function Agenda({ groupId }: { groupId: string }) {
     }
     return regroupees;
   }, [disponibilites, vue]);
+
+  const entreesGrille = useMemo(
+    () =>
+      entreesDepuisGroupe(evenements, disponibilites, {
+        lienEvenement: (id) => lienEvenement(groupId, id),
+        titreOccupe: (nom) => t('agenda.semaine_occupe', { nom }),
+        titreDetails: (nom, titre) => t('agenda.semaine_occupe_details', { nom, titre }),
+      }),
+    [evenements, disponibilites, groupId],
+  );
 
   const precedent = (): void => setAncre(vue === 'mois' ? moisVoisin(ancre, -1) : ajouterJours(ancre, -7));
   const suivant = (): void => setAncre(vue === 'mois' ? moisVoisin(ancre, 1) : ajouterJours(ancre, 7));
@@ -167,14 +159,6 @@ export function Agenda({ groupId }: { groupId: string }) {
                 </button>
               ))}
             </div>
-            <label className="agenda-visibilite-champ">
-              <span className="discret ligne-meta">{t('disponibilites.ma_visibilite')}</span>
-              <select value={maVisibilite} onChange={(e) => modifierVisibilite(visibilitePartage(e.target.value))}>
-                <option value="none">{t('disponibilites.visibilite_none')}</option>
-                <option value="busy">{t('disponibilites.visibilite_busy')}</option>
-                <option value="details">{t('disponibilites.visibilite_details')}</option>
-              </select>
-            </label>
           </div>
 
           {vue !== 'liste' && (
@@ -237,24 +221,7 @@ export function Agenda({ groupId }: { groupId: string }) {
         )}
 
         {vue === 'semaine' && (
-          <ul className="jours semaine">
-            {semaine.map((jour) => (
-              <li key={jour} className={jour === aujourdhui() ? 'aujourdhui' : undefined}>
-                <h3>
-                  <time dateTime={jour}>{libelleJour(jour, { weekday: 'long', day: 'numeric', month: 'long' })}</time>
-                </h3>
-                {(parJour.get(jour) ?? []).length === 0 && (disposParJour.get(jour) ?? []).length === 0 && (
-                  <p className="discret">{t('agenda.rien')}</p>
-                )}
-                {(parJour.get(jour) ?? []).map((e) => (
-                  <LigneEvenement key={e.id} groupId={groupId} e={e} />
-                ))}
-                {(disposParJour.get(jour) ?? []).map((d) => (
-                  <LigneDisponibilite key={`${d.id}-${d.membership_id}`} d={d} />
-                ))}
-              </li>
-            ))}
-          </ul>
+          <GrilleSemaine semaine={semaine} entrees={entreesGrille} jourActuel={aujourdhui()} periode={titre} />
         )}
 
         {vue === 'liste' && (

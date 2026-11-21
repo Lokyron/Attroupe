@@ -1,15 +1,9 @@
-import { appeler, booleen, champ, liste, texte, texteOuNul } from './client';
+import { appeler, booleen, champ, liste, texte, texteOuNul } from './client.js';
 
 // Les formes de l'API d'agenda personnel et de disponibilités (lot 8, architecture §6), relues champ par champ.
 
 export type VisibilitePartage = 'none' | 'busy' | 'details';
 export type VisibiliteActive = 'busy' | 'details';
-
-export interface PartageCreneau {
-  group_id: string;
-  group_name: string;
-  visibility: VisibiliteActive;
-}
 
 export interface CreneauPersonnel {
   id: string;
@@ -23,7 +17,6 @@ export interface CreneauPersonnel {
   /** Non nul : créneau IMPORTÉ d'un agenda externe (ADR-0013). Lecture seule, et ses textes ne sortent
    *  jamais vers un groupe — ils sont chiffrés en base et ne sont déchiffrés que pour leur propriétaire. */
   calendar_source_id: string | null;
-  partages: PartageCreneau[];
 }
 
 export interface ChampsCreneauPersonnel {
@@ -60,14 +53,6 @@ function visibiliteActive(valeur: unknown): VisibiliteActive {
   return valeur;
 }
 
-function partageCreneau(p: unknown): PartageCreneau {
-  return {
-    group_id: texte(champ(p, 'group_id')),
-    group_name: texte(champ(p, 'group_name')),
-    visibility: visibiliteActive(champ(p, 'visibility')),
-  };
-}
-
 function creneauPersonnel(c: unknown): CreneauPersonnel {
   return {
     id: texte(champ(c, 'id')),
@@ -79,7 +64,6 @@ function creneauPersonnel(c: unknown): CreneauPersonnel {
     ends_at: texteOuNul(champ(c, 'ends_at')),
     time_zone: texte(champ(c, 'time_zone')),
     calendar_source_id: texteOuNul(champ(c, 'calendar_source_id')),
-    partages: liste(champ(c, 'partages')).map(partageCreneau),
   };
 }
 
@@ -108,6 +92,11 @@ export async function listerMonAgenda(fenetre?: { du?: string; au?: string }): P
   return liste(champ(r, 'creneaux')).map(creneauPersonnel);
 }
 
+/** Un seul créneau de MON agenda (page d'événement personnel). 404 `agenda.introuvable` s'il n'est pas à ce compte. */
+export async function lireCreneauPersonnel(id: string): Promise<CreneauPersonnel> {
+  return creneauPersonnel(await appeler('GET', `/api/moi/agenda/${encodeURIComponent(id)}`));
+}
+
 export async function creerCreneauPersonnel(champs: ChampsCreneauPersonnel): Promise<CreneauPersonnel> {
   return creneauPersonnel(await appeler('POST', '/api/moi/agenda', champs));
 }
@@ -118,18 +107,6 @@ export async function modifierCreneauPersonnel(id: string, champs: Partial<Champ
 
 export async function supprimerCreneauPersonnel(id: string): Promise<void> {
   await appeler('DELETE', `/api/moi/agenda/${encodeURIComponent(id)}`);
-}
-
-export async function definirPartagesCreneau(
-  id: string,
-  partages: ReadonlyArray<{ group_id: string; visibility: VisibilitePartage }>,
-): Promise<CreneauPersonnel> {
-  return creneauPersonnel(await appeler('PUT', `/api/moi/agenda/${encodeURIComponent(id)}/partages`, { partages }));
-}
-
-export async function changerMaVisibiliteDefaut(groupId: string, visibility: VisibilitePartage): Promise<VisibilitePartage> {
-  const r = await appeler('PUT', `/api/groupes/${encodeURIComponent(groupId)}/ma-visibilite`, { visibility });
-  return visibilitePartage(champ(r, 'default_personal_visibility'));
 }
 
 export async function listerDisponibilitesGroupe(

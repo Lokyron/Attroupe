@@ -31,8 +31,8 @@ describe('lot 12 : version et dernière migration', () => {
   it('derniereMigration retourne la dernière migration appliquée sur une base migrée', () => {
     const derniere = derniereMigration(b.base);
     expect(derniere).toBeDefined();
-    expect(derniere?.version).toBe('0008');
-    expect(derniere?.nom).toBe('0008_preferences_notifications_heritage');
+    expect(derniere?.version).toBe('0009');
+    expect(derniere?.nom).toBe('0009_visibilite_agenda_personnel');
   });
 
   it('routesVersion renvoie name, version, tag, migration et migration_nom', () => {
@@ -54,8 +54,8 @@ describe('lot 12 : version et dernière migration', () => {
       name: 'attroupe',
       version: '0.1.0-test',
       tag: process.env['ATTROUPE_TAG'] ?? '0.1.0-test',
-      migration: '0008',
-      migration_nom: '0008_preferences_notifications_heritage',
+      migration: '0009',
+      migration_nom: '0009_visibilite_agenda_personnel',
     });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decoderSegment, estFragmentDeRoute, separerFragment } from '../../client/src/lib/fragment-route.js';
+import { aFormeDIdentifiant, decoderSegment, estFragmentDeRoute, separerFragment } from '../../client/src/lib/fragment-route.js';
 
 describe('estFragmentDeRoute', () => {
   it('accepte les fragments de route', () => {
@@ -53,6 +53,15 @@ describe('decoderSegment', () => {
   it('rend null, sans lever, sur un pourcentage mal formé', () => {
     for (const segment of ['%E0', '%', '%zz', 'a%2', '%C3%28']) {
       expect(decoderSegment(segment), segment).toBeNull();
+    }
+  });
+});
+
+describe('aFormeDIdentifiant', () => {
+  it('reconnaît un UUID v7 et refuse les mots de page ou les segments mal formés', () => {
+    expect(aFormeDIdentifiant('0193a5c2-7b1e-7c3a-9f4d-1a2b3c4d5e6f')).toBe(true);
+    for (const segment of ['sources', 'nouveau', '', '0193a5c2', '0193A5C2-7B1E-7C3A-9F4D-1A2B3C4D5E6F', '../x']) {
+      expect(aFormeDIdentifiant(segment), segment).toBe(false);
     }
   });
 });

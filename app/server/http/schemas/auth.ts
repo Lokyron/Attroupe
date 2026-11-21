@@ -54,6 +54,7 @@ export function schemaProfil(aujourdhui: Date) {
       display_name: z.string().trim().min(1).max(60),
       time_zone: z.string().min(1).max(64).refine(fuseauValide),
       birthday: z.string().refine((v) => anniversaireValide(v, aujourdhui)).nullable(),
+      personal_agenda_visibility: z.enum(['none', 'busy', 'details']),
     })
     .partial()
     .refine((v) => Object.keys(v).length > 0);

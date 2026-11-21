@@ -151,4 +151,49 @@ describe('migrations qui réécrivent des données', () => {
       fermer(apres);
     }
   });
+
+  it('0009 : le plafond de compte est amorcé avec le choix le plus restrictif des appartenances actives, sans toucher aux partages', () => {
+    copier((n) => n <= 8);
+    const avant = ouvrirEtMigrer(chemin, { dossierMigrations: migrations });
+    const sqlAvant = brut(avant);
+    for (const u of ['u1', 'u2', 'u3', 'u4']) {
+      sqlAvant.prepare('INSERT INTO users (id, email, username, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(u, `${u}@exemple.test`, `user-${u}`, u, T, T);
+    }
+    for (const g of ['g1', 'g2']) {
+      sqlAvant.prepare('INSERT INTO groups (id, name, slug, created_by_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(g, g, `slug-${g}`, 'u1', T, T);
+    }
+    const adhesion = sqlAvant.prepare(
+      'INSERT INTO memberships (id, group_id, user_id, role, status, default_personal_visibility, joined_at, ended_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    );
+    // u1 : details + none -> none ; u2 : details + busy -> busy ; u3 : details seul -> details ; u4 : un « none » mais INACTIF -> défaut busy.
+    adhesion.run('m1a', 'g1', 'u1', 'admin', 'active', 'details', T, null, T, T);
+    adhesion.run('m1b', 'g2', 'u1', 'member', 'active', 'none', T, null, T, T);
+    adhesion.run('m2a', 'g1', 'u2', 'member', 'active', 'details', T, null, T, T);
+    adhesion.run('m2b', 'g2', 'u2', 'member', 'active', 'busy', T, null, T, T);
+    adhesion.run('m3a', 'g1', 'u3', 'member', 'active', 'details', T, null, T, T);
+    adhesion.run('m4a', 'g1', 'u4', 'member', 'left', 'none', T, T, T, T);
+    sqlAvant
+      .prepare("INSERT INTO personal_events (id, user_id, title, all_day, starts_at, time_zone, created_at, updated_at) VALUES ('p1', 'u1', 'Secret', 0, ?, 'Europe/Paris', ?, ?)")
+      .run('2026-12-01T09:00:00Z', T, T);
+    sqlAvant.prepare("INSERT INTO personal_event_shares (personal_event_id, group_id, membership_id, visibility, created_at) VALUES ('p1', 'g1', 'm1a', 'details', ?)").run(T);
+    const partages = (sql: ReturnType<typeof brut>): unknown[] => sql.prepare('SELECT * FROM personal_event_shares ORDER BY personal_event_id, group_id').all();
+    const partagesAvant = partages(sqlAvant);
+    fermer(avant);
+
+    copier(() => true);
+    const apres = ouvrirEtMigrer(chemin, { dossierMigrations: migrations });
+    const sqlApres = brut(apres);
+    try {
+      expect(sqlApres.prepare('SELECT id, personal_agenda_visibility FROM users ORDER BY id').all()).toEqual([
+        { id: 'u1', personal_agenda_visibility: 'none' },
+        { id: 'u2', personal_agenda_visibility: 'busy' },
+        { id: 'u3', personal_agenda_visibility: 'details' },
+        { id: 'u4', personal_agenda_visibility: 'busy' },
+      ]);
+      expect(partages(sqlApres)).toEqual(partagesAvant);
+      expect(() => sqlApres.prepare("UPDATE users SET personal_agenda_visibility = 'tous' WHERE id = 'u1'").run()).toThrow(/CHECK/);
+    } finally {
+      fermer(apres);
+    }
+  });
 });

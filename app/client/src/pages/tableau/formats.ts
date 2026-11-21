@@ -3,7 +3,7 @@ import { ajouterJours, jourDeDebut } from '../../agenda/dates';
 import { libelleHoraire } from '../../agenda/format';
 import { t, type CleTexte } from '../../i18n';
 import { exposantIntl, formaterMontantExposant } from '../../lib/montants';
-import type { ElementCalendrier, StatutPresence } from './selecteurs';
+import { dateEnClair, partiesSolde, type ElementCalendrier, type PartieSolde, type SoldeGroupe, type StatutPresence } from './selecteurs';
 
 export function libellePastilleCalendrier(el: ElementCalendrier): string {
   return el.sorte === 'groupe'
@@ -62,6 +62,15 @@ export function formaterDateRelative(el: ElementCalendrier, jourAujourdHui: stri
   return formaterDateEvenement(el.starts_at, el.all_day, el.time_zone);
 }
 
+/** Date d'un événement en toutes lettres (grande carte) ; la règle est dans `dateEnClair` (selecteurs.ts), ici seuls les textes. */
+export function formaterDateEnClair(el: ElementCalendrier, jourAujourdHui: string): string {
+  return dateEnClair(el, jourAujourdHui, {
+    aujourdhui: t('tableau.aujourdhui'),
+    demain: t('tableau.demain'),
+    horaire: libelleHoraire(el),
+  });
+}
+
 export function partiesVignetteDate(el: ElementCalendrier): { mois: string; jour: string } {
   const isoJour = jourDeDebut(el);
   const date = new Date(`${isoJour}T00:00:00Z`);
@@ -81,8 +90,11 @@ export function cleStatutCompact(statut: StatutPresence): CleTexte {
   return 'tableau.statut_a_valider';
 }
 
-export function badgeMoisCourt(ancre: string): string {
-  const date = new Date(`${ancre.slice(0, 7)}-01T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return ancre.slice(0, 7);
-  return new Intl.DateTimeFormat('fr-FR', { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(date);
+/** Parties du solde d'un groupe, montants et étiquettes dans la langue de l'interface. */
+export function partiesSoldeAffichees(solde: SoldeGroupe): PartieSolde[] {
+  return partiesSolde(solde, formaterMontant, {
+    positif: t('tableau.solde_on_vous_doit'),
+    negatif: t('tableau.solde_vous_devez'),
+    equilibre: t('tableau.solde_equilibre'),
+  });
 }

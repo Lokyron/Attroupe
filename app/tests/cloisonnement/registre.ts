@@ -139,13 +139,13 @@ export const REGISTRE: readonly EntreeRoute[] = [
   { methode: 'GET', chemin: '/api/moi/flux-ical', exige: 'session' },
   { methode: 'POST', chemin: '/api/moi/flux-ical', exige: 'session', corps: { label: 'Mon téléphone', include_declined: false } },
   { methode: 'DELETE', chemin: '/api/moi/flux-ical/:fluxId', exige: 'session', ressources: { fluxId: 'abonnement' } },
-  // Agenda personnel (lot 8) : relève du COMPTE. `group_id` dans `PUT /api/moi/agenda/:id/partages` n'est pas forgé par la suite générique
-  // (Manon est légitimement membre de B) ; il est attaqué dans tests/unite/agenda-personnel.test.ts et tests/integration/agenda-personnel.test.ts.
+  // Agenda personnel (lot 8) : relève du COMPTE. Il n'y a plus de route d'écriture des partages (ADR-0017) : le réglage de
+  // visibilité est un champ de profil (`PATCH /api/moi`), et le plafond est attaqué dans tests/cloisonnement/agenda-personnel-plafond.test.ts.
   { methode: 'GET', chemin: '/api/moi/agenda', exige: 'session' },
+  { methode: 'GET', chemin: '/api/moi/agenda/:creneauId', exige: 'session', ressources: { creneauId: 'creneauPerso' } },
   { methode: 'POST', chemin: '/api/moi/agenda', exige: 'session', corps: { title: 'Dentiste', starts_at: '2027-03-21T10:00:00Z', time_zone: 'Europe/Paris' } },
   { methode: 'PATCH', chemin: '/api/moi/agenda/:id', exige: 'session', ressources: { id: 'creneauPerso' }, corps: { title: 'Modifié' } },
   { methode: 'DELETE', chemin: '/api/moi/agenda/:id', exige: 'session', ressources: { id: 'creneauPerso' } },
-  { methode: 'PUT', chemin: '/api/moi/agenda/:id/partages', exige: 'session', ressources: { id: 'creneauPerso' }, corps: { partages: [] } },
   // Sources d'agenda externe (ADR-0013) : relèvent du COMPTE. L'URL est un secret porteur, jamais rendue. Il n'existe pas de lecture d'UNE source par
   // identifiant : la liste est filtrée par le compte (ses attaques sont celles de `GET /api/moi/flux-ical`) ; l'identifiant forgé s'attaque en
   // écriture (PATCH, synchronisation à la demande) et en suppression.
@@ -211,8 +211,7 @@ export const REGISTRE: readonly EntreeRoute[] = [
   { methode: 'GET', chemin: '/api/groupes/:groupId/invitations', exige: 'admin' },
   { methode: 'POST', chemin: '/api/groupes/:groupId/invitations', exige: 'admin', corps: { email: 'forge@exemple.test' } },
   { methode: 'DELETE', chemin: '/api/groupes/:groupId/invitations/:invitationId', exige: 'admin', ressources: { invitationId: 'invitation' } },
-  // Visibilité par défaut et disponibilités partagées dans le groupe (lot 8).
-  { methode: 'PUT', chemin: '/api/groupes/:groupId/ma-visibilite', exige: 'appartenance', corps: { visibility: 'busy' } },
+  // Disponibilités partagées dans le groupe (lot 8), sous le plafond de chaque membre (ADR-0017).
   { methode: 'GET', chemin: '/api/groupes/:groupId/disponibilites', exige: 'appartenance', requete: { du: '2027-03-01', au: '2027-03-31' } },
 
   // --- L'agenda du groupe (lot 4) ---------------------------------------------------------------------------------

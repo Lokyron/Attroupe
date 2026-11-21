@@ -3,7 +3,7 @@ import { listerInvitationsEmises } from '../../db/queries/invitations.js';
 import { listerMembres } from '../../db/queries/membres.js';
 import { mesGroupes } from '../../db/queries/transverse.js';
 import { versInstant } from '../../domain/instant.js';
-import { changerMaVisibiliteDefaut, disponibilitesDuGroupe } from '../../services/agenda-personnel.js';
+import { disponibilitesDuGroupe } from '../../services/agenda-personnel.js';
 import {
   changerRole,
   creerNouveauGroupe,
@@ -21,7 +21,6 @@ import { cadence } from '../middleware/cadence.js';
 import { exigerSession, gardeSession } from '../middleware/session.js';
 import { monter } from '../montage.js';
 import { parametre } from '../parametres.js';
-import { schemaVisibiliteDefaut } from '../schemas/agenda-personnel.js';
 import { schemaFenetre } from '../schemas/evenements.js';
 import { schemaChangementRole, schemaCreationGroupe, schemaInvitation, schemaModificationGroupe } from '../schemas/groupes.js';
 import { analyser } from '../schemas/valider.js';
@@ -113,12 +112,7 @@ function routesDuGroupe(contexte: Contexte): Router {
     res.json({ ok: true });
   });
 
-  // Visibilité par défaut et disponibilités partagées dans ce groupe (lot 8).
-  routeur.put('/ma-visibilite', (req, res) => {
-    const { visibility } = analyser(schemaVisibiliteDefaut, req.body);
-    res.json(changerMaVisibiliteDefaut(scopeDe(req), visibility));
-  });
-
+  // Disponibilités partagées dans ce groupe, sous le plafond de chaque membre (lot 8, ADR-0017).
   routeur.get('/disponibilites', (req, res) => {
     const fenetre = analyser(schemaFenetre, req.query);
     res.json({ disponibilites: disponibilitesDuGroupe(scopeDe(req), fenetre) });

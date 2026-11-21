@@ -1,3 +1,4 @@
+import { visibilitePartage, type VisibilitePartage } from './agenda-personnel.js';
 import { appeler, booleen, champ, liste, nombre, texte, texteOuNul } from './client.js';
 
 // Compte courant : profil, mot de passe, vérification d'adresse et sessions (appareils connectés).
@@ -9,6 +10,7 @@ export interface ProfilCompte {
   time_zone: string;
   /** `null` : adresse non confirmée. */
   email_verified_at: string | null;
+  personal_agenda_visibility: VisibilitePartage;
 }
 
 export interface SessionCompte {
@@ -27,6 +29,7 @@ function profil(r: unknown): ProfilCompte {
     display_name: texte(champ(r, 'display_name')),
     time_zone: texte(champ(r, 'time_zone')),
     email_verified_at: texteOuNul(champ(r, 'email_verified_at')),
+    personal_agenda_visibility: visibilitePartage(champ(r, 'personal_agenda_visibility')),
   };
 }
 
@@ -42,7 +45,11 @@ function session(s: unknown): SessionCompte {
 }
 
 /** Au moins un champ est exigé par le serveur ; un champ absent n'est pas touché. */
-export async function modifierProfil(champs: { display_name?: string; time_zone?: string }): Promise<ProfilCompte> {
+export async function modifierProfil(champs: {
+  display_name?: string;
+  time_zone?: string;
+  personal_agenda_visibility?: VisibilitePartage;
+}): Promise<ProfilCompte> {
   return profil(await appeler('PATCH', '/api/moi', champs));
 }
 

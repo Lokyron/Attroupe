@@ -31,3 +31,11 @@ export function decoderSegment(segment: string): string | null {
     throw err;
   }
 }
+
+/** Forme d'un identifiant de ligne (UUID v7 en minuscules, cf. `nouvelIdentifiant` côté serveur). */
+const FORME_IDENTIFIANT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Vrai si le segment a la forme d'un identifiant : `#/agenda/sources` n'est pas un créneau, c'est une page « introuvable ». */
+export function aFormeDIdentifiant(segment: string): boolean {
+  return FORME_IDENTIFIANT.test(segment);
+}

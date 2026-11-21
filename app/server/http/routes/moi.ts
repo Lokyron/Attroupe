@@ -20,13 +20,14 @@ import { mesGroupes } from '../../db/queries/transverse.js';
 import { normaliserUrlSource, publierSource, synchroniserSource, type BilanSynchro } from '../../services/agenda-externe.js';
 import {
   creerDansMonAgenda,
-  definirPartagesDansMonAgenda,
   listerMonAgenda,
   modifierDansMonAgenda,
+  modifierMonProfil,
   supprimerDeMonAgenda,
 } from '../../services/agenda-personnel.js';
+import { lireMonCreneau } from '../../services/agenda-personnel-lecture.js';
 import { accepter, mesInvitations, refuser } from '../../services/invitations.js';
-import { listerSessions, lireProfil, modifierProfil, revoquerAutresSessions, revoquerSession } from '../../db/queries/comptes.js';
+import { listerSessions, lireProfil, revoquerAutresSessions, revoquerSession } from '../../db/queries/comptes.js';
 import { dateValide, fenetreValide } from '../../domain/evenements.js';
 import { MINUTE_MS, versInstant } from '../../domain/instant.js';
 import { empreinteJeton, nouveauJetonFlux, urlFlux, urlWebcal } from '../../domain/jetons.js';
@@ -38,6 +39,7 @@ import {
   marquerLues,
   mesNotifications,
   mesPreferencesNotifications,
+  pastilleNotifications,
 } from '../../services/notifications.js';
 import { envoyerNotificationPush, obtenirClePubliqueVapid } from '../../services/push.js';
 import type { Contexte } from '../contexte.js';
@@ -48,13 +50,13 @@ import { parametre } from '../parametres.js';
 import { schemaModificationSource, schemaNouvelleSource } from '../schemas/agenda-externe.js';
 import {
   schemaFenetreAgendaPersonnel,
+  schemaIdentifiantCreneau,
   schemaModificationCreneauPersonnel,
   schemaNouveauCreneauPersonnel,
-  schemaPartagesCreneau,
 } from '../schemas/agenda-personnel.js';
 import { schemaChangementMotDePasse, schemaProfil } from '../schemas/auth.js';
 import { schemaCreationFlux } from '../schemas/flux.js';
-import { schemaLectureNotifications, schemaPreferenceNotification } from '../schemas/notifications.js';
+import { schemaLectureNotifications, schemaListeNotifications, schemaPreferenceNotification } from '../schemas/notifications.js';
 import { analyser } from '../schemas/valider.js';
 
 /** Abonnements calendrier non révoqués par compte. */
@@ -110,11 +112,17 @@ export function routesMoi(contexte: Contexte): Router {
   routeur.get('/', (req, res) => {
     const auth = exigerSession(req);
     const { portee } = auth;
+    const invitations = mesInvitations(contexte, auth);
     res.json({
       ...lireProfil(portee),
       // Mes groupes (le sélecteur) : appartenances ACTIVES seulement, et le badge « vous avez des invitations ».
       groupes: mesGroupes(portee),
-      invitations_en_attente: mesInvitations(contexte, auth).length,
+      invitations_en_attente: invitations.length,
+      // Pastille de « Notifs », calculée ici une fois pour toutes : le client n'additionne rien (cf. `compterNotificationsAVoir`).
+      notifications_a_voir: pastilleNotifications(
+        portee,
+        invitations.map((i) => i.id),
+      ),
       // Sans clé Brevo les e-mails restent en file : l'interface doit le dire (architecture §7.3).
       service_email: contexte.env.BREVO_API_KEY === undefined ? 'non_configure' : 'actif',
     });
@@ -135,8 +143,7 @@ export function routesMoi(contexte: Contexte): Router {
   routeur.patch('/', (req, res) => {
     const { portee } = exigerSession(req);
     const champs = analyser(schemaProfil(contexte.horloge()), req.body);
-    modifierProfil(portee, champs, versInstant(contexte.horloge()));
-    res.json(lireProfil(portee));
+    res.json(modifierMonProfil(portee, champs, versInstant(contexte.horloge())));
   });
 
   // Ancien mot de passe vérifié, nouveau posé, autres sessions révoquées, jeton de CETTE session renouvelé (nouveau cookie).
@@ -317,6 +324,13 @@ export function routesMoi(contexte: Contexte): Router {
     res.json({ creneaux: listerMonAgenda(portee, fenetre, contexte.env.ATTROUPE_ENCRYPTION_KEY, contexte.journal) });
   });
 
+  // Un seul créneau, porté sur le compte connecté : celui d'un autre compte (ou supprimé) est un 404, identifiant forgé ou non.
+  routeur.get('/agenda/:creneauId', (req, res) => {
+    const { portee } = exigerSession(req);
+    const { creneauId } = analyser(schemaIdentifiantCreneau, { creneauId: parametre(req, 'creneauId') });
+    res.json(lireMonCreneau(portee, creneauId, contexte.env.ATTROUPE_ENCRYPTION_KEY, contexte.journal));
+  });
+
   routeur.post('/agenda', (req, res) => {
     const { portee } = exigerSession(req);
     const corps = analyser(schemaNouveauCreneauPersonnel, req.body);
@@ -335,17 +349,11 @@ export function routesMoi(contexte: Contexte): Router {
     res.json({ ok: true });
   });
 
-  routeur.put('/agenda/:id/partages', (req, res) => {
-    const { portee } = exigerSession(req);
-    const corps = analyser(schemaPartagesCreneau, req.body);
-    const partages = 'partages' in corps ? corps.partages : [corps];
-    res.json(definirPartagesDansMonAgenda(portee, parametre(req, 'id'), partages));
-  });
-
   // Notifications et préférences d'envoi par e-mail (lot 10).
   routeur.get('/notifications', (req, res) => {
     const { portee } = exigerSession(req);
-    res.json(mesNotifications(portee));
+    const options = analyser(schemaListeNotifications, req.query);
+    res.json(mesNotifications(contexte, portee, options));
   });
 
   routeur.post('/notifications/lecture', (req, res) => {

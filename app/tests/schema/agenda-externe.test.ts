@@ -274,11 +274,11 @@ describe('agenda externe : base et requêtes', () => {
       expect(t.sql.prepare('SELECT count(*) FROM personal_events WHERE calendar_source_id = ?').pluck().get(r.id)).toBe(0);
     });
 
-    it('remplacerCreneauxImportes ÉCRASE `details` en `busy` (réglage du membre) au lieu de laisser le déclencheur échouer', () => {
+    it('remplacerCreneauxImportes ÉCRASE `details` en `busy` (réglage de compte) au lieu de laisser le déclencheur échouer', () => {
       const alice = portee(d.a.userId);
       const r = creerSource(alice, nouvelle(), CLE);
       if (!r.ok) throw new Error('création attendue');
-      t.sql.prepare("UPDATE memberships SET default_personal_visibility = 'details' WHERE id = ?").run(d.a.membershipId);
+      t.sql.prepare("UPDATE users SET personal_agenda_visibility = 'details' WHERE id = ?").run(d.a.userId);
       try {
         expect(remplacerCreneauxImportes(alice, r.id, [PLAGE], CLE)).toBe(1);
         const visibilites = t.sql
@@ -289,15 +289,15 @@ describe('agenda externe : base et requêtes', () => {
           .all(r.id);
         expect(visibilites).toEqual(['busy']);
       } finally {
-        t.sql.prepare("UPDATE memberships SET default_personal_visibility = 'busy' WHERE id = ?").run(d.a.membershipId);
+        t.sql.prepare("UPDATE users SET personal_agenda_visibility = 'busy' WHERE id = ?").run(d.a.userId);
       }
     });
 
-    it('remplacerCreneauxImportes respecte `none` : aucun partage', () => {
+    it('remplacerCreneauxImportes respecte un réglage de compte `none` : aucun partage', () => {
       const alice = portee(d.a.userId);
       const r = creerSource(alice, nouvelle(), CLE);
       if (!r.ok) throw new Error('création attendue');
-      t.sql.prepare("UPDATE memberships SET default_personal_visibility = 'none' WHERE id = ?").run(d.a.membershipId);
+      t.sql.prepare("UPDATE users SET personal_agenda_visibility = 'none' WHERE id = ?").run(d.a.userId);
       try {
         expect(remplacerCreneauxImportes(alice, r.id, [PLAGE], CLE)).toBe(1);
         expect(
@@ -307,7 +307,7 @@ describe('agenda externe : base et requêtes', () => {
             .get(r.id),
         ).toBe(0);
       } finally {
-        t.sql.prepare("UPDATE memberships SET default_personal_visibility = 'busy' WHERE id = ?").run(d.a.membershipId);
+        t.sql.prepare("UPDATE users SET personal_agenda_visibility = 'busy' WHERE id = ?").run(d.a.userId);
       }
     });
 

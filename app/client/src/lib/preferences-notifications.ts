@@ -30,16 +30,16 @@ export type GenreNotification = (typeof GENRES_NOTIFICATION)[number];
 
 /**
  * Genres que le serveur accepte mais qu'aucun code n'émet encore : on ne les propose pas au réglage (une case qui ne fait rien laisse
- * croire à un contrôle qui n'existe pas). À retirer d'ici et à ranger dans un thème le jour où le serveur les émet.
- * `invitation_received` : une invitation vise un compte qui n'est pas encore membre, hors de toute diffusion de groupe.
+ * croire à un contrôle qui n'existe pas). À ranger dans un thème dès que le serveur les émet. Vide aujourd'hui :
+ * `invitation_received` est émis à l'envoi d'une invitation à un compte existant.
  */
-export const GENRES_NON_EMIS: readonly GenreNotification[] = ['invitation_received'];
+export const GENRES_NON_EMIS: readonly GenreNotification[] = [];
 
 /** Genres regroupés pour l'affichage ; chaque genre émis apparaît dans exactement un thème (vérifié par test). */
 export type ThemeNotification = 'groupe' | 'evenements' | 'sondages' | 'organisation' | 'messages' | 'depenses';
 
 export const THEMES_NOTIFICATION: readonly { readonly cle: ThemeNotification; readonly genres: readonly GenreNotification[] }[] = [
-  { cle: 'groupe', genres: ['member_joined'] },
+  { cle: 'groupe', genres: ['member_joined', 'invitation_received'] },
   { cle: 'evenements', genres: ['event_created', 'event_updated', 'event_cancelled'] },
   { cle: 'sondages', genres: ['poll_opened', 'poll_closing'] },
   { cle: 'organisation', genres: ['item_claimed', 'task_assigned'] },

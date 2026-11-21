@@ -196,6 +196,8 @@ describe('agenda externe : détails chiffrés', () => {
       expect(declencheurs).toHaveLength(2);
       try {
         for (const dec of declencheurs) t.sql.exec(`DROP TRIGGER ${dec.name}`);
+        // Réglage de compte au plus haut : seule la ligne de partage (forcée) et le plancher du créneau importé restent en jeu.
+        t.sql.prepare("UPDATE users SET personal_agenda_visibility = 'details' WHERE id = (SELECT user_id FROM personal_events WHERE id = ?)").run(creneauId);
         // Preuve que les déclencheurs ont bien disparu : le partage en `details` d'un créneau importé passe maintenant.
         t.sql.prepare("UPDATE personal_event_shares SET visibility = 'details' WHERE personal_event_id = ?").run(creneauId);
         expect(t.sql.prepare('SELECT visibility FROM personal_event_shares WHERE personal_event_id = ?').pluck().get(creneauId)).toBe('details');
@@ -207,6 +209,10 @@ describe('agenda externe : détails chiffrés', () => {
         for (const trace of toutesLesTraces()) expect(serialise).not.toContain(trace);
         expect(serialise).not.toContain('details_');
         expect(listerDisponibilitesGroupe(d.scopeB, FENETRE)).toEqual([]);
+
+        // Et avec le réglage de compte à « busy » (le défaut), le plafond ramène la ligne forcée à « occupé » : aucune colonne de texte lue.
+        t.sql.prepare("UPDATE users SET personal_agenda_visibility = 'busy' WHERE id = (SELECT user_id FROM personal_events WHERE id = ?)").run(creneauId);
+        expect(vueCarol()[0]).toMatchObject({ id: creneauId, visibility: 'busy', title: null, description: null, location_name: null });
       } finally {
         for (const dec of declencheurs) t.sql.exec(dec.sql);
       }

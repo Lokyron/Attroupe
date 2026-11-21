@@ -1,27 +1,51 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { creerPorteeUtilisateur } from '../../server/db/portee-utilisateur.js';
 import {
+  COUPLES_DISPONIBILITE,
   creerCreneauPersonnel,
-  definirPartagesCreneau,
-  lireMaVisibiliteDefaut,
   listerDisponibilitesGroupe,
   modifierCreneauPersonnel,
-  modifierMaVisibiliteDefaut,
   supprimerCreneauPersonnel,
 } from '../../server/db/queries/agenda-personnel.js';
 import { empreintePersonnelleFlux, evenementsPersonnelsFlux } from '../../server/db/queries/flux.js';
 import { creerScope } from '../../server/db/scope.js';
+import { plafonner, RANG_VISIBILITE, type VisibilitePartage } from '../../server/domain/visibilite-personnelle.js';
 import type { AccesFlux } from '../../server/http/middleware/jeton-flux.js';
-import {
-  changerMaVisibiliteDefaut,
-  creerDansMonAgenda,
-  definirPartagesDansMonAgenda,
-  disponibilitesDuGroupe,
-} from '../../server/services/agenda-personnel.js';
+import { creerDansMonAgenda, disponibilitesDuGroupe } from '../../server/services/agenda-personnel.js';
 import { calculerEtag, fenetreDe, genererFlux } from '../../server/services/flux-ical.js';
 import { baseTemporaire, deuxGroupes, type BaseTemporaire, type DeuxGroupes } from '../fixtures/base.js';
 
 const T0 = '2026-06-01T10:00:00Z';
+const NIVEAUX: readonly VisibilitePartage[] = ['none', 'busy', 'details'];
+
+describe('plafonner : la seule combinaison du réglage de compte et du partage (ADR-0017)', () => {
+  it('est un minimum sur none < busy < details, pour les 9 couples', () => {
+    for (const plafond of NIVEAUX) {
+      for (const demandee of NIVEAUX) {
+        const attendu = RANG_VISIBILITE[plafond] <= RANG_VISIBILITE[demandee] ? plafond : demandee;
+        expect(plafonner(plafond, demandee)).toBe(attendu);
+      }
+    }
+    expect(plafonner('none', 'details')).toBe('none');
+    expect(plafonner('busy', 'details')).toBe('busy');
+    expect(plafonner('details', 'busy')).toBe('busy');
+    expect(plafonner('details', 'details')).toBe('details');
+  });
+
+  it('la table des couples de listerDisponibilitesGroupe est exactement le minimum du treillis', () => {
+    // Un plafond « none » n'a aucun couple (aucune requête), un partage n'est jamais « none » : 2 x 2 couples.
+    expect(COUPLES_DISPONIBILITE).toHaveLength(4);
+    for (const plafond of ['busy', 'details'] as const) {
+      for (const partage of ['busy', 'details'] as const) {
+        const couple = COUPLES_DISPONIBILITE.filter((c) => c.plafond === plafond && c.partage === partage);
+        expect(couple).toEqual([{ plafond, partage, effective: plafonner(plafond, partage) }]);
+      }
+    }
+    // Le texte « détails » n'est exécuté que pour (details, details) ; « occupé » trois fois.
+    expect(COUPLES_DISPONIBILITE.filter((c) => c.effective === 'details')).toHaveLength(1);
+    expect(COUPLES_DISPONIBILITE.filter((c) => c.effective === 'busy')).toHaveLength(3);
+  });
+});
 
 describe('agenda personnel : requêtes et services (lot 8)', () => {
   let t: BaseTemporaire;
@@ -36,99 +60,78 @@ describe('agenda personnel : requêtes et services (lot 8)', () => {
     t.nettoyer();
   });
 
-  function ajouterMembre(groupId: string, userId: string, membershipId: string, visibilite: 'none' | 'busy' | 'details' = 'busy'): void {
+  function ajouterMembre(groupId: string, userId: string, membershipId: string): void {
     t.sql
       .prepare(
-        `INSERT INTO memberships (id, group_id, user_id, role, default_personal_visibility, joined_at, created_at, updated_at)
-         VALUES (?, ?, ?, 'member', ?, ?, ?, ?)`,
+        `INSERT INTO memberships (id, group_id, user_id, role, joined_at, created_at, updated_at)
+         VALUES (?, ?, ?, 'member', ?, ?, ?)`,
       )
-      .run(membershipId, groupId, userId, visibilite, T0, T0, T0);
+      .run(membershipId, groupId, userId, T0, T0, T0);
   }
 
-  function creerGroupePourA(groupId: string, membershipId: string, visibilite: 'none' | 'busy' | 'details'): void {
+  function creerGroupePourA(groupId: string, membershipId: string): void {
     t.sql
       .prepare(`INSERT INTO groups (id, name, slug, created_by_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(groupId, `Groupe ${groupId}`, `groupe-${groupId.toLowerCase()}`, dg.a.userId, T0, T0);
-    ajouterMembre(groupId, dg.a.userId, membershipId, visibilite);
+    ajouterMembre(groupId, dg.a.userId, membershipId);
   }
 
-  describe('partage automatique selon default_personal_visibility et modification de la visibilité par défaut', () => {
-    it('crée automatiquement les partages selon default_personal_visibility (none, busy, details)', () => {
-      creerGroupePourA('g_none', 'm_none', 'none');
-      creerGroupePourA('g_busy', 'm_busy', 'busy');
-      creerGroupePourA('g_details', 'm_details', 'details');
+  /** Pose le réglage de compte directement en base (le test de l'API est dans tests/integration). */
+  function regler(userId: string, valeur: VisibilitePartage): void {
+    t.sql.prepare('UPDATE users SET personal_agenda_visibility = ? WHERE id = ?').run(valeur, userId);
+  }
 
+  function partagesDe(creneauId: string): Array<{ group_id: string; visibility: string }> {
+    return t.sql
+      .prepare('SELECT group_id, visibility FROM personal_event_shares WHERE personal_event_id = ? ORDER BY group_id')
+      .all(creneauId) as Array<{ group_id: string; visibility: string }>;
+  }
+
+  const CRENEAU = {
+    title: 'Dentiste',
+    description: 'Contrôle annuel',
+    location_name: 'Centre ville',
+    all_day: false,
+    starts_at: '2026-07-10T14:00:00Z',
+    ends_at: '2026-07-10T15:00:00Z',
+    time_zone: 'Europe/Paris',
+  } as const;
+
+  describe('partages écrits à la création selon le réglage de compte', () => {
+    it('écrit plafonner(réglage, details) pour chaque appartenance active, et rien si le réglage est none', () => {
+      creerGroupePourA('g_2', 'm_2');
       const porteeA = creerPorteeUtilisateur(t.base, dg.a.userId);
-      const cree = creerCreneauPersonnel(porteeA, {
-        title: 'Dentiste',
-        description: 'Contrôle annuel',
-        location_name: 'Centre ville',
-        all_day: false,
-        starts_at: '2026-07-10T14:00:00Z',
-        ends_at: '2026-07-10T15:00:00Z',
-        time_zone: 'Europe/Paris',
-      });
+      const groupes = [dg.a.groupId, 'g_2'].sort();
 
-      const parGroupe = new Map(cree.partages.map((p) => [p.group_id, p.visibility]));
-      expect(parGroupe.has('g_none')).toBe(false);
-      expect(parGroupe.get('g_busy')).toBe('busy');
-      expect(parGroupe.get('g_details')).toBe('details');
-      // Le groupe A d'origine a la valeur par défaut du schéma ('busy').
-      expect(parGroupe.get(dg.a.groupId)).toBe('busy');
-    });
+      // Réglage par défaut (busy).
+      const parDefaut = creerCreneauPersonnel(porteeA, CRENEAU);
+      expect(partagesDe(parDefaut.id)).toEqual(groupes.map((group_id) => ({ group_id, visibility: 'busy' })));
 
-    it('modifie default_personal_visibility via modifierMaVisibiliteDefaut et l’applique aux prochains créneaux', () => {
-      expect(lireMaVisibiliteDefaut(dg.scopeA)).toBe('busy');
-      expect(modifierMaVisibiliteDefaut(dg.scopeA, 'details')).toBe(true);
-      expect(lireMaVisibiliteDefaut(dg.scopeA)).toBe('details');
+      regler(dg.a.userId, 'details');
+      const detaille = creerCreneauPersonnel(porteeA, CRENEAU);
+      expect(partagesDe(detaille.id)).toEqual(groupes.map((group_id) => ({ group_id, visibility: 'details' })));
 
-      const porteeA = creerPorteeUtilisateur(t.base, dg.a.userId);
-      const cree1 = creerDansMonAgenda(porteeA, {
-        title: 'Sport',
-        description: null,
-        location_name: null,
-        all_day: false,
-        starts_at: '2026-07-11T18:00:00Z',
-        ends_at: '2026-07-11T19:00:00Z',
-        time_zone: 'Europe/Paris',
-      });
-      expect(cree1.partages).toEqual([
-        { group_id: dg.a.groupId, group_name: 'Groupe A', visibility: 'details' },
-      ]);
-
-      expect(changerMaVisibiliteDefaut(dg.scopeA, 'none')).toEqual({ default_personal_visibility: 'none' });
-      expect(lireMaVisibiliteDefaut(dg.scopeA)).toBe('none');
-
-      const cree2 = creerDansMonAgenda(porteeA, {
-        title: 'Privé',
-        description: null,
-        location_name: null,
-        all_day: false,
-        starts_at: '2026-07-12T18:00:00Z',
-        ends_at: '2026-07-12T19:00:00Z',
-        time_zone: 'Europe/Paris',
-      });
-      expect(cree2.partages).toEqual([]);
+      regler(dg.a.userId, 'none');
+      const cache = creerDansMonAgenda(porteeA, CRENEAU);
+      expect(partagesDe(cache.id)).toEqual([]);
     });
   });
 
   describe('confidentialité busy vs details et membres retirés (architecture §10)', () => {
-    it('ne fuite jamais title, description ni location_name pour un créneau partagé en busy', () => {
+    it('ne fuite jamais title, description ni location_name pour un créneau lu en busy', () => {
       // B devient membre du groupe A pour lire les disponibilités de A.
-      ajouterMembre(dg.a.groupId, dg.b.userId, 'mb_dans_a', 'busy');
+      ajouterMembre(dg.a.groupId, dg.b.userId, 'mb_dans_a');
       const scopeBdansA = creerScope(t.base, dg.b.userId, dg.a.groupId);
 
       const porteeA = creerPorteeUtilisateur(t.base, dg.a.userId);
       const creneau = creerCreneauPersonnel(porteeA, {
+        ...CRENEAU,
         title: 'Consultation médicale secrète',
         description: 'Détail confidentiel',
         location_name: 'Cabinet',
-        all_day: false,
         starts_at: '2026-08-01T09:00:00Z',
         ends_at: '2026-08-01T10:00:00Z',
-        time_zone: 'Europe/Paris',
       });
-      expect(definirPartagesCreneau(porteeA, creneau.id, [{ group_id: dg.a.groupId, visibility: 'busy' }])).toBe('ok');
 
       const disposRequete = listerDisponibilitesGroupe(scopeBdansA, { du: '2026-08-01', au: '2026-08-02' });
       expect(disposRequete).toHaveLength(1);
@@ -147,21 +150,20 @@ describe('agenda personnel : requêtes et services (lot 8)', () => {
       expect(serialise).not.toContain('Cabinet');
     });
 
-    it('renvoie title, description et location_name pour un créneau partagé en details', () => {
-      ajouterMembre(dg.a.groupId, dg.b.userId, 'mb_dans_a', 'busy');
+    it('renvoie title, description et location_name quand le réglage ET le partage valent details', () => {
+      ajouterMembre(dg.a.groupId, dg.b.userId, 'mb_dans_a');
       const scopeBdansA = creerScope(t.base, dg.b.userId, dg.a.groupId);
+      regler(dg.a.userId, 'details');
 
       const porteeA = creerPorteeUtilisateur(t.base, dg.a.userId);
       const creneau = creerCreneauPersonnel(porteeA, {
+        ...CRENEAU,
         title: 'Déjeuner ouvert',
         description: 'Qui veut se joindre ?',
         location_name: 'Brasserie du Parc',
-        all_day: false,
         starts_at: '2026-08-02T12:00:00Z',
         ends_at: '2026-08-02T13:30:00Z',
-        time_zone: 'Europe/Paris',
       });
-      expect(definirPartagesCreneau(porteeA, creneau.id, [{ group_id: dg.a.groupId, visibility: 'details' }])).toBe('ok');
 
       const dispos = listerDisponibilitesGroupe(scopeBdansA, { du: '2026-08-02', au: '2026-08-03' });
       expect(dispos).toHaveLength(1);
@@ -174,17 +176,40 @@ describe('agenda personnel : requêtes et services (lot 8)', () => {
       });
     });
 
+    it('couvre les 9 couples (réglage, partage) : le résultat suit plafonner, jamais une ligne seule', () => {
+      ajouterMembre(dg.a.groupId, dg.b.userId, 'mb_dans_a');
+      const scopeBdansA = creerScope(t.base, dg.b.userId, dg.a.groupId);
+      const porteeA = creerPorteeUtilisateur(t.base, dg.a.userId);
+      const creneau = creerCreneauPersonnel(porteeA, { ...CRENEAU, starts_at: '2026-08-06T10:00:00Z', ends_at: '2026-08-06T11:00:00Z' });
+
+      for (const reglage of NIVEAUX) {
+        for (const partage of ['busy', 'details'] as const) {
+          regler(dg.a.userId, reglage);
+          // La ligne est écrite directement : ni plafond ni réalignement n'interviennent à l'écriture.
+          t.sql.prepare('UPDATE personal_event_shares SET visibility = ? WHERE personal_event_id = ? AND group_id = ?').run(partage, creneau.id, dg.a.groupId);
+          const effective = plafonner(reglage, partage);
+          const lu = listerDisponibilitesGroupe(scopeBdansA, { du: '2026-08-06', au: '2026-08-07' });
+          if (effective === 'none') {
+            expect(lu).toEqual([]);
+          } else {
+            expect(lu).toHaveLength(1);
+            expect(lu[0]?.visibility).toBe(effective);
+            expect(lu[0]?.title).toBe(effective === 'details' ? CRENEAU.title : null);
+          }
+        }
+      }
+    });
+
     it('exclut les créneaux d’un membre retiré (status = removed) de listerDisponibilitesGroupe', () => {
-      ajouterMembre(dg.a.groupId, dg.b.userId, 'mb_dans_a', 'details');
+      ajouterMembre(dg.a.groupId, dg.b.userId, 'mb_dans_a');
       const porteeB = creerPorteeUtilisateur(t.base, dg.b.userId);
       const creneauB = creerCreneauPersonnel(porteeB, {
+        ...CRENEAU,
         title: 'Créneau de B',
         description: null,
         location_name: null,
-        all_day: false,
         starts_at: '2026-08-03T10:00:00Z',
         ends_at: '2026-08-03T11:00:00Z',
-        time_zone: 'Europe/Paris',
       });
 
       expect(listerDisponibilitesGroupe(dg.scopeA, { du: '2026-08-03', au: '2026-08-04' }).map((d) => d.id)).toContain(
@@ -195,43 +220,6 @@ describe('agenda personnel : requêtes et services (lot 8)', () => {
       t.sql.prepare(`UPDATE memberships SET status = 'removed', ended_at = ? WHERE id = ?`).run(T0, 'mb_dans_a');
 
       expect(listerDisponibilitesGroupe(dg.scopeA, { du: '2026-08-03', au: '2026-08-04' })).toEqual([]);
-    });
-  });
-
-  describe('definirPartages : rejet d’un groupe étranger et atomicité', () => {
-    it('refuse un group_id étranger (groupe_introuvable) sans rien modifier', () => {
-      const porteeA = creerPorteeUtilisateur(t.base, dg.a.userId);
-      const creneau = creerCreneauPersonnel(porteeA, {
-        title: 'Rendez-vous',
-        description: null,
-        location_name: null,
-        all_day: false,
-        starts_at: '2026-08-05T10:00:00Z',
-        ends_at: '2026-08-05T11:00:00Z',
-        time_zone: 'Europe/Paris',
-      });
-      // Initialement partagé en 'busy' dans le groupe A.
-      expect(creneau.partages).toEqual([
-        { group_id: dg.a.groupId, group_name: 'Groupe A', visibility: 'busy' },
-      ]);
-
-      // Tentative de mise à jour contenant à la fois le groupe A ('details') et le groupe B étranger.
-      const res = definirPartagesCreneau(porteeA, creneau.id, [
-        { group_id: dg.a.groupId, visibility: 'details' },
-        { group_id: dg.b.groupId, visibility: 'busy' },
-      ]);
-      expect(res).toBe('groupe_introuvable');
-
-      // Aucune écriture partielle : le partage sur le groupe A est resté 'busy'.
-      const partageA = t.sql
-        .prepare('SELECT visibility FROM personal_event_shares WHERE personal_event_id = ? AND group_id = ?')
-        .pluck()
-        .get(creneau.id, dg.a.groupId);
-      expect(partageA).toBe('busy');
-
-      expect(() =>
-        definirPartagesDansMonAgenda(porteeA, creneau.id, [{ group_id: dg.b.groupId, visibility: 'busy' }]),
-      ).toThrowError(/groupe\.introuvable/);
     });
   });
 
@@ -274,6 +262,7 @@ describe('agenda personnel : requêtes et services (lot 8)', () => {
       expect(fluxSans).not.toContain(`UID:perso-${creneau.id}@attroupe`);
       expect(fluxSans).not.toContain('Séance kiné');
 
+      // Le flux lit l'agenda DU PROPRIÉTAIRE : le réglage de compte (« busy » par défaut) ne le plafonne pas (ADR-0017, décision 8).
       const fluxAvec = genererFlux(fabriquerAcces(1), 'https://attroupe.test');
       expect(fluxAvec).toContain(`UID:perso-${creneau.id}@attroupe`);
       expect(fluxAvec).toContain('SUMMARY:[Personnel] Séance kiné');

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { creerPorteeUtilisateur, ErreurCompte, type PorteeUtilisateur } from '../../server/db/portee-utilisateur.js';
+import { listerDisponibilitesGroupe } from '../../server/db/queries/agenda-personnel.js';
 import { creerScope, ErreurScope } from '../../server/db/scope.js';
 import { baseTemporaire, deuxGroupes, type BaseTemporaire, type DeuxGroupes } from '../fixtures/base.js';
 
@@ -91,29 +92,42 @@ describe('PorteeUtilisateur : un compte ne lit ni n’écrit les lignes d’un a
       it('le groupe voit l’intervalle, jamais le titre ; seuls les membres actifs comptent', () => {
         const id = alice.inserer('personal_events', { ...creneau, description: 'Cabinet du Dr X', location_name: 'Rue secrète' });
         d.scopeA.inserer('personal_event_shares', { personal_event_id: id, visibility: 'busy' });
-        const occupes = d.scopeA.creneauxOccupes();
+        // Le plafond de compte vaut « busy » par défaut (migration 0009) : la projection est celle de `listerDisponibilitesGroupe`.
+        const occupes = listerDisponibilitesGroupe(d.scopeA, { du: '2026-12-01', au: '2026-12-02' });
         expect(occupes).toEqual([
-          { membership_id: d.a.membershipId, all_day: 0, starts_at: creneau.starts_at, ends_at: creneau.ends_at, time_zone: 'Europe/Paris' },
+          {
+            id,
+            membership_id: d.a.membershipId,
+            display_name: expect.any(String),
+            all_day: 0,
+            starts_at: creneau.starts_at,
+            ends_at: creneau.ends_at,
+            time_zone: 'Europe/Paris',
+            visibility: 'busy',
+            title: null,
+            description: null,
+            location_name: null,
+          },
         ]);
         const brut = JSON.stringify(occupes);
-        for (const secret of ['médecin', 'Cabinet', 'secrète', 'title', 'description', 'location']) expect(brut).not.toContain(secret);
+        for (const secret of ['médecin', 'Cabinet', 'secrète']) expect(brut).not.toContain(secret);
         // Le groupe B ne voit rien du groupe A, et A hors de la plage ne voit rien.
-        expect(d.scopeB.creneauxOccupes()).toEqual([]);
-        expect(d.scopeA.creneauxOccupes({ debut: '2026-12-02T00:00:00Z', fin: '2026-12-03T00:00:00Z' })).toEqual([]);
-        expect(d.scopeA.creneauxOccupes({ debut: '2026-12-01T09:30:00Z', fin: '2026-12-01T09:45:00Z' }).length).toBe(1);
+        expect(listerDisponibilitesGroupe(d.scopeB, { du: '2026-12-01', au: '2026-12-02' })).toEqual([]);
+        expect(listerDisponibilitesGroupe(d.scopeA, { du: '2026-12-02', au: '2026-12-03' })).toEqual([]);
+        expect(listerDisponibilitesGroupe(d.scopeA, { du: '2026-12-01T09:30:00Z', au: '2026-12-01T09:45:00Z' }).length).toBe(1);
         // Créneau supprimé ou membre parti : disparaît de la projection.
         t.sql.prepare("UPDATE memberships SET status = 'left', ended_at = '2026-02-01T00:00:00Z' WHERE id = ?").run(d.a.membershipId);
-        expect(d.scopeA.creneauxOccupes()).toEqual([]);
+        expect(listerDisponibilitesGroupe(d.scopeA, { du: '2026-12-01', au: '2026-12-02' })).toEqual([]);
       });
 
       it('on ne partage que son propre créneau, et seulement vers son propre groupe', () => {
         const idB = bob.inserer('personal_events', creneau);
         expect(() => d.scopeA.inserer('personal_event_shares', { personal_event_id: idB, visibility: 'busy' })).toThrow(/votre agenda/);
-        expect(d.scopeA.creneauxOccupes()).toEqual([]);
+        expect(listerDisponibilitesGroupe(d.scopeA, { du: '2026-12-01', au: '2026-12-02' })).toEqual([]);
         // Le scope de B ne peut pas pousser le créneau d'Alice dans le groupe B non plus.
         const idA = alice.inserer('personal_events', creneau);
         expect(() => d.scopeB.inserer('personal_event_shares', { personal_event_id: idA, visibility: 'busy' })).toThrow(ErreurScope);
-        expect(d.scopeB.creneauxOccupes()).toEqual([]);
+        expect(listerDisponibilitesGroupe(d.scopeB, { du: '2026-12-01', au: '2026-12-02' })).toEqual([]);
       });
 
       it('un partage n’appartient qu’à son membre : un autre membre du groupe ne le modifie ni ne le retire', () => {

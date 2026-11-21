@@ -1,7 +1,12 @@
 import { corpsPreference, estGenreNotification, type ChangementPreference, type EmailMode, type GenreNotification } from '../lib/preferences-notifications';
-import { appeler, champ, liste, nombre, texte, texteOuNul } from './client';
+import type { StatutInvitation } from '../lib/notifications-vue';
+import { appeler, booleen, champ, liste, nombre, texte, texteOuNul } from './client';
 
 export type { EmailMode, GenreNotification };
+
+export type { StatutInvitation };
+
+export type FiltreNotifications = 'non_lues' | 'toutes';
 
 export interface Notification {
   id: string;
@@ -13,11 +18,18 @@ export interface Notification {
   payload: Record<string, unknown>;
   created_at: string;
   read_at: string | null;
+  /** État de l'invitation visée par une notification `invitation_received` ; `null` pour tout autre genre. */
+  invitation_statut: StatutInvitation | null;
 }
 
 export interface ListeNotifications {
   notifications: Notification[];
+  /** Non lues du compte, tous filtres confondus. */
   non_lues: number;
+  /** Il reste des notifications au-delà de la page demandée. */
+  a_suite: boolean;
+  /** Curseur à passer en `avant` pour la page suivante ; `null` s'il n'y en a pas. */
+  curseur_suivant: string | null;
 }
 
 export interface PreferenceNotification {
@@ -28,6 +40,14 @@ export interface PreferenceNotification {
   /** Genres coupés par cette ligne (aucune notification de ce genre n'est créée) ; `null` : hérités de la ligne globale (jamais `null` pour `'*'`). */
   muted_kinds: GenreNotification[] | null;
   updated_at: string;
+}
+
+function statutInvitation(valeur: unknown): StatutInvitation | null {
+  if (valeur === null) return null;
+  if (valeur !== 'pending' && valeur !== 'accepted' && valeur !== 'declined' && valeur !== 'revoked' && valeur !== 'expired') {
+    throw new Error("État d'invitation inconnu.");
+  }
+  return valeur;
 }
 
 function notification(n: unknown): Notification {
@@ -42,6 +62,7 @@ function notification(n: unknown): Notification {
     payload: typeof payload === 'object' && payload !== null && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {},
     created_at: texte(champ(n, 'created_at')),
     read_at: texteOuNul(champ(n, 'read_at')),
+    invitation_statut: statutInvitation(champ(n, 'invitation_statut')),
   };
 }
 
@@ -65,11 +86,15 @@ function preference(p: unknown): PreferenceNotification {
   };
 }
 
-export async function listerNotifications(): Promise<ListeNotifications> {
-  const r = await appeler('GET', '/api/moi/notifications');
+/** Une page de `limite` notifications ; `avant` (le `curseur_suivant` de la page précédente) demande la suivante. */
+export async function listerNotifications(filtre: FiltreNotifications = 'toutes', limite = 50, avant?: string): Promise<ListeNotifications> {
+  const curseur = avant === undefined ? '' : `&avant=${encodeURIComponent(avant)}`;
+  const r = await appeler('GET', `/api/moi/notifications?filtre=${filtre}&limite=${String(limite)}${curseur}`);
   return {
     notifications: liste(champ(r, 'notifications')).map(notification),
     non_lues: nombre(champ(r, 'non_lues')),
+    a_suite: booleen(champ(r, 'a_suite')),
+    curseur_suivant: texteOuNul(champ(r, 'curseur_suivant')),
   };
 }
 

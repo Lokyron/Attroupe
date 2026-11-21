@@ -48,7 +48,7 @@ describe('migrations', () => {
     const sql = brut(base);
     try {
       const avant = sql.prepare('SELECT version, applied_at, checksum FROM schema_migrations').all();
-      expect(avant).toHaveLength(8);
+      expect(avant).toHaveLength(9);
       const second = migrer(base, chemin, { dossierMigrations: migrations });
       expect(second).toEqual({ appliquees: [], sauvegarde: undefined });
       expect(sql.prepare('SELECT version, applied_at, checksum FROM schema_migrations').all()).toEqual(avant);
@@ -81,7 +81,7 @@ describe('migrations', () => {
   it('une migration jouée dont le fichier a disparu fait échouer le démarrage', () => {
     fermer(ouvrirEtMigrer(chemin, { dossierMigrations: migrations }));
     rmSync(join(migrations, '0001_socle.sql'));
-    writeFileSync(join(migrations, '0009_autre.sql'), 'CREATE TABLE autre (id TEXT NOT NULL PRIMARY KEY) STRICT;');
+    writeFileSync(join(migrations, '0010_autre.sql'), 'CREATE TABLE autre (id TEXT NOT NULL PRIMARY KEY) STRICT;');
     expect(() => ouvrirEtMigrer(chemin, { dossierMigrations: migrations })).toThrow(/fichier a disparu/);
   });
 
@@ -92,20 +92,20 @@ describe('migrations', () => {
 
   it('une nouvelle migration est jouée dans l’ordre, après une sauvegarde cohérente de l’état précédent', () => {
     fermer(ouvrirEtMigrer(chemin, { dossierMigrations: migrations }));
-    writeFileSync(join(migrations, '0009_ajout.sql'), 'CREATE TABLE ajout (id TEXT NOT NULL PRIMARY KEY) STRICT;');
+    writeFileSync(join(migrations, '0010_ajout.sql'), 'CREATE TABLE ajout (id TEXT NOT NULL PRIMARY KEY) STRICT;');
 
     const base = ouvrirEtMigrer(chemin, { dossierMigrations: migrations });
     const sql = brut(base);
     try {
       const versions = sql.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all();
-      expect(versions).toEqual(['0001_socle', '0002_verification_email', '0003_profil_et_push', '0004_agenda_externe', '0005_agenda_externe_details', '0006_notifications_reglement', '0007_listes_type', '0008_preferences_notifications_heritage', '0009_ajout']);
+      expect(versions).toEqual(['0001_socle', '0002_verification_email', '0003_profil_et_push', '0004_agenda_externe', '0005_agenda_externe_details', '0006_notifications_reglement', '0007_listes_type', '0008_preferences_notifications_heritage', '0009_visibilite_agenda_personnel', '0010_ajout']);
       expect(listerTables(sql)).toContain('ajout');
 
       const sauvegardes = readdirSync(join(dossier, 'sauvegardes'));
       expect(sauvegardes).toHaveLength(1);
-      expect(sauvegardes[0]).toMatch(/^avant-0009_ajout-.*-\d+-[0-9a-f]{6}\.sqlite$/);
+      expect(sauvegardes[0]).toMatch(/^avant-0010_ajout-.*-\d+-[0-9a-f]{6}\.sqlite$/);
 
-      // La sauvegarde est l'état d'AVANT : complète (37 tables) et sans la table de la migration 0009.
+      // La sauvegarde est l'état d'AVANT : complète (37 tables) et sans la table de la migration 0010.
       sql.prepare('ATTACH DATABASE ? AS sauvegarde').run(join(dossier, 'sauvegardes', sauvegardes[0] ?? ''));
       const tablesSauvegardees = sql
         .prepare("SELECT name FROM sauvegarde.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
@@ -113,7 +113,7 @@ describe('migrations', () => {
         .all();
       expect(tablesSauvegardees).toHaveLength(37);
       expect(tablesSauvegardees).not.toContain('ajout');
-      expect(sql.prepare('SELECT version FROM sauvegarde.schema_migrations').pluck().all()).toEqual(['0001_socle', '0002_verification_email', '0003_profil_et_push', '0004_agenda_externe', '0005_agenda_externe_details', '0006_notifications_reglement', '0007_listes_type', '0008_preferences_notifications_heritage']);
+      expect(sql.prepare('SELECT version FROM sauvegarde.schema_migrations').pluck().all()).toEqual(['0001_socle', '0002_verification_email', '0003_profil_et_push', '0004_agenda_externe', '0005_agenda_externe_details', '0006_notifications_reglement', '0007_listes_type', '0008_preferences_notifications_heritage', '0009_visibilite_agenda_personnel']);
     } finally {
       fermer(base);
     }
@@ -122,11 +122,11 @@ describe('migrations', () => {
   it('une migration qui échoue est annulée en entier', () => {
     fermer(ouvrirEtMigrer(chemin, { dossierMigrations: migrations }));
     writeFileSync(
-      join(migrations, '0009_cassee.sql'),
+      join(migrations, '0010_cassee.sql'),
       'CREATE TABLE moitie (id TEXT NOT NULL PRIMARY KEY) STRICT;\nCREATE TABLE moitie (id TEXT) STRICT;',
     );
     expect(() => ouvrirEtMigrer(chemin, { dossierMigrations: migrations })).toThrow();
-    writeFileSync(join(migrations, '0009_cassee.sql'), 'SELECT 1;');
+    writeFileSync(join(migrations, '0010_cassee.sql'), 'SELECT 1;');
     const base = ouvrirEtMigrer(chemin, { dossierMigrations: migrations });
     const sql = brut(base);
     try {

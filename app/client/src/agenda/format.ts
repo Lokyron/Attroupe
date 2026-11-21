@@ -19,6 +19,11 @@ export function libelleJourCourt(jour: string): string {
   return libelleJour(jour, { weekday: 'short' });
 }
 
+/** Heure pleine (0 à 23) pour la colonne des heures de la grille de la semaine (« 08:00 »). */
+export function libelleHeure(h: number): string {
+  return new Intl.DateTimeFormat(LOCALE, { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }).format(new Date(Date.UTC(2000, 0, 1, h)));
+}
+
 /** Heure d'un instant UTC, lue dans le fuseau de l'événement. */
 function heure(instant: string, timeZone: string): string {
   return new Intl.DateTimeFormat(LOCALE, { hour: '2-digit', minute: '2-digit', timeZone }).format(new Date(instant));

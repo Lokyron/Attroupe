@@ -440,6 +440,8 @@ const ligneProfil = z.object({
   time_zone: z.string(),
   created_at: z.string(),
   avatar_updated_at: z.string().nullable(),
+  /** Ce que les membres des groupes voient de l'agenda personnel (ADR-0017) : un plafond, jamais une promesse sur le flux iCal. */
+  personal_agenda_visibility: z.enum(['none', 'busy', 'details']),
 });
 
 export type Profil = Omit<z.infer<typeof ligneProfil>, 'avatar_updated_at'> & {
@@ -450,7 +452,7 @@ export type Profil = Omit<z.infer<typeof ligneProfil>, 'avatar_updated_at'> & {
 export function lireProfil(portee: PorteeUtilisateur): Profil {
   const brut = preparer(
     baseDe(portee),
-    'SELECT id, email, email_verified_at, username, display_name, birthday, locale, time_zone, created_at, avatar_updated_at FROM users WHERE id = ?',
+    'SELECT id, email, email_verified_at, username, display_name, birthday, locale, time_zone, created_at, avatar_updated_at, personal_agenda_visibility FROM users WHERE id = ?',
   ).get(portee.userId);
   const { avatar_updated_at, ...reste } = ligneProfil.parse(brut);
   return {
@@ -463,6 +465,7 @@ export interface ModificationProfil {
   readonly display_name?: string | undefined;
   readonly time_zone?: string | undefined;
   readonly birthday?: string | null | undefined;
+  readonly personal_agenda_visibility?: 'none' | 'busy' | 'details' | undefined;
 }
 
 /** Modifie les seules colonnes de profil autorisées, sur le compte de la portée. */
@@ -481,6 +484,10 @@ export function modifierProfil(portee: PorteeUtilisateur, champs: ModificationPr
   if (champs.birthday !== undefined) {
     sets.push('birthday = ?');
     valeurs.push(champs.birthday);
+  }
+  if (champs.personal_agenda_visibility !== undefined) {
+    sets.push('personal_agenda_visibility = ?');
+    valeurs.push(champs.personal_agenda_visibility);
   }
   if (sets.length === 0) return;
   // Les noms de colonnes viennent du code ci-dessus, jamais de la requête ; les valeurs sont liées.

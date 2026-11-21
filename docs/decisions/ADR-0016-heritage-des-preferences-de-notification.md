@@ -64,4 +64,21 @@ ligne restait indépendante. L'utilisateur croyait être revenu à l'héritage ;
   si le groupe n'en avait surchargé qu'un. Un retour champ par champ demanderait soit un `PUT`
   acceptant `null`, soit deux routes. Dette assumée, signalée ici plutôt que découverte plus tard.
 - Les genres que le serveur accepte mais n'émet pas encore (dont `invitation_received`) sont masqués
-  dans l'interface : une case qui ne coupe rien est pire qu'une case absente.
+  dans l'interface : une case qui ne coupe rien est pire qu'une case absente. *(Ce passage est révisé
+  le 2026-11-21, voir plus bas : `invitation_received` n'est plus dans ce cas.)*
+
+## Révision du 2026-11-21 — `invitation_received` est émis, donc réglable
+
+**Ce qui change** : le passage « genres émis » des Conséquences est caduc pour `invitation_received`.
+Le serveur émet désormais ce genre à l'envoi d'une invitation à un compte existant
+(`app/server/db/queries/notifications.ts`, notification sans `group_id`, sans e-mail en file). Le genre
+est rangé dans le thème « groupe » de `app/client/src/lib/preferences-notifications.ts`, et la liste
+`GENRES_NON_EMIS` y est désormais vide : le réglage le propose.
+
+**Pourquoi** : la règle d'origine (ne pas proposer un genre qui ne coupe rien) reste la bonne. Dès que
+le genre est émis, la case coupe réellement quelque chose.
+
+**Portée réelle** : le destinataire d'une invitation n'est pas encore membre du groupe invitant. En
+règle générale, il n'a donc pas de ligne de préférence pour ce groupe, et la préférence s'applique
+**par la ligne globale** (`'*'`). Le réglage par groupe ne joue qu'au cas où une ligne existerait déjà
+pour ce groupe. Le mécanisme (résolution champ par champ, décisions 1 à 6) ne change pas.

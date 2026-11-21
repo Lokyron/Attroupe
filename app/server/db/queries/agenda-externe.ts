@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { chiffrerCleImmich, dechiffrerCleImmich } from '../../domain/immich.js';
+import { plafonner } from '../../domain/visibilite-personnelle.js';
 import { baseDe, type PorteeUtilisateur } from '../portee-utilisateur.js';
 import { creerScope } from '../scope.js';
 import { preparer } from '../sql.js';
+import { lirePlafondAgenda } from './agenda-personnel.js';
 import { mesGroupes } from './transverse.js';
 
 // Synchronisation d'agenda ENTRANTE (migration 0004) : sources d'agenda externe d'un compte et créneaux importés.
@@ -175,12 +177,15 @@ export interface DetailsImportesLus {
  * Textes déchiffrés des créneaux importés de CE compte, par identifiant. RÉSERVÉ à la lecture par le propriétaire : aucune requête de
  * groupe ne doit appeler ceci. Ne lève jamais sur un blob illisible : il est compté dans `illisibles` et son créneau reste sans texte.
  */
-export function lireDetailsImportes(portee: PorteeUtilisateur, cleChiffrement: string): DetailsImportesLus {
-  const lignes = preparer(
-    baseDe(portee),
-    'SELECT id, details_cipher, details_nonce FROM personal_events WHERE user_id = ? AND deleted_at IS NULL AND calendar_source_id IS NOT NULL AND details_cipher IS NOT NULL',
+export function lireDetailsImportes(portee: PorteeUtilisateur, cleChiffrement: string, creneauId?: string): DetailsImportesLus {
+  const base =
+    'SELECT id, details_cipher, details_nonce FROM personal_events WHERE user_id = ? AND deleted_at IS NULL AND calendar_source_id IS NOT NULL AND details_cipher IS NOT NULL';
+  // `creneauId` restreint la lecture (et le déchiffrement) à UN créneau de ce compte ; le filtre `user_id` reste posé dans les deux cas.
+  const lignes = (
+    creneauId === undefined
+      ? preparer(baseDe(portee), base).all(portee.userId)
+      : preparer(baseDe(portee), `${base} AND id = ?`).all(portee.userId, creneauId)
   )
-    .all(portee.userId)
     .map((ligne) => ligneDetailsChiffres.parse(ligne));
   const details = new Map<string, DetailsImporte>();
   let illisibles = 0;
@@ -199,14 +204,12 @@ export function lireDetailsImportes(portee: PorteeUtilisateur, cleChiffrement: s
   return { details, illisibles };
 }
 
-const ligneVisibiliteMembre = z.object({ default_personal_visibility: z.enum(['none', 'busy', 'details']) });
-
 /**
  * Remplace en UNE transaction le lot de créneaux importés d'une source : suppression réelle de l'ancien lot, insertion du nouveau,
  * puis partages. Renvoie le nombre de plages écrites, ou `undefined` si la source n'est pas à ce compte (rien n'est alors écrit).
  *
- * Les partages suivent `default_personal_visibility` de chaque groupe, SAUF que `details` est ramené à `busy` : un créneau importé
- * n'a aucun détail à montrer, et le déclencheur de la base ferait échouer toute la synchronisation. Une visibilité `none` est respectée.
+ * Les partages valent `plafonner(réglage de compte, 'busy')` (ADR-0017) : un créneau importé n'a aucun détail à montrer, et le
+ * déclencheur de la base ferait échouer toute la synchronisation. Un réglage `none` n'écrit aucun partage.
  */
 export function remplacerCreneauxImportes(
   portee: PorteeUtilisateur,
@@ -217,13 +220,8 @@ export function remplacerCreneauxImportes(
   const base = baseDe(portee);
   return portee.transaction(() => {
     if (lireSource(portee, sourceId) === undefined) return undefined;
-    const scopes = mesGroupes(portee).flatMap((g) => {
-      const scope = creerScope(base, portee.userId, g.group_id);
-      const membre = scope.un<unknown>('memberships', scope.membershipId);
-      if (membre === undefined) return [];
-      const { default_personal_visibility: visibilite } = ligneVisibiliteMembre.parse(membre);
-      return visibilite === 'none' ? [] : [scope];
-    });
+    const visibilite = plafonner(lirePlafondAgenda(portee), 'busy');
+    const scopes = visibilite === 'none' ? [] : mesGroupes(portee).map((g) => creerScope(base, portee.userId, g.group_id));
     preparer(base, 'DELETE FROM personal_events WHERE user_id = ? AND calendar_source_id = ?').run(portee.userId, sourceId);
     for (const plage of plages) {
       const details = detailsDe(plage);
@@ -240,8 +238,10 @@ export function remplacerCreneauxImportes(
         details_cipher: chiffres?.cipher ?? null,
         details_nonce: chiffres?.nonce ?? null,
       });
-      // Ramène-au-sûr explicite : jamais `details`, quel que soit le réglage du membre.
-      for (const scope of scopes) scope.upsert('personal_event_shares', { personal_event_id: creneauId, visibility: 'busy' });
+      // Jamais `details` : `plafonner(…, 'busy')` ramène le réglage de compte au plancher des créneaux importés.
+      if (visibilite !== 'none') {
+        for (const scope of scopes) scope.upsert('personal_event_shares', { personal_event_id: creneauId, visibility: visibilite });
+      }
     }
     return plages.length;
   });

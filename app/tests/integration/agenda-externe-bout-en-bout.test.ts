@@ -53,7 +53,7 @@ describe('agenda externe de bout en bout : mes détails pour moi, « occupé » 
     d = decor({ agendaExterne: faux.dependances, journal: JOURNAL_SILENCIEUX }, { ATTROUPE_ENCRYPTION_KEY: cle });
     alice = await personne(d, 'alice_bout');
     bob = await personne(d, 'bob_bout');
-    // `default_personal_visibility` vaut « busy » à la création : l'import partage donc au groupe sans réglage.
+    // Le réglage de compte `personal_agenda_visibility` vaut « busy » à la création : l'import partage donc au groupe sans réglage.
     ({ groupId } = await groupe(d, 'Les amis', [
       { personne: alice, role: 'admin' },
       { personne: bob, role: 'member' },
@@ -79,6 +79,20 @@ describe('agenda externe de bout en bout : mes détails pour moi, « occupé » 
     expect(importe?.['title']).toBe(TITRE);
     expect(importe?.['description']).toBe(DESCRIPTION);
     expect(importe?.['location_name']).toBe(LIEU);
+  });
+
+  it('Alice lit son rendez-vous importé par son identifiant ; Bob reçoit 404', async () => {
+    const liste = await alice.client.get('/api/moi/agenda?du=2026-11-01&au=2026-12-31');
+    const importe = (liste.corps['creneaux'] as Array<Record<string, unknown>>).find((c) => c['calendar_source_id'] !== null);
+    const id = importe?.['id'] as string;
+    const r = await alice.client.get(`/api/moi/agenda/${id}`);
+    expect(r.statut).toBe(200);
+    expect(r.corps['title']).toBe(TITRE);
+    expect(r.corps['description']).toBe(DESCRIPTION);
+    expect(r.corps['location_name']).toBe(LIEU);
+    const intrus = await bob.client.get(`/api/moi/agenda/${id}`);
+    expect(intrus.statut).toBe(404);
+    expect(JSON.stringify(intrus.corps)).not.toContain(TITRE);
   });
 
   it('les colonnes en clair restent VIDES en base : il n’y a rien à sélectionner par erreur', () => {

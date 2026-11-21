@@ -4,7 +4,7 @@ import { creerScope, ErreurAppartenance } from '../scope.js';
 import { calculerSoldesParDevise } from '../../domain/soldes.js';
 import { construireUrlMediaSignee } from '../../domain/immich.js';
 import { JOUR_MS, plus, versInstant } from '../../domain/instant.js';
-import { listerCreneauxPersonnels, type CreneauPersonnelAvecPartages } from './agenda-personnel.js';
+import { listerCreneauxPersonnels, type CreneauPersonnel } from './agenda-personnel.js';
 import { listerDepenses, listerRemboursements, type DepenseAvecParts } from './depenses.js';
 import { listerEvenements, maPresence, type Evenement, type Presence } from './evenements.js';
 import { lireConfigImmich, listerAlbums, listerAssetsAlbum } from './immich.js';
@@ -65,7 +65,7 @@ export interface PhotoTableauDeBord {
 export interface TableauDeBord {
   readonly groupes: GroupeTableauDeBord[];
   readonly evenements: EvenementTableauDeBord[];
-  readonly evenements_perso: CreneauPersonnelAvecPartages[];
+  readonly evenements_perso: CreneauPersonnel[];
   readonly depenses: DepenseTableauDeBord[];
   readonly soldes: SoldeTableauDeBord[];
   readonly photos: PhotoTableauDeBord[];

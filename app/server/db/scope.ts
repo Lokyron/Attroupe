@@ -7,7 +7,6 @@ import {
   type DescriptionTable,
   type OptionsLecture,
   type SansPromesse,
-  type ValeurSql,
   type Valeurs,
 } from './moteur.js';
 import { preparer } from './sql.js';
@@ -78,15 +77,6 @@ export type TableSuppressionReelle = { [K in TableMetier]: Tables[K]['suppressio
 /** Description des tables, exposée en lecture seule pour le test de cohérence avec le schéma. */
 export const DESCRIPTION_TABLES: Readonly<Record<TableMetier, DescriptionTable>> = TABLES;
 
-/** Créneau d'agenda personnel partagé, vu du groupe : un intervalle, JAMAIS un titre ni un lieu. */
-export interface CreneauOccupe {
-  readonly membership_id: string;
-  readonly all_day: 0 | 1;
-  readonly starts_at: string;
-  readonly ends_at: string | null;
-  readonly time_zone: string;
-}
-
 export interface GroupScope {
   readonly [MARQUE]: true;
   readonly groupId: string;
@@ -116,11 +106,6 @@ export interface GroupScope {
   readonly supprimer: (table: TableSuppressionReelle, cle: Valeurs) => boolean;
   /** Groupe des écritures en une transaction, sans sortir du scope. Le rappel est SYNCHRONE : s'il rend une `Promise`, cela ne compile pas (et lève `ErreurTransactionAsynchrone` à l'exécution). */
   readonly transaction: <T>(fn: () => T & SansPromesse<T>) => T;
-  /**
-   * Créneaux personnels partagés avec ce groupe par des membres ACTIFS, en projection « occupé » :
-   * les colonnes de texte de `personal_events` ne sont pas sélectionnées. Bornes : instants UTC.
-   */
-  readonly creneauxOccupes: (entre?: { readonly debut: string; readonly fin: string }) => CreneauOccupe[];
 }
 
 /** Scope → base, pour les requêtes jointes de `db/queries/` (membres avec leur compte…) : la base ne se déduit que d'un scope fabriqué ici. */
@@ -184,23 +169,6 @@ export function creerScope(base: Base, userId: string, groupId: string): GroupSc
   const groupe = <T>(): T | undefined =>
     preparer(base, 'SELECT * FROM groups WHERE groups.id = ? AND deleted_at IS NULL').get(appartenance.group_id) as T | undefined;
 
-  const creneauxOccupes = (entre?: { readonly debut: string; readonly fin: string }): CreneauOccupe[] => {
-    const params: ValeurSql[] = [appartenance.group_id, 'active'];
-    let bornes = '';
-    if (entre !== undefined) {
-      bornes = ' AND p.starts_at <= ? AND COALESCE(p.ends_at, p.starts_at) >= ?';
-      params.push(entre.fin, entre.debut);
-    }
-    const texte =
-      'SELECT s.membership_id AS membership_id, p.all_day AS all_day, p.starts_at AS starts_at, p.ends_at AS ends_at, p.time_zone AS time_zone ' +
-      'FROM personal_event_shares AS s ' +
-      'JOIN personal_events AS p ON s.personal_event_id = p.id ' +
-      'JOIN memberships AS m ON m.id = s.membership_id AND m.group_id = s.group_id ' +
-      `WHERE s.group_id = ? AND m.status = ? AND p.deleted_at IS NULL${bornes} ` +
-      'ORDER BY p.starts_at, s.membership_id, p.id';
-    return preparer(base, texte).all(...params) as CreneauOccupe[];
-  };
-
   const scope: GroupScope = Object.freeze({
     [MARQUE]: true as const,
     groupId: appartenance.group_id,
@@ -217,7 +185,6 @@ export function creerScope(base: Base, userId: string, groupId: string): GroupSc
     supprimerDoux: moteur.supprimerDoux,
     supprimer: moteur.supprimer,
     transaction: moteur.transaction,
-    creneauxOccupes,
   });
   BASES.set(scope, base);
   return scope;

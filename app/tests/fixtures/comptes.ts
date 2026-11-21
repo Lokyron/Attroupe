@@ -1,3 +1,5 @@
+import { Agent, createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import request from 'supertest';
 import type { Express } from 'express';
 import fr from '../../server/i18n/fr.json' with { type: 'json' };
@@ -10,6 +12,13 @@ import { envValide } from './env.js';
 // Décor des tests du lot 2 : une application montée sur une base de fichier temporaire, une horloge qu'on
 // avance à la main, un hachage léger (le coût de production — 32 Mio, ~100 ms — ne sert à rien ici) et un
 // client HTTP qui garde son cookie comme un navigateur.
+//
+// Le décor n'écoute qu'une fois. Appelé avec une fonction Express, `supertest` monte un vrai serveur TCP
+// *par requête* : la suite de cloisonnement en émettait 16 251, donc 16 251 sockets laissés 30 s en
+// `TIME_WAIT` pour les 16 384 ports éphémères de macOS (49152-65535). Trois tests sont déjà tombés en
+// `EADDRNOTAVAIL` parce que deux requêtes avaient été ajoutées à un décor. Ici le serveur est monté au
+// premier appel, partagé par tous les clients du décor, fermé dans `nettoyer()`, et l'agent `keepAlive`
+// réutilise la connexion au lieu d'en ouvrir une par requête.
 
 export const ORIGINE = 'https://attroupe.test';
 export const MOT_DE_PASSE = 'correct-cheval-pile-agrafe';
@@ -63,6 +72,46 @@ export function decor(surcharges: Partial<OptionsApp> = {}, env: NodeJS.ProcessE
       status: string;
       payload_json: string;
     }>;
+  // Serveur d'écoute unique, monté paresseusement : un décor qui ne fait aucune requête HTTP n'ouvre rien.
+  let serveur: Server | undefined;
+  let origine: Promise<string> | undefined;
+  let decorFerme = false;
+  // `maxSockets` est plafonné, et la valeur n'est pas arbitraire — elle est encadrée des deux côtés :
+  //  - EN HAUT par `kern.ipc.somaxconn`, qui vaut 128 sur macOS : une rafale de 384 connexions simultanées
+  //    (`listes-concurrence`) déborde la file d'acceptation du serveur — que better-sqlite3, synchrone, n'a pas le
+  //    temps de vider — et le noyau répond alors par un RST, soit un `ECONNRESET` côté test ;
+  //  - EN BAS par les tests qui ont besoin d'une vraie simultanéité pour prouver quelque chose. Le plus exigeant est
+  //    `auth-securite` (« la file de hachage pleine ne débite pas la cadence »), qui lance 80 connexions d'un coup.
+  //    Le seuil qu'il doit franchir est de **37 requêtes en vol** (`MAX_PARALLELE` 4 + `MAX_EN_ATTENTE` 32, puis une
+  //    de plus, cf. `app/server/services/mot-de-passe.ts`) : plafonner en dessous mettrait ces requêtes en file côté
+  //    client, le 503 attendu ne se produirait jamais, et la preuve deviendrait verte sans rien prouver. 80 laisse
+  //    donc une marge confortable — ce n'est pas le nombre de requêtes du test qu'il faut suivre, mais ce seuil-là.
+  // Au-delà de 80, l'agent met en file côté client, ce qui est sans danger ailleurs : dans un seul processus les
+  // écritures SQLite se font de toute façon à la queue leu leu, et aucune requête passée par ce client n'attend
+  // qu'une autre soit en vol (les flux SSE, seuls à ne jamais se terminer, ont leur serveur dans `flux-sse.ts`).
+  const agent = new Agent({ keepAlive: true, maxSockets: 80, maxFreeSockets: 16 });
+  const origineLocale = (): Promise<string> => {
+    origine ??= new Promise<string>((resolu, rejeter) => {
+      const s = createServer(app);
+      serveur = s;
+      s.once('error', rejeter);
+      s.listen(0, '127.0.0.1', () => {
+        // Une erreur APRÈS l'écoute ne doit pas tomber dans une promesse déjà résolue, où elle disparaîtrait
+        // sans bruit : un `EMFILE` à l'`accept` (descripteurs épuisés) ressortirait alors en `ECONNRESET` ou
+        // en dépassement de délai, bien plus loin, sans indice sur sa cause. On la relance donc, sauf après
+        // `nettoyer()` où une erreur de fermeture n'intéresse personne.
+        s.off('error', rejeter);
+        s.on('error', (erreur) => {
+          if (!decorFerme) throw erreur;
+        });
+        // Sans `unref`, un décor dont `nettoyer()` n'est pas appelé retiendrait le processus de test.
+        s.unref();
+        resolu(`http://127.0.0.1:${(s.address() as AddressInfo).port}`);
+      });
+    });
+    return origine;
+  };
+
   const envoyes: MessageSortant[] = [];
   const temoin: Transporteur = {
     envoyer: (message) => {
@@ -75,10 +124,17 @@ export function decor(surcharges: Partial<OptionsApp> = {}, env: NodeJS.ProcessE
     ...t,
     app,
     temps,
-    client: (adresse) => new Client(app, adresse),
+    client: (adresse) => new Client(app, origineLocale, agent, adresse),
     mails,
     envoyes,
     remettre,
+    nettoyer: () => {
+      decorFerme = true;
+      agent.destroy();
+      serveur?.closeAllConnections();
+      serveur?.close();
+      t.nettoyer();
+    },
     jetonMail: async (to, gabarit) => {
       await remettre();
       // Le sujet d'une invitation porte le nom du groupe : on compare ce qui précède le premier `{variable}` du gabarit.
@@ -107,6 +163,8 @@ export class Client {
 
   constructor(
     readonly app: Express,
+    private readonly origineLocale: () => Promise<string>,
+    private readonly agent: Agent,
     private readonly adresse: string = '203.0.113.7',
   ) {}
 
@@ -116,7 +174,11 @@ export class Client {
     corps?: unknown,
     options: { origine?: string | null; cookie?: string | null; entetes?: Readonly<Record<string, string>> } = {},
   ): Promise<Reponse> {
-    let r = request(this.app)[methode](chemin).set('X-Forwarded-For', this.adresse).set('User-Agent', 'Test/1.0 (Appareil A)');
+    // On vise le serveur déjà à l'écoute (une chaîne, pas la fonction Express) : c'est ce qui évite un serveur par requête.
+    let r = request(await this.origineLocale())[methode](chemin)
+      .agent(this.agent)
+      .set('X-Forwarded-For', this.adresse)
+      .set('User-Agent', 'Test/1.0 (Appareil A)');
     const origine = options.origine === undefined ? ORIGINE : options.origine;
     if (origine !== null) r = r.set('Origin', origine);
     const cookie = options.cookie === undefined ? this.cookie : (options.cookie ?? undefined);

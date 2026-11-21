@@ -1,19 +1,18 @@
 import type { PorteeUtilisateur } from '../db/portee-utilisateur.js';
 import {
   creerCreneauPersonnel,
-  definirPartagesCreneau,
   lireCreneauPersonnel,
   listerCreneauxPersonnels,
   listerDisponibilitesGroupe,
   modifierCreneauPersonnel,
-  modifierMaVisibiliteDefaut,
+  realignerPartagesSurReglage,
   supprimerCreneauPersonnel,
   type ChampsCreneauPersonnel,
-  type CreneauPersonnelAvecPartages,
+  type CreneauPersonnel,
   type DisponibiliteMembre,
   type ModificationCreneauPersonnel,
-  type VisibilitePartage,
 } from '../db/queries/agenda-personnel.js';
+import { lireProfil, modifierProfil, type ModificationProfil, type Profil } from '../db/queries/comptes.js';
 import { lireDetailsImportes } from '../db/queries/agenda-externe.js';
 import type { GroupScope } from '../db/scope.js';
 import { champsHoraireInvalides } from '../domain/evenements.js';
@@ -23,16 +22,16 @@ import type { Journal } from '../http/middleware/journal.js';
 // Cas d'usage de l'agenda personnel et du partage de disponibilités (lot 8, modèle §3.6, architecture §6 et §10).
 // Cloisonnement strict :
 //  - un créneau personnel appartient à un compte (`PorteeUtilisateur`) : l'identifiant d'un autre compte renvoie 404 `agenda.introuvable` ;
-//  - partager vers un groupe où le compte n'est pas membre actif renvoie 404 `groupe.introuvable`, sans rien écrire ;
-//  - les disponibilités lues dans un groupe (`GroupScope`) ne sélectionnent jamais les textes privés quand la visibilité est `'busy'`.
+//  - la visibilité se règle une fois par compte (`users.personal_agenda_visibility`, ADR-0017) et plafonne tout partage à la lecture ;
+//  - les disponibilités lues dans un groupe (`GroupScope`) ne sélectionnent jamais les textes privés quand la visibilité effective est `'busy'`.
 
-export type CreneauPersonnelPublic = Omit<CreneauPersonnelAvecPartages, 'all_day'> & { readonly all_day: boolean };
+export type CreneauPersonnelPublic = Omit<CreneauPersonnel, 'all_day'> & { readonly all_day: boolean };
 
 export type DisponibilitePublique =
   | (Omit<Extract<DisponibiliteMembre, { visibility: 'busy' }>, 'all_day'> & { readonly all_day: boolean })
   | (Omit<Extract<DisponibiliteMembre, { visibility: 'details' }>, 'all_day'> & { readonly all_day: boolean });
 
-function publierCreneau(creneau: CreneauPersonnelAvecPartages): CreneauPersonnelPublic {
+function publierCreneau(creneau: CreneauPersonnel): CreneauPersonnelPublic {
   return { ...creneau, all_day: creneau.all_day === 1 };
 }
 
@@ -40,7 +39,7 @@ function publierDisponibilite(dispo: DisponibiliteMembre): DisponibilitePublique
   return { ...dispo, all_day: dispo.all_day === 1 };
 }
 
-function trouverCreneau(portee: PorteeUtilisateur, creneauId: string): CreneauPersonnelAvecPartages {
+function trouverCreneau(portee: PorteeUtilisateur, creneauId: string): CreneauPersonnel {
   const creneau = lireCreneauPersonnel(portee, creneauId);
   if (creneau === undefined) throw new ErreurHttp(404, 'agenda.introuvable');
   return creneau;
@@ -100,27 +99,16 @@ export function supprimerDeMonAgenda(portee: PorteeUtilisateur, creneauId: strin
   if (!supprimerCreneauPersonnel(portee, creneauId)) throw new ErreurHttp(404, 'agenda.introuvable');
 }
 
-export function definirPartagesDansMonAgenda(
-  portee: PorteeUtilisateur,
-  creneauId: string,
-  partages: ReadonlyArray<{ readonly group_id: string; readonly visibility: VisibilitePartage }>,
-): CreneauPersonnelPublic {
-  // Un créneau importé n'a aucun détail à montrer : la base le refuse (déclencheur), on répond proprement avant plutôt qu'une SqliteError.
-  if (trouverCreneau(portee, creneauId).calendar_source_id !== null && partages.some((p) => p.visibility === 'details')) {
-    throw new ErreurHttp(409, 'agenda.import_sans_details');
-  }
-  const resultat = definirPartagesCreneau(portee, creneauId, partages);
-  if (resultat === 'creneau_introuvable') throw new ErreurHttp(404, 'agenda.introuvable');
-  if (resultat === 'groupe_introuvable') throw new ErreurHttp(404, 'groupe.introuvable');
-  return publierCreneau(trouverCreneau(portee, creneauId));
-}
-
-export function changerMaVisibiliteDefaut(
-  scope: GroupScope,
-  visibility: VisibilitePartage,
-): { readonly default_personal_visibility: VisibilitePartage } {
-  modifierMaVisibiliteDefaut(scope, visibility);
-  return { default_personal_visibility: visibility };
+/**
+ * Enregistre le profil du compte. Quand le réglage de visibilité de l'agenda est fourni, les partages existants sont réalignés dans la
+ * MÊME transaction (ADR-0017, décision 5) : élargir le réglage prend effet sur les créneaux déjà en base, abaisser ne supprime rien.
+ */
+export function modifierMonProfil(portee: PorteeUtilisateur, champs: ModificationProfil, maintenant: string): Profil {
+  portee.transaction(() => {
+    modifierProfil(portee, champs, maintenant);
+    if (champs.personal_agenda_visibility !== undefined) realignerPartagesSurReglage(portee);
+  });
+  return lireProfil(portee);
 }
 
 export function disponibilitesDuGroupe(

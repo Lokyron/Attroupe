@@ -2,6 +2,7 @@
 // Les types d'entrée sont structurels et minimaux : `DonneesTableauDeBord` (api/) les satisfait, et ce fichier
 // n'importe rien d'autre que les dates, pour rester chargeable par les tests.
 import { ajouterJours, grilleMois, jourDeDebut, joursDe, joursDeSemaine } from '../../agenda/dates.js';
+import type { EntreeGrille } from '../../agenda/grille-semaine.js';
 
 export type FiltreCalendrier = 'tous' | 'groupes' | 'perso';
 export type VueCalendrier = 'liste' | 'semaine' | 'mois';
@@ -50,6 +51,12 @@ interface SoldeEntree extends AvecGroupe {
   readonly net_minor: number;
 }
 
+interface SoldeNomme extends SoldeEntree {
+  readonly group_name: string;
+}
+
+export type EvenementGroupe = Extract<ElementCalendrier, { sorte: 'groupe' }>;
+
 /** Fenêtre à demander au serveur pour une vue ; `undefined` pour la liste (le serveur renvoie alors sa fenêtre par défaut). */
 export function fenetreCalendrier(vue: VueCalendrier, ancreJour: string): { du: string; au: string } | undefined {
   if (vue === 'liste') return undefined;
@@ -63,7 +70,7 @@ export function fenetreCalendrier(vue: VueCalendrier, ancreJour: string): { du: 
 export function lienElementCalendrier(el: ElementCalendrier): string {
   return el.sorte === 'groupe'
     ? `#/groupe/${encodeURIComponent(el.group_id)}/evenement/${encodeURIComponent(el.id)}`
-    : '#/compte';
+    : `#/agenda/${encodeURIComponent(el.id)}`;
 }
 
 /** Un groupe garde la même couleur partout : elle découle de son rang dans la liste. */
@@ -75,11 +82,6 @@ export function couleursParGroupe(groupes: readonly AvecGroupe[]): Map<string, C
   return couleurs;
 }
 
-/** Garde les éléments du groupe filtré ; `''` = tous les groupes. */
-export function filtrerParGroupe<T extends AvecGroupe>(elements: readonly T[], filtreGroupe: string): T[] {
-  return elements.filter((e) => filtreGroupe === '' || e.group_id === filtreGroupe);
-}
-
 /**
  * Groupe visé par les actions rapides : l'unique groupe de l'utilisateur, sinon celui du filtre. Avec plusieurs
  * groupes et le filtre « Tous », il n'y a pas de cible : `null` plutôt que de deviner.
@@ -88,16 +90,15 @@ export function groupeCible<G extends AvecGroupe>(groupes: readonly G[], filtreG
   return groupes.length === 1 ? (groupes[0] ?? null) : (groupes.find((g) => g.group_id === filtreGroupe) ?? null);
 }
 
-/** Événements de groupe (filtrés par groupe) et personnels, fusionnés selon l'onglet de source et triés par début. */
+/** Événements de groupe et personnels, fusionnés selon l'onglet de source et triés par début. */
 export function elementsCalendrier(
   donnees: EvenementsEntree,
-  filtreGroupe: string,
   filtreCalendrier: FiltreCalendrier,
 ): ElementCalendrier[] {
   const groupes: ElementCalendrier[] =
     filtreCalendrier === 'perso'
       ? []
-      : filtrerParGroupe(donnees.evenements, filtreGroupe).map((e) => ({
+      : donnees.evenements.map((e) => ({
           sorte: 'groupe' as const,
           id: e.id,
           group_id: e.group_id,
@@ -126,6 +127,31 @@ export function elementsCalendrier(
   return [...groupes, ...persos].sort((a, b) => a.starts_at.localeCompare(b.starts_at));
 }
 
+/**
+ * Adaptateur vers la grille horaire de la semaine : la couleur d'un événement de groupe est celle de son groupe, celle d'un
+ * événement personnel est le violet. `titre` reçoit déjà le texte à afficher (le groupe y est nommé par `libelle`).
+ */
+export function entreesGrilleDepuisElements(
+  elements: readonly ElementCalendrier[],
+  couleurParGroupe: ReadonlyMap<string, CouleurGroupe>,
+  libelle: (el: ElementCalendrier) => string,
+): EntreeGrille[] {
+  return elements.map(
+    (el): EntreeGrille => ({
+      cle: `${el.sorte}-${el.id}`,
+      titre: libelle(el),
+      lien: lienElementCalendrier(el),
+      genre: 'evenement',
+      couleur: el.sorte === 'perso' ? 'violet' : (couleurParGroupe.get(el.group_id) ?? 'indigo'),
+      annule: false,
+      all_day: el.all_day,
+      starts_at: el.starts_at,
+      ends_at: el.ends_at,
+      time_zone: el.time_zone,
+    }),
+  );
+}
+
 /** Les éléments rangés par jour civil ; un événement sur plusieurs jours figure dans chacun. */
 export function grouperParJour(elements: readonly ElementCalendrier[]): Map<string, ElementCalendrier[]> {
   const parJour = new Map<string, ElementCalendrier[]>();
@@ -148,10 +174,64 @@ export function evenementsAVenir(elements: readonly ElementCalendrier[], jourAct
   return elements.filter((el) => jourDeDebut(el) >= jourActuel);
 }
 
-/** Nombre d'éléments à venir qui tombent dans le mois du jour actuel. */
-export function nombreAVenirDuMois(aVenir: readonly ElementCalendrier[], jourActuel: string): number {
-  const mois = jourActuel.slice(0, 7);
-  return aVenir.filter((el) => jourDeDebut(el).slice(0, 7) === mois).length;
+/**
+ * Premier élément pas encore terminé (la liste d'entrée est triée par début) : un événement en cours reste « le prochain ».
+ * Une journée entière dure jusqu'à son dernier jour ; un événement à heure fixe jusqu'à `ends_at`, ou à défaut son début.
+ */
+export function prochainEvenement(
+  elements: readonly ElementCalendrier[],
+  maintenant: Date,
+  jourActuel: string,
+): ElementCalendrier | null {
+  return nonTermines(elements, maintenant, jourActuel)[0] ?? null;
+}
+
+/** Les éléments pas encore terminés (voir `prochainEvenement` pour la règle de fin), dans l'ordre d'entrée. */
+export function nonTermines(
+  elements: readonly ElementCalendrier[],
+  maintenant: Date,
+  jourActuel: string,
+): ElementCalendrier[] {
+  const instant = maintenant.getTime();
+  return elements.filter((el) => {
+    if (el.all_day) return (joursDe(el).at(-1) ?? jourDeDebut(el)) >= jourActuel;
+    const fin = new Date(el.ends_at ?? el.starts_at).getTime();
+    return Number.isNaN(fin) ? jourDeDebut(el) >= jourActuel : fin >= instant;
+  });
+}
+
+/** Nombre de réponses en attente montrées dans le bloc « à traiter » : au-delà, il noierait le reste de l'écran. */
+export const MAX_REPONSES_ATTENDUES = 3;
+
+export interface ActionsAttendues {
+  /** Invitations à un groupe auxquelles il n'a pas répondu. */
+  readonly invitations: number;
+  /** Événements de groupe à venir sans réponse de sa part (au plus `MAX_REPONSES_ATTENDUES`, dans l'ordre chronologique). */
+  readonly reponses: readonly EvenementGroupe[];
+  /** Nombre total d'actions attendues, réponses non montrées comprises. */
+  readonly total: number;
+}
+
+/**
+ * Ce qui attend une action de l'utilisateur, d'après les seules données du tableau de bord : invitations en attente et
+ * événements de groupe à venir sans réponse. `exclure` écarte l'événement déjà mis en avant (sa carte porte l'action).
+ * Aucune dépense « à valider » n'est détectable : le modèle n'a pas de validation de dépense.
+ */
+export function actionsAttendues(
+  aVenir: readonly ElementCalendrier[],
+  invitationsEnAttente: number,
+  exclure: ElementCalendrier | null,
+): ActionsAttendues {
+  const sansReponse = aVenir.filter(
+    (el): el is EvenementGroupe =>
+      el.sorte === 'groupe' && el.mon_statut === null && !(exclure?.sorte === 'groupe' && exclure.id === el.id),
+  );
+  const invitations = Math.max(0, invitationsEnAttente);
+  return {
+    invitations,
+    reponses: sansReponse.slice(0, MAX_REPONSES_ATTENDUES),
+    total: invitations + sansReponse.length,
+  };
 }
 
 export type SensSoldes = 'aucun' | 'positif' | 'negatif' | 'equilibre' | 'multi';
@@ -175,23 +255,73 @@ export function resumerSoldes(soldes: readonly SoldeEntree[]): ResumeSoldes {
   return { devises, total, sens };
 }
 
-/**
- * Groupe vers lequel mène un lien de CONSULTATION des dépenses : repli sur le premier groupe connu, et non sur la seule
- * cible, qui exige l'absence d'ambiguïté (réservée aux actions de création). `''` s'il n'y a aucun groupe.
- */
-export function groupeDesDepenses(
-  depenses: readonly AvecGroupe[],
-  soldes: readonly AvecGroupe[],
-  cible: AvecGroupe | null,
-  groupes: readonly AvecGroupe[],
-): string {
-  return depenses[0]?.group_id ?? soldes[0]?.group_id ?? cible?.group_id ?? groupes[0]?.group_id ?? '';
-}
-
 /** Premier groupe à albums actifs : d'abord parmi les groupes visibles, puis parmi tous. */
 export function groupeDesPhotos<G extends { readonly photos_actives: boolean }>(
   visibles: readonly G[],
   tous: readonly G[],
 ): G | undefined {
   return visibles.find((g) => g.photos_actives) ?? tous.find((g) => g.photos_actives);
+}
+
+export interface SoldeGroupe {
+  readonly group_id: string;
+  readonly group_name: string;
+  /** Net par devise, dans l'ordre d'apparition : on n'additionne jamais deux devises. */
+  readonly devises: readonly (readonly [string, number])[];
+  readonly sens: SensSoldes;
+}
+
+/** Un chiffre net par groupe (un par devise si le groupe en compte plusieurs), dans l'ordre d'apparition des groupes. */
+export function soldesParGroupe(soldes: readonly SoldeNomme[]): SoldeGroupe[] {
+  const parGroupe = new Map<string, SoldeNomme[]>();
+  for (const s of soldes) {
+    const deLeGroupe = parGroupe.get(s.group_id);
+    if (deLeGroupe === undefined) parGroupe.set(s.group_id, [s]);
+    else deLeGroupe.push(s);
+  }
+  return Array.from(parGroupe.values()).flatMap((lignes) => {
+    const premiere = lignes[0];
+    if (premiere === undefined) return [];
+    const { devises, sens } = resumerSoldes(lignes);
+    return [{ group_id: premiere.group_id, group_name: premiere.group_name, devises, sens }];
+  });
+}
+
+export interface PartieSolde {
+  readonly devise: string;
+  readonly sens: 'positif' | 'negatif' | 'equilibre';
+  /** « On vous doit », « Vous devez » ou « À l’équilibre ». */
+  readonly etiquette: string;
+  /** Montant toujours positif : c'est l'étiquette qui porte le sens, jamais un signe à deviner. */
+  readonly montant: string;
+}
+
+/** Une partie par devise du groupe, chacune avec son propre sens : « On vous doit 20 € » et « Vous devez 15 $ » ne se mélangent pas. */
+export function partiesSolde(
+  solde: SoldeGroupe,
+  formaterMontant: (montantMineur: number, devise: string) => string,
+  etiquettes: Readonly<Record<PartieSolde['sens'], string>>,
+): PartieSolde[] {
+  return solde.devises.map(([devise, net]) => {
+    const sens = net > 0 ? 'positif' : net < 0 ? 'negatif' : 'equilibre';
+    return { devise, sens, etiquette: etiquettes[sens], montant: formaterMontant(Math.abs(net), devise) };
+  });
+}
+
+/**
+ * Date d'un événement en toutes lettres : « Aujourd’hui · 20:00 », « Demain · 20:00 », sinon « vendredi 20 mars · 20:00 ».
+ * Le jour est celui de l'événement dans son fuseau (`jourDeDebut`), lu en UTC pour ne pas glisser selon le navigateur.
+ */
+export function dateEnClair(
+  el: ElementCalendrier,
+  jourAujourdHui: string,
+  libelles: { readonly aujourdhui: string; readonly demain: string; readonly horaire: string },
+): string {
+  const jour = jourDeDebut(el);
+  if (jour === jourAujourdHui) return `${libelles.aujourdhui} · ${libelles.horaire}`;
+  if (jour === ajouterJours(jourAujourdHui, 1)) return `${libelles.demain} · ${libelles.horaire}`;
+  const date = new Date(`${jour}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return jour;
+  const enToutesLettres = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(date);
+  return `${enToutesLettres} · ${libelles.horaire}`;
 }

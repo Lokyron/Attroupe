@@ -3,15 +3,20 @@ import {
   compterSurJours,
   couleursParGroupe,
   elementsCalendrier,
+  entreesGrilleDepuisElements,
   evenementsAVenir,
   fenetreCalendrier,
-  filtrerParGroupe,
   groupeCible,
-  groupeDesDepenses,
   groupeDesPhotos,
   grouperParJour,
   lienElementCalendrier,
-  nombreAVenirDuMois,
+  prochainEvenement,
+  nonTermines,
+  dateEnClair,
+  partiesSolde,
+  actionsAttendues,
+  soldesParGroupe,
+  MAX_REPONSES_ATTENDUES,
   resumerSoldes,
 } from '../../client/src/pages/tableau/selecteurs.js';
 
@@ -47,24 +52,18 @@ const donnees = {
 
 describe('éléments du calendrier', () => {
   it('fusionne groupes et agenda perso, triés par début', () => {
-    const titres = elementsCalendrier(donnees, '', 'tous').map((e) => e.title);
+    const titres = elementsCalendrier(donnees, 'tous').map((e) => e.title);
     expect(titres).toEqual(['Randonnée', 'Dentiste', 'Dîner']);
   });
 
   it('l’onglet « perso » ne garde que le perso, l’onglet « groupes » que les groupes', () => {
-    expect(elementsCalendrier(donnees, '', 'perso').map((e) => e.sorte)).toEqual(['perso']);
-    expect(elementsCalendrier(donnees, '', 'groupes').every((e) => e.sorte === 'groupe')).toBe(true);
-  });
-
-  it('le filtre de groupe écarte les autres groupes mais pas le perso', () => {
-    const titres = elementsCalendrier(donnees, 'a', 'tous').map((e) => e.title);
-    expect(titres).toEqual(['Dentiste', 'Dîner']);
+    expect(elementsCalendrier(donnees, 'perso').map((e) => e.sorte)).toEqual(['perso']);
+    expect(elementsCalendrier(donnees, 'groupes').every((e) => e.sorte === 'groupe')).toBe(true);
   });
 
   it('un événement sur plusieurs jours figure dans chacun', () => {
     const el = elementsCalendrier(
       { evenements: [groupe('a', 'Week-end', '2027-03-06', { ends_at: '2027-03-07' })], evenements_perso: [] },
-      '',
       'tous',
     );
     const parJour = grouperParJour(el);
@@ -74,27 +73,11 @@ describe('éléments du calendrier', () => {
 });
 
 describe('événements à venir', () => {
-  const elements = elementsCalendrier(donnees, '', 'tous');
+  const elements = elementsCalendrier(donnees, 'tous');
 
   it('garde ce qui commence aujourd’hui ou plus tard', () => {
     expect(evenementsAVenir(elements, '2027-03-12').map((e) => e.title)).toEqual(['Dentiste', 'Dîner']);
     expect(evenementsAVenir(elements, '2027-04-01')).toEqual([]);
-  });
-
-  it('compte ceux du mois du jour actuel', () => {
-    const avenir = evenementsAVenir(elements, '2027-03-10');
-    expect(nombreAVenirDuMois(avenir, '2027-03-10')).toBe(2);
-    // Les événements d'un autre mois, y compris le même mois d'une autre année, sont écartés : la valeur reste 2.
-    const horsMois = elementsCalendrier(
-      {
-        evenements: [groupe('a', 'Mai', '2027-05-01'), groupe('a', 'Avril', '2027-04-01'), groupe('a', 'Mars suivant', '2028-03-15')],
-        evenements_perso: [],
-      },
-      '',
-      'tous',
-    );
-    expect(nombreAVenirDuMois(horsMois, '2027-03-10')).toBe(0);
-    expect(nombreAVenirDuMois([...avenir, ...horsMois], '2027-03-10')).toBe(2);
   });
 });
 
@@ -104,7 +87,6 @@ describe('regroupement par jour (grouperParJour)', () => {
       evenements: [groupe('a', 'Long', '2027-03-10', { ends_at: '2027-03-12' }), groupe('a', 'Court', '2027-03-11')],
       evenements_perso: [perso('Seul', '2027-03-20')],
     },
-    '',
     'tous',
   );
 
@@ -126,7 +108,6 @@ describe('regroupement par jour (grouperParJour)', () => {
     expect(grouperParJour([]).size).toBe(0);
     const beaucoup = elementsCalendrier(
       { evenements: [], evenements_perso: Array.from({ length: 20000 }, (_, i) => perso(`E${i}`, '2027-03-12')) },
-      '',
       'tous',
     );
     const debut = performance.now();
@@ -194,12 +175,6 @@ describe('groupes', () => {
     expect(groupeCible([], '')).toBeNull();
   });
 
-  it('filtrerParGroupe : « » garde tout', () => {
-    const l = [g('a'), g('b')];
-    expect(filtrerParGroupe(l, '')).toHaveLength(2);
-    expect(filtrerParGroupe(l, 'b')).toEqual([g('b')]);
-  });
-
   it('le groupe des photos : visibles d’abord, puis tous', () => {
     const a = g('a', true);
     const b = g('b', true);
@@ -207,25 +182,17 @@ describe('groupes', () => {
     expect(groupeDesPhotos([g('c')], [a, b])).toBe(a);
     expect(groupeDesPhotos([], [g('c')])).toBeUndefined();
   });
-
-  it('le groupe des dépenses : dépense, solde, cible, premier groupe, puis rien', () => {
-    const a = { group_id: 'a' };
-    const b = { group_id: 'b' };
-    const c = { group_id: 'c' };
-    expect(groupeDesDepenses([a], [b], c, [c])).toBe('a');
-    expect(groupeDesDepenses([], [b], c, [c])).toBe('b');
-    expect(groupeDesDepenses([], [], c, [a])).toBe('c');
-    expect(groupeDesDepenses([], [], null, [a])).toBe('a');
-    expect(groupeDesDepenses([], [], null, [])).toBe('');
-  });
 });
 
 describe('liens', () => {
-  it('un événement de groupe mène à sa page, le perso au compte', () => {
-    const [g] = elementsCalendrier({ evenements: [groupe('a/b', 'x', '2027-03-01')], evenements_perso: [] }, '', 'tous');
+  it('un événement de groupe mène à sa page', () => {
+    const [g] = elementsCalendrier({ evenements: [groupe('a/b', 'x', '2027-03-01')], evenements_perso: [] }, 'tous');
     expect(g && lienElementCalendrier(g)).toBe('#/groupe/a%2Fb/evenement/a%2Fb-x');
-    const [p] = elementsCalendrier({ evenements: [], evenements_perso: [perso('y', '2027-03-01')] }, '', 'tous');
-    expect(p && lienElementCalendrier(p)).toBe('#/compte');
+  });
+
+  it('un événement personnel mène à sa propre page, pas au compte', () => {
+    const [p] = elementsCalendrier({ evenements: [], evenements_perso: [perso('y/z', '2027-03-01')] }, 'tous');
+    expect(p && lienElementCalendrier(p)).toBe('#/agenda/perso-y%2Fz');
   });
 });
 
@@ -236,7 +203,7 @@ describe('événements à heure fixe et fuseaux', () => {
   const fixe = (titre: string, debut: string, extra: object = {}) =>
     groupe('a', titre, debut, { all_day: false, time_zone: 'Europe/Paris', ...extra });
   const elementsDe = (...evenements: ReturnType<typeof fixe>[]) =>
-    elementsCalendrier({ evenements, evenements_perso: [] }, '', 'tous');
+    elementsCalendrier({ evenements, evenements_perso: [] }, 'tous');
   const joursRanges = (...evenements: ReturnType<typeof fixe>[]) => [...grouperParJour(elementsDe(...evenements)).keys()];
 
   it('un événement de 23 h 30 UTC est rangé au lendemain à Paris', () => {
@@ -350,18 +317,175 @@ describe('événements à heure fixe et fuseaux', () => {
     const el = elementsDe(fixe('Fin de mois', '2027-03-31T22:30:00Z'), fixe('Mi-mars', '2027-03-15T12:00:00Z'));
     const avenir = evenementsAVenir(el, '2027-03-10');
     expect(avenir).toHaveLength(2);
-    // Il est dans la liste « à venir », mais il compte pour avril et non pour mars.
-    expect(nombreAVenirDuMois(avenir, '2027-03-10')).toBe(1);
-    expect(nombreAVenirDuMois(avenir, '2027-04-01')).toBe(1);
+    // Il est dans la liste « à venir », mais il tombe en avril et non en mars.
+    expect([...grouperParJour(avenir).keys()]).toEqual(['2027-03-15', '2027-04-01']);
   });
 
   it('un événement perso à heure fixe suit lui aussi son fuseau', () => {
     const el = elementsCalendrier(
       { evenements: [], evenements_perso: [perso('RDV tardif', '2027-03-11T23:30:00Z', { all_day: false })] },
-      '',
       'tous',
     );
     expect([...grouperParJour(el).keys()]).toEqual(['2027-03-12']);
     expect(evenementsAVenir(el, '2027-03-12')).toHaveLength(1);
+  });
+});
+
+describe('adaptateur vers la grille de la semaine', () => {
+  const donnees = {
+    evenements: [groupe('g1', 'Brunch', '2027-03-16', { all_day: false, starts_at: '2027-03-16T09:00:00Z' })],
+    evenements_perso: [
+      {
+        id: 'p1',
+        title: 'Dentiste',
+        starts_at: '2027-03-16T13:00:00Z',
+        ends_at: '2027-03-16T14:00:00Z',
+        all_day: false,
+        time_zone: 'Europe/Paris',
+        location_name: null,
+      },
+    ],
+  };
+  const elements = elementsCalendrier(donnees, 'tous');
+  const couleurs = couleursParGroupe([{ group_id: 'g0' }, { group_id: 'g1' }]);
+
+  it('un événement de groupe prend la couleur de son groupe et mène à sa page', () => {
+    const entree = entreesGrilleDepuisElements(elements, couleurs, (el) => el.title).find((e) => e.cle.startsWith('groupe-'));
+    expect(entree).toMatchObject({ titre: 'Brunch', couleur: 'cyan', genre: 'evenement', lien: '#/groupe/g1/evenement/g1-Brunch', time_zone: 'Europe/Paris' });
+  });
+
+  it('un événement personnel est violet et mène à l’agenda personnel', () => {
+    const entree = entreesGrilleDepuisElements(elements, couleurs, (el) => el.title).find((e) => e.cle.startsWith('perso-'));
+    expect(entree).toMatchObject({ cle: 'perso-p1', couleur: 'violet', lien: '#/agenda/p1', starts_at: '2027-03-16T13:00:00Z' });
+  });
+
+  it('un groupe inconnu de la palette retombe sur l’indigo, et le libellé est celui que fournit l’appelant', () => {
+    const [entree] = entreesGrilleDepuisElements(elements.slice(0, 1), new Map(), (el) => `[${el.title}]`);
+    expect(entree).toMatchObject({ couleur: 'indigo', titre: expect.stringMatching(/^\[.*\]$/) as string });
+  });
+});
+
+describe('prochain événement', () => {
+  const el = (...e: ReturnType<typeof groupe>[]) => elementsCalendrier({ evenements: e, evenements_perso: [] }, 'tous');
+
+  it('saute ce qui est terminé et garde ce qui est en cours', () => {
+    const liste = el(
+      groupe('a', 'Fini', '2027-03-10T08:00:00Z', { all_day: false, ends_at: '2027-03-10T09:00:00Z' }),
+      groupe('a', 'En cours', '2027-03-10T09:30:00Z', { all_day: false, ends_at: '2027-03-10T12:00:00Z' }),
+      groupe('a', 'Plus tard', '2027-03-10T18:00:00Z', { all_day: false }),
+    );
+    expect(prochainEvenement(liste, new Date('2027-03-10T10:00:00Z'), '2027-03-10')?.title).toBe('En cours');
+    expect(prochainEvenement(liste, new Date('2027-03-10T13:00:00Z'), '2027-03-10')?.title).toBe('Plus tard');
+    expect(prochainEvenement(liste, new Date('2027-03-10T19:00:00Z'), '2027-03-10')).toBeNull();
+  });
+
+  it('sans fin, un événement à heure fixe s’arrête à son début', () => {
+    const liste = el(groupe('a', 'Dîner', '2027-03-10T18:00:00Z', { all_day: false }), groupe('a', 'Brunch', '2027-03-11', {}));
+    expect(prochainEvenement(liste, new Date('2027-03-10T18:00:01Z'), '2027-03-10')?.title).toBe('Brunch');
+  });
+
+  it('une journée entière dure jusqu’à son dernier jour', () => {
+    const liste = el(groupe('a', 'Week-end', '2027-03-06', { ends_at: '2027-03-08' }));
+    expect(prochainEvenement(liste, new Date('2027-03-08T20:00:00Z'), '2027-03-08')?.title).toBe('Week-end');
+    expect(prochainEvenement(liste, new Date('2027-03-09T08:00:00Z'), '2027-03-09')).toBeNull();
+  });
+
+  it('un événement personnel peut être le prochain ; sans rien : null', () => {
+    const liste = elementsCalendrier({ evenements: [], evenements_perso: [perso('Dentiste', '2027-03-12')] }, 'tous');
+    expect(prochainEvenement(liste, new Date('2027-03-10T10:00:00Z'), '2027-03-10')?.sorte).toBe('perso');
+    expect(prochainEvenement([], new Date('2027-03-10T10:00:00Z'), '2027-03-10')).toBeNull();
+  });
+});
+
+describe('ce qui attend une action', () => {
+  const aVenir = (...e: ReturnType<typeof groupe>[]) => elementsCalendrier({ evenements: e, evenements_perso: [perso('Dentiste', '2027-03-11')] }, 'tous');
+
+  it('rien à faire : bloc vide', () => {
+    const r = actionsAttendues(aVenir(groupe('a', 'Dîner', '2027-03-20', { mon_statut: 'yes' })), 0, null);
+    expect(r).toEqual({ invitations: 0, reponses: [], total: 0 });
+  });
+
+  it('compte les invitations et les événements sans réponse, jamais le perso', () => {
+    const liste = aVenir(groupe('a', 'Dîner', '2027-03-20'), groupe('a', 'Ciné', '2027-03-22', { mon_statut: 'maybe' }));
+    const r = actionsAttendues(liste, 2, null);
+    expect(r.invitations).toBe(2);
+    expect(r.reponses.map((e) => e.title)).toEqual(['Dîner']);
+    expect(r.total).toBe(3);
+  });
+
+  it('écarte l’événement mis en avant, dont la carte porte déjà l’action', () => {
+    const liste = aVenir(groupe('a', 'Dîner', '2027-03-20'), groupe('a', 'Pique-nique', '2027-03-25'));
+    const r = actionsAttendues(liste, 0, liste.find((e) => e.title === 'Dîner') ?? null);
+    expect(r.reponses.map((e) => e.title)).toEqual(['Pique-nique']);
+    expect(r.total).toBe(1);
+  });
+
+  it('plafonne les réponses montrées mais pas le total', () => {
+    const evenements = ['A', 'B', 'C', 'D', 'E'].map((n, i) => groupe('a', n, `2027-03-${String(20 + i)}`));
+    const r = actionsAttendues(aVenir(...evenements), -3, null);
+    expect(r.reponses).toHaveLength(MAX_REPONSES_ATTENDUES);
+    expect(r.invitations).toBe(0);
+    expect(r.total).toBe(5);
+  });
+});
+
+describe('solde net par groupe', () => {
+  const s = (g: string, devise: string, net: number) => ({ group_id: g, group_name: `Groupe ${g}`, currency_code: devise, net_minor: net });
+
+  it('aucun solde : liste vide, le bloc se replie', () => {
+    expect(soldesParGroupe([])).toEqual([]);
+  });
+
+  it('un chiffre par groupe, sans mélanger les groupes', () => {
+    expect(soldesParGroupe([s('a', 'EUR', 500), s('b', 'EUR', -200)])).toEqual([
+      { group_id: 'a', group_name: 'Groupe a', devises: [['EUR', 500]], sens: 'positif' },
+      { group_id: 'b', group_name: 'Groupe b', devises: [['EUR', -200]], sens: 'negatif' },
+    ]);
+  });
+
+  it('un groupe à deux devises garde un montant par devise et le sens « multi »', () => {
+    const [g] = soldesParGroupe([s('a', 'EUR', 500), s('a', 'USD', -100)]);
+    expect(g?.sens).toBe('multi');
+    expect(g?.devises).toEqual([['EUR', 500], ['USD', -100]]);
+  });
+});
+
+describe('éléments non terminés', () => {
+  it('écarte un événement du matin dès l’après-midi, même sans réponse', () => {
+    const el = elementsCalendrier(
+      { evenements: [groupe('a', 'Brunch', '2027-03-10T08:00:00Z', { all_day: false, ends_at: '2027-03-10T09:00:00Z' })], evenements_perso: [] },
+      'tous',
+    );
+    expect(nonTermines(el, new Date('2027-03-10T08:30:00Z'), '2027-03-10')).toHaveLength(1);
+    expect(nonTermines(el, new Date('2027-03-10T14:00:00Z'), '2027-03-10')).toEqual([]);
+  });
+});
+
+describe('date en clair', () => {
+  const journee = (jour: string) => elementsCalendrier({ evenements: [], evenements_perso: [perso('T', jour)] }, 'tous')[0];
+  const l = { aujourdhui: 'Auj', demain: 'Dem', horaire: 'H' };
+
+  it('aujourd’hui et demain sont nommés, sinon jour et date en toutes lettres', () => {
+    const [a, b, c] = [journee('2027-03-10'), journee('2027-03-11'), journee('2027-03-12')];
+    expect(a && dateEnClair(a, '2027-03-10', l)).toBe('Auj · H');
+    expect(b && dateEnClair(b, '2027-03-10', l)).toBe('Dem · H');
+    expect(c && dateEnClair(c, '2027-03-10', l)).toBe('vendredi 12 mars · H');
+  });
+});
+
+describe('parties du solde', () => {
+  const g = (devises: readonly (readonly [string, number])[]) => ({ group_id: 'a', group_name: 'A', devises, sens: 'multi' as const });
+  const eti = { positif: 'doit', negatif: 'devez', equilibre: 'eq' };
+  const montant = (n: number, d: string) => `${String(n)} ${d}`;
+
+  it('chaque devise garde son propre sens et un montant positif', () => {
+    expect(partiesSolde(g([['EUR', 2000], ['USD', -1500]]), montant, eti)).toEqual([
+      { devise: 'EUR', sens: 'positif', etiquette: 'doit', montant: '2000 EUR' },
+      { devise: 'USD', sens: 'negatif', etiquette: 'devez', montant: '1500 USD' },
+    ]);
+  });
+
+  it('un net nul est à l’équilibre', () => {
+    expect(partiesSolde(g([['EUR', 0]]), montant, eti)[0]?.sens).toBe('equilibre');
   });
 });

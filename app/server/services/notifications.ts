@@ -2,6 +2,7 @@ import { z } from 'zod';
 import fr from '../i18n/fr.json' with { type: 'json' };
 import type { PorteeUtilisateur } from '../db/portee-utilisateur.js';
 import {
+  compterNotificationsAVoir,
   definirPreferenceNotification,
   lirePreferencesNotifications,
   listerMesNotifications,
@@ -11,6 +12,7 @@ import {
   type EmailMode,
   type NotificationKind,
   type ListeNotifications,
+  type OptionsListeNotifications,
   type PreferenceNotificationVue,
 } from '../db/queries/notifications.js';
 import { versInstant } from '../domain/instant.js';
@@ -29,8 +31,13 @@ const LIBELLES_PUSH = z
   })
   .parse(fr.notifications_push);
 
-export function mesNotifications(portee: PorteeUtilisateur): ListeNotifications {
-  return listerMesNotifications(portee);
+export function mesNotifications(contexte: Contexte, portee: PorteeUtilisateur, options?: OptionsListeNotifications): ListeNotifications {
+  return listerMesNotifications(portee, options, versInstant(contexte.horloge()));
+}
+
+/** Pastille de l'entrée « Notifs » : non lues + invitations en attente sans notification (jamais deux fois la même invitation). */
+export function pastilleNotifications(portee: PorteeUtilisateur, invitationsEnAttente: readonly string[]): number {
+  return compterNotificationsAVoir(portee, invitationsEnAttente);
 }
 
 export function marquerLues(contexte: Contexte, portee: PorteeUtilisateur, ids?: readonly string[]): number {

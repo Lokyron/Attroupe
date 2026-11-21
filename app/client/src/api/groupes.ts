@@ -1,3 +1,4 @@
+import { visibilitePartage, type VisibilitePartage } from './agenda-personnel';
 import { appeler, ErreurLocale, booleen, champ, liste, nombre, role, texte, texteOuNul } from './client';
 
 // Les formes de l'API de groupes (architecture §6), relues champ par champ à l'arrivée.
@@ -12,8 +13,12 @@ export interface Moi {
   email_verified_at: string | null;
   /** Fuseau IANA (`Europe/Paris`) du compte. */
   time_zone: string;
+  /** Ce que les membres de mes groupes voient de mon agenda personnel (ADR-0017) ; ne couvre pas un lien de flux iCal partagé. */
+  personal_agenda_visibility: VisibilitePartage;
   groupes: GroupeResume[];
   invitations_en_attente: number;
+  /** Pastille de « Notifs » calculée par le serveur : non lues + invitations en attente sans notification. */
+  notifications_a_voir: number;
   service_email: 'actif' | 'non_configure';
 }
 
@@ -63,7 +68,6 @@ export interface DetailGroupe {
   time_zone: string;
   mon_role: Role;
   mon_appartenance_id: string;
-  ma_visibilite_defaut: 'none' | 'busy' | 'details';
   fonctionnalites: {
     photos: boolean;
   };
@@ -84,8 +88,10 @@ export async function lireMoi(): Promise<Moi> {
     avatar_url: avatarUrlOptionnel(r),
     email_verified_at: texteOuNul(champ(r, 'email_verified_at')),
     time_zone: texte(champ(r, 'time_zone')),
+    personal_agenda_visibility: visibilitePartage(champ(r, 'personal_agenda_visibility')),
     groupes: liste(champ(r, 'groupes')).map((g) => ({ group_id: texte(champ(g, 'group_id')), name: texte(champ(g, 'name')), role: role(champ(g, 'role')) })),
     invitations_en_attente: nombre(champ(r, 'invitations_en_attente')),
+    notifications_a_voir: nombre(champ(r, 'notifications_a_voir')),
     service_email,
   };
 }
@@ -171,8 +177,6 @@ export async function creerGroupe(name: string): Promise<string> {
 
 export async function lireGroupe(groupId: string): Promise<DetailGroupe> {
   const r = await appeler('GET', `/api/groupes/${encodeURIComponent(groupId)}`);
-  const vis = champ(r, 'ma_visibilite_defaut');
-  const maVisibilite = vis === 'none' || vis === 'busy' || vis === 'details' ? vis : 'busy';
   const fonct = champ(r, 'fonctionnalites');
   return {
     id: texte(champ(r, 'id')),
@@ -181,7 +185,6 @@ export async function lireGroupe(groupId: string): Promise<DetailGroupe> {
     time_zone: texte(champ(r, 'time_zone')),
     mon_role: role(champ(r, 'mon_role')),
     mon_appartenance_id: texte(champ(r, 'mon_appartenance_id')),
-    ma_visibilite_defaut: maVisibilite,
     fonctionnalites: {
       photos: booleen(champ(fonct, 'photos')),
     },

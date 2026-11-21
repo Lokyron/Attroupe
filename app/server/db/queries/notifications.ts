@@ -3,8 +3,8 @@ import fr from '../../i18n/fr.json' with { type: 'json' };
 import { estGenreNotification, type GenreNotification } from '../../domain/notifications.js';
 import type { Base } from '../base.js';
 import { nouvelIdentifiant } from '../identifiant.js';
-import type { PorteeUtilisateur } from '../portee-utilisateur.js';
-import { baseDeScope, type GroupScope } from '../scope.js';
+import { baseDe, type PorteeUtilisateur } from '../portee-utilisateur.js';
+import { baseDeScope, type Condition, type GroupScope } from '../scope.js';
 import { executerEnTransaction, preparer } from '../sql.js';
 import { enfilerEmail, listerNotificationsEnAttenteResume, mesGroupes } from './transverse.js';
 
@@ -51,12 +51,44 @@ export interface NotificationVue {
   readonly payload: Readonly<Record<string, unknown>>;
   readonly created_at: string;
   readonly read_at: string | null;
+  /**
+   * État de l'invitation visée, pour une notification `invitation_received` (`subject_type = 'invitation'`) : `'pending'` tant qu'elle
+   * peut être acceptée ou refusée, sinon son issue (`'expired'` aussi pour une invitation en attente dont l'échéance est passée).
+   * `null` : pas une notification d'invitation, ou invitation qui n'est pas adressée à CE compte.
+   */
+  readonly invitation_statut: StatutInvitation | null;
 }
+
+export type StatutInvitation = 'pending' | 'accepted' | 'declined' | 'revoked' | 'expired';
 
 export interface ListeNotifications {
   readonly notifications: NotificationVue[];
+  /** Notifications non lues du compte, tous filtres confondus. */
   readonly non_lues: number;
+  /** Vrai s'il reste des notifications au-delà de `limite` pour le filtre demandé. */
+  readonly a_suite: boolean;
+  /** Curseur (`created_at|id` de la dernière notification de la page) à passer en `avant` pour la page suivante ; `null` s'il n'y en a pas. */
+  readonly curseur_suivant: string | null;
 }
+
+/** Position dans l'ordre total (created_at, id) décroissant : deux notifications de même date restent distinguées par leur identifiant. */
+export interface CurseurNotification {
+  readonly created_at: string;
+  readonly id: string;
+}
+
+export interface OptionsListeNotifications {
+  /** `'non_lues'` : seulement celles sans `read_at` ; `'toutes'` : l'historique complet. */
+  readonly filtre: 'non_lues' | 'toutes';
+  readonly limite: number;
+  /** Page suivante : seulement les notifications strictement après ce curseur dans l'ordre d'affichage. */
+  readonly avant?: CurseurNotification | undefined;
+}
+
+const ligneInvitationVisee = z.object({
+  status: z.enum(['pending', 'accepted', 'declined', 'revoked', 'expired']),
+  expires_at: z.string(),
+});
 
 // Une colonne NULL n'existe que sur la ligne d'un GROUPE (migration 0008) : « hérite de la ligne globale '*' », champ par champ.
 const lignePreference = z.object({
@@ -103,13 +135,55 @@ function parserPayload(payloadJson: string): Readonly<Record<string, unknown>> {
   }
 }
 
-/** Liste les notifications du compte connecté (plus récentes d'abord) et le compteur de non lues. */
-export function listerMesNotifications(portee: PorteeUtilisateur, limite = 50): ListeNotifications {
+/**
+ * État de l'invitation visée par une notification, lue sur `target_user_id = ce compte` : l'identifiant d'une invitation adressée à
+ * quelqu'un d'autre (ou inexistante) donne `null`, sans rien révéler.
+ */
+function statutInvitationVisee(portee: PorteeUtilisateur, n: { kind: string; subject_type: string | null; subject_id: string | null }, maintenant: string | undefined): StatutInvitation | null {
+  if (n.kind !== 'invitation_received' || n.subject_type !== 'invitation' || n.subject_id === null) return null;
+  const ligne = preparer(baseDe(portee), 'SELECT status, expires_at FROM invitations WHERE id = ? AND target_user_id = ?').get(n.subject_id, portee.userId);
+  if (ligne === undefined) return null;
+  const invitation = ligneInvitationVisee.parse(ligne);
+  return invitation.status === 'pending' && maintenant !== undefined && invitation.expires_at <= maintenant ? 'expired' : invitation.status;
+}
+
+/**
+ * Liste les notifications du compte connecté (plus récentes d'abord) et le compteur de non lues. `filtre` et `limite` bornent la page ;
+ * on lit `limite + 1` lignes pour savoir s'il en reste (`a_suite`). `maintenant` (instant du modèle) sert à voir une invitation échue ;
+ * absent, seul le statut en base compte.
+ */
+export function listerMesNotifications(
+  portee: PorteeUtilisateur,
+  options: OptionsListeNotifications = { filtre: 'toutes', limite: 50 },
+  maintenant?: string,
+): ListeNotifications {
   const noms = new Map(mesGroupes(portee).map((g) => [g.group_id, g.name]));
-  const lignes = portee
-    .tous<unknown>('notifications', undefined, { ordre: [{ colonne: 'created_at', sens: 'DESC' }, { colonne: 'id', sens: 'DESC' }], limite })
-    .map((l) => ligneNotification.parse(l));
-  const nonLues = portee.tous<{ id: string }>('notifications', [{ colonne: 'read_at', operateur: 'IS NULL' }]).length;
+  const nonLuesSeulement: Condition[] = [{ colonne: 'read_at', operateur: 'IS NULL' }];
+  // Ordre d'affichage = ordre du curseur : (created_at DESC, id DESC). Le moteur de portée n'admet pas de OU : la page suivante se lit en
+  // deux temps, d'abord les ex æquo de la date du curseur (id plus petit), puis les dates strictement plus anciennes. Le filtre de compte
+  // (`user_id`) est posé par la portée dans les deux lectures.
+  const ordre = [{ colonne: 'created_at', sens: 'DESC' as const }, { colonne: 'id', sens: 'DESC' as const }];
+  const taille = options.limite + 1;
+  const lire = (filtres: readonly Condition[], limite: number): z.infer<typeof ligneNotification>[] =>
+    portee
+      .tous<unknown>('notifications', [...(options.filtre === 'non_lues' ? nonLuesSeulement : []), ...filtres], { ordre, limite })
+      .map((l) => ligneNotification.parse(l));
+  const { avant } = options;
+  const lues =
+    avant === undefined
+      ? lire([], taille)
+      : (() => {
+          const memeDate = lire(
+            [{ colonne: 'created_at', operateur: '=', valeur: avant.created_at }, { colonne: 'id', operateur: '<', valeur: avant.id }],
+            taille,
+          );
+          return memeDate.length >= taille
+            ? memeDate
+            : [...memeDate, ...lire([{ colonne: 'created_at', operateur: '<', valeur: avant.created_at }], taille - memeDate.length)];
+        })();
+  const lignes = lues.slice(0, options.limite);
+  const derniere = lignes.at(-1);
+  const nonLues = portee.tous<{ id: string }>('notifications', nonLuesSeulement).length;
   return {
     notifications: lignes.map((n) => ({
       id: n.id,
@@ -121,8 +195,11 @@ export function listerMesNotifications(portee: PorteeUtilisateur, limite = 50): 
       payload: parserPayload(n.payload_json),
       created_at: n.created_at,
       read_at: n.read_at,
+      invitation_statut: statutInvitationVisee(portee, n, maintenant),
     })),
     non_lues: nonLues,
+    a_suite: lues.length > options.limite,
+    curseur_suivant: lues.length > options.limite && derniere !== undefined ? `${derniere.created_at}|${derniere.id}` : null,
   };
 }
 
@@ -161,6 +238,64 @@ export function lirePreferencesNotifications(portee: PorteeUtilisateur): Prefere
       muted_kinds: p.muted_kinds === null ? (p.group_id === '*' ? [] : null) : [...parserMutedKinds(p.muted_kinds)].filter(estGenreNotification),
       updated_at: p.updated_at,
     }));
+}
+
+/**
+ * Ce que la pastille de l'entrée « Notifs » doit afficher. Source unique de vérité (le client n'additionne rien) :
+ * les notifications non lues dont le sujet n'est PAS une invitation en attente, plus les invitations en attente elles-mêmes.
+ * Une invitation en attente compte ainsi exactement une fois, que sa notification soit lue ou non : tant qu'on n'y a pas répondu,
+ * rien d'autre ne la signale (plus d'entrée « Invitations » dans la navigation), et sa notification ne s'ajoute jamais à elle.
+ * `invitationsEnAttente` : identifiants des invitations en attente de CE compte (relues par l'appelant avec la preuve `target_user_id`).
+ */
+export function compterNotificationsAVoir(portee: PorteeUtilisateur, invitationsEnAttente: readonly string[]): number {
+  const enAttente = new Set(invitationsEnAttente);
+  const nonLues = portee
+    .tous<{ kind: string; subject_id: string | null }>('notifications', [{ colonne: 'read_at', operateur: 'IS NULL' }])
+    .filter((n) => !(n.kind === 'invitation_received' && n.subject_id !== null && enAttente.has(n.subject_id)));
+  return nonLues.length + enAttente.size;
+}
+
+const ligneNomInviteur = z.object({ display_name: z.string() });
+
+export interface OptionsNotificationInvitation {
+  readonly destinataireId: string;
+  readonly invitationId: string;
+  readonly role: 'admin' | 'member';
+  readonly maintenant: string;
+}
+
+/**
+ * Écrit la notification `invitation_received` d'une invitation envoyée à un COMPTE existant (`existing_user`), dans la transaction de
+ * l'envoi. `group_id` reste NULL : le destinataire n'est pas membre, la notification ne doit ni lier à une page du groupe ni entrer dans
+ * le résumé quotidien (qui joint l'appartenance). Aucun e-mail : `email_queued_at` reste NULL, le chemin e-mail n'existait pas pour ce genre.
+ * Respecte les préférences : un genre coupé (ligne globale `'*'`) n'écrit rien, l'invitation reste alors comptée à part par la pastille.
+ * Rend faux si rien n'a été écrit.
+ */
+export function notifierInvitation(scope: GroupScope, options: OptionsNotificationInvitation): boolean {
+  const base = baseDeScope(scope);
+  const groupe = scope.groupe<{ name: string }>();
+  if (groupe === undefined) return false;
+  if (resoudrePreferenceNotification(base, options.destinataireId, scope.groupId).mutedKinds.has('invitation_received')) return false;
+  const inviteur = preparer(
+    base,
+    'SELECT u.display_name AS display_name FROM memberships AS m JOIN users AS u ON u.id = m.user_id WHERE m.id = ? AND m.group_id = ?',
+  ).get(scope.membershipId, scope.groupId);
+  preparer(
+    base,
+    `INSERT INTO notifications (id, user_id, group_id, kind, subject_type, subject_id, payload_json, created_at, email_queued_at)
+     VALUES (?, ?, NULL, 'invitation_received', 'invitation', ?, ?, ?, NULL)`,
+  ).run(
+    nouvelIdentifiant(),
+    options.destinataireId,
+    options.invitationId,
+    JSON.stringify({
+      group_name: groupe.name,
+      invited_by_name: inviteur === undefined ? '' : ligneNomInviteur.parse(inviteur).display_name,
+      role: options.role,
+    }),
+    options.maintenant,
+  );
+  return true;
 }
 
 /**

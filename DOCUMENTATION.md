@@ -46,14 +46,23 @@ verrous dont deux font échouer la compilation et un l'écriture en base
 ([`ADR-0006`](docs/decisions/ADR-0006-cloisonnement-structurel.md)).
 
 **Client (`app/client/src/`)**, modules ajoutés depuis la phase 2 :
-- `lib/` : `montants.ts`, `initiales.ts`, `liens.ts`, `liens-texte.ts` (détection des liens dans un texte libre, rendue en nœuds React), `fuseaux.ts`, `pluriel.ts`, `etat-agenda.ts`, `fragment-route.ts`, `preferences-notifications.ts`.
+- `lib/` : `montants.ts`, `initiales.ts`, `liens.ts`, `liens-texte.ts` (détection des liens dans un texte libre, rendue en nœuds React), `fuseaux.ts`, `pluriel.ts`, `etat-agenda.ts`, `fragment-route.ts`, `preferences-notifications.ts`, `actions-creation.ts` (les quatre entrées de la feuille « Créer »), `notifications-vue.ts`, `retour-focus.ts` (`premierVisible` : le déclencheur visible où rendre le focus).
 - `hooks/useFragment.ts` : le fragment d'URL courant, relu à chaque changement.
-- `components/` : `BarreAjout.tsx`, `ChampsPeriode.tsx`, `GrilleCartes.tsx`, `TexteAvecLiens.tsx`, `ChampFuseau.tsx`, `PreferencesNotifications.tsx`.
+- `components/` : `BarreAjout.tsx`, `ChampsPeriode.tsx`, `GrilleCartes.tsx`, `TexteAvecLiens.tsx`, `ChampFuseau.tsx`, `PreferencesNotifications.tsx`, `FeuilleCreation.tsx`, `ReponseInvitation.tsx`, `GrilleSemaine.tsx`.
+- `agenda/` : `grille-semaine.ts` (géométrie de la grille horaire, `DUREE_MINIMALE_MIN`), `grille-semaine-groupe.ts`.
+- `pages/` : `EvenementPersonnel.tsx` (route `#/agenda/:creneauId`) ; `pages/tableau/` : `CarteProchain.tsx`, `BlocAFaire.tsx`, `BlocSolde.tsx`, `Pli.tsx`, `formats.ts`, et les blocs de l'accueil.
 
 **Routage par fragment et couleurs (client)** :
 - Le fragment porte l'état de consultation en **requête** : `#/groupe/:id/agenda?vue=semaine&date=2027-03-12`, ou `?vue=liste&jours=60`. L'album ouvert est une **route** : `#/groupe/:id/albums/:albumId`.
 - Un fragment qui ne commence pas par `#/` (par exemple `#contenu-principal`, le lien d'évitement) **n'est pas une route** : `estFragmentDeRoute` (`lib/fragment-route.ts`) l'écarte. Sans ce garde, le lien d'évitement renvoyait à l'accueil. Un segment mal encodé (`%E0`) donne la page « introuvable », sans lever d'erreur.
+- `#/agenda/:creneauId` ouvre un événement personnel. Un segment qui n'a pas la forme d'un identifiant (`#/agenda/sources`) donne « introuvable ». `#/invitations` n'a plus d'entrée de navigation (elle est fondue dans « Notifs ») mais reste servie : les e-mails d'invitation y pointent.
 - Mode sombre : `--primaire` (`#4f46e5` en sombre) est réservé aux **fonds** qui portent du texte blanc. Les traits, comme l'anneau de focus, utilisent `--primaire-trait` ; le texte au survol, `--primaire-texte-survol`. Utiliser `--primaire` pour un trait ou un texte sur fond sombre casse le contraste : c'est déjà arrivé.
+
+**Interface mobile d'abord (chantier du 2026-11-21, à lire avant de toucher à l'accueil ou à l'agenda)** :
+- **Accueil** (`pages/TableauDeBord.tsx`, blocs dans `pages/tableau/`) : grande carte du prochain événement avec son action probable, bloc « À faire » (absent quand il est vide), « Ma semaine » (ruban des sept jours), solde net par groupe, puis photos et groupes repliés. Le détail d'un solde est un lien vers la page dépenses du groupe (`pages/tableau/BlocSolde.tsx`). Les tuiles de KPI, la grille « bento » et les actions rapides de l'en-tête ont disparu.
+- **Grille semaine** (`components/GrilleSemaine.tsx`) : une vraie grille horaire, partagée par la page agenda d'un groupe et le widget de l'accueil. **Le seuil « un jour à la fois » n'existe qu'en CSS** (`@container semaine`, 45 rem, `app/client/src/styles.css`) : le JavaScript lit `scroll-snap-type` (`unSeulJour`) et ne répète pas le seuil (règle dans `AGENTS.md` §4).
+- **Création** : le bouton « Créer » du bandeau du bas et celui de la barre latérale ouvrent la même `FeuilleCreation`, avec le choix du groupe cible quand il y en a plusieurs. Deux déclencheurs, une instance : `boutonsOuvrants` (`App.tsx`) rend le focus au déclencheur d'origine.
+- **Mon compte** (`pages/Compte.tsx`) : la visibilité de l'agenda personnel est un seul contrôle, qui s'applique à tout l'agenda. Les réglages par créneau et par groupe ont disparu.
 
 ## 3 bis. Hébergement
 
@@ -321,6 +330,28 @@ Routes ajoutées depuis la phase 2 (notifications, dépenses). Même préfixe `/
 | PUT | `/api/moi/preferences-notifications` | `{group_id, email_mode?, muted_kinds?}` : au moins un des deux champs, sinon 400 `requete.invalide`. `email_mode` est optionnel. Un champ absent n'est pas modifié ; `muted_kinds: []` est un choix explicite (aucun genre coupé), distinct d'un champ absent. `muted_kinds` est une liste fermée de genres, définie dans `app/server/domain/notifications.ts`. `group_id` `'*'` désigne le réglage global ; 404 `groupe.introuvable` si l'appartenance n'est pas active. |
 | DELETE | `/api/moi/preferences-notifications/:groupeId` | Supprime la ligne de préférence du groupe : le groupe revient à l'héritage du réglage global, champ par champ. Idempotent. 404 `groupe.introuvable` si l'appartenance n'est pas active, ou pour `'*'`. |
 
+Chantier interface du 2026-11-21 (visibilité de l'agenda personnel, notifications d'invitation). Ce qui change dans la surface de l'API :
+
+| Méthode | Chemin | Changement |
+|---|---|---|
+| GET | `/api/moi/agenda/:creneauId` | **Ajouté.** Un créneau de mon agenda personnel. 404 `agenda.introuvable` s'il n'appartient pas au compte, n'existe pas ou est supprimé. Les textes d'un créneau importé ne sont déchiffrés que pour leur propriétaire. |
+| GET | `/api/moi/notifications` | **Paramètres ajoutés** : `filtre` (`non_lues` ou `toutes`), `limite` (1 à 200, défaut 50), `avant` (curseur `<created_at>\|<id>`, facultatif). Réponse : `{ notifications, non_lues, a_suite, curseur_suivant }`, `curseur_suivant` valant `null` s'il n'y a plus de suite. Curseur malformé : 400. Chaque notification porte `invitation_statut` quand son sujet est une invitation. |
+| GET / PATCH | `/api/moi` | **Champ `notifications_a_voir`** (entier) : la pastille de « Notifs ». Non lues hors invitations en attente, plus les invitations en attente (chacune compte une fois). **Champ `personal_agenda_visibility`** (`none`, `busy`, `details`), lu et modifiable ; le `PATCH` réaligne les partages dans la même transaction. |
+| GET | `/api/groupes/:groupId` | **Champ retiré** : `ma_visibilite_defaut`. |
+| GET | `/api/groupes/:groupId/disponibilites` | Applique désormais le plafond de visibilité du propriétaire. |
+| GET / POST | `/api/moi/agenda`, et le tableau de bord | **Champ retiré** : `partages` (les créneaux ne portent plus leurs partages). |
+| PUT | `/api/moi/agenda/:id/partages` | **Supprimé.** |
+| PUT | `/api/groupes/:groupId/ma-visibilite` | **Supprimé.** |
+
+Règles métier de ce chantier :
+
+- **Visibilité effective** d'un créneau personnel pour un autre membre : `min(users.personal_agenda_visibility, personal_event_shares.visibility)`, sur l'ordre `none < busy < details`. Elle est appliquée **à la lecture**, donc valable pour les créneaux existants comme pour les futurs. Détail et motif : `Dossier de conception/03 - Modele de donnees.md` §3.6 et [`ADR-0017`](docs/decisions/ADR-0017-visibilite-globale-agenda-personnel.md).
+- Un créneau **importé** d'un agenda externe ne dépasse jamais `busy`. Le flux iCal sortant n'est **pas** plafonné : il lit l'agenda du propriétaire du jeton, et l'URL d'un flux est un secret porteur.
+- **Verrou n° 6** du garde-fou SQL (`app/server/db/sql.ts`) : toute requête qui référence à la fois `personal_event_shares` et `personal_events` est refusée si elle ne porte pas le plafond de compte (`users.personal_agenda_visibility = ?`) et le rapprochement `users.id = memberships.user_id`.
+- **Migration `0009_visibilite_agenda_personnel.sql`** : ajoute `users.personal_agenda_visibility`, amorcée avec le choix le plus restrictif des appartenances actives. Elle ne touche aucune ligne de `personal_event_shares`. `memberships.default_personal_visibility` reste en base, **dormante** : plus rien ne la lit.
+- **Invitations** : une invitation envoyée à un compte existant crée une notification `invitation_received` (`group_id` NULL, pas d'e-mail en file). Y répondre marque la notification lue ; elle reste dans l'historique avec son état. Une invitation à une simple adresse e-mail ne crée pas de notification, faute de compte à notifier. Une invitation acceptée alors que le compte est déjà membre est clôturée en `accepted` et répond 409 `membre.deja` une fois ; au second essai, l'invitation n'est plus en attente (404).
+- `creneauxOccupes` (`GroupScope`) est **supprimée** de `app/server/db/scope.ts`.
+
 Registre de cloisonnement : `app/tests/cloisonnement/registre.ts` recense chaque route et son exigence ; le test de
 complétude échoue si une route montée n'y figure pas (les routeurs se montent avec `monter()`, `http/montage.ts`).
 
@@ -445,8 +476,8 @@ ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
   `article`, `articleVoisin`, `tache`.
 - **Ouvert sur le lot 6** : l'interface n'a jamais été ouverte dans un navigateur, ni sur un vrai téléphone (le critère n° 3 est prouvé côté
   serveur par des tests, pas à la main) ; la reconnexion automatique d'`EventSource` n'est vérifiée que par lecture du code ; un membre retiré
-  dont l'onglet reste ouvert réessaie (30 s) indéfiniment (404 muet) ; sur macOS, lancer `npm test` deux fois de suite en moins d'une minute
-  peut épuiser les ports éphémères (`EADDRNOTAVAIL`, supertest ouvre un serveur par requête) — attendre 30 s. C'est `connect EADDRNOTAVAIL 127.0.0.1:<port>` : sans gravité, sans rapport avec le code testé ; peu probable sous Linux.
+  dont l'onglet reste ouvert réessaie (30 s) indéfiniment (404 muet) ; l'épuisement des ports éphémères sur macOS
+  (`connect EADDRNOTAVAIL 127.0.0.1:<port>`) est corrigé depuis le 20/11/2026 — le décor de test ne monte plus qu'un seul serveur d'écoute, pic de `TIME_WAIT` ramené de 16 260 à 328 ; cette signature est donc redevenue le signe d'un vrai défaut, pas du décor de la machine (voir `AGENTS.md` §5).
 - **Audit UI / UX / frontend du 2026-11-18** :
   [`docs/audits/2026-11-18-ui-ux-frontend.md`](docs/audits/2026-11-18-ui-ux-frontend.md). Note globale
   5/10 : les fonctions de la V1 sont là, la couche d'usage ne l'est pas. Les huit constats critiques,
@@ -600,7 +631,11 @@ ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
   Phase 3 : mode sombre, accessibilité structurelle et routage (lien d'évitement, `<h1>` unique, `document.title`
   par route, route `introuvable`), responsive tablette, finitions, mémoïsation, et état de consultation de
   l'agenda dans l'URL (`lib/etat-agenda.ts`).
-- **Fragilité de test confirmée, et sa signature** : un `npm test` lancé juste après un
+- **Fragilité de test confirmée, puis corrigée à la racine le 20/11/2026.** Ce qui suit est
+  l'historique du symptôme ; la cause (un serveur TCP par requête dans `app/tests/fixtures/comptes.ts`)
+  est traitée, le pic de `TIME_WAIT` de la suite de cloisonnement est passé de 16 260 à 328, et un
+  `EADDRNOTAVAIL` aujourd'hui doit être cherché, pas excusé. Lancer les trois répertoires séparément
+  et espacés reste la façon recommandée de vérifier. Pour mémoire : un `npm test` lancé juste après un
   `npm run typecheck` a donné 42 échecs sur 2 fichiers, puis deux runs espacés ont été entièrement
   verts (1659 tests). Rejoué sur la phase 2 bis : `npx vitest run` en un seul bloc donne 49 échecs,
   tous dans `app/tests/cloisonnement/suite-generique.test.ts`, avec
@@ -629,3 +664,15 @@ ajouter un gabarit à jeton sans écrire la page du client échoue aux tests.
     les imports de tout le dépôt, donc il s'allonge à mesure que le projet grossit. C'est un garde-fou
     de sécurité : il doit échouer pour ce qu'il mesure, ou pas du tout.
   - `app/tests/unite/ics-entrant.test.ts`, le plafond de flux iCal (voir ci-dessus).
+- **Chantier interface mobile et visibilité globale, du 2026-11-21** (cinq lots). Côté serveur, ajoutés :
+  `services/agenda-personnel-lecture.ts` (lecture d'un créneau de son propre compte) et
+  `domain/visibilite-personnelle.ts` (l'ordre `none < busy < details` et la seule fonction de combinaison),
+  plus la migration `0009`. Côté client, supprimés : `pages/tableau/VueSemaine.tsx`, `BarreKpis.tsx`,
+  `WidgetDepenses.tsx`, `WidgetEvenementsAVenir.tsx`. Décisions : [`ADR-0016`](docs/decisions/ADR-0016-heritage-des-preferences-de-notification.md)
+  (révision du 2026-11-21 sur `invitation_received`) et [`ADR-0017`](docs/decisions/ADR-0017-visibilite-globale-agenda-personnel.md).
+- **Ouvert sur ce chantier** : rien n'a été vérifié dans un navigateur ni sur un téléphone réel, donc ni la
+  grille horaire, ni l'aimantation au défilement, ni la feuille « Créer ». « Dépense à valider » n'est pas
+  détectable, faute de donnée dans le modèle. Une invitation envoyée à une adresse e-mail sans compte ne crée
+  pas de notification ; son rattachement à la création du compte reste à faire. Le filtre de source de la
+  barre d'outils du calendrier de l'accueil (`pages/tableau/BarreOutilsCalendrier.tsx`) garde trois valeurs
+  (tous, groupes, perso).

@@ -5,6 +5,7 @@ import { nouvelIdentifiant } from '../identifiant.js';
 import { baseDe, type PorteeUtilisateur } from '../portee-utilisateur.js';
 import { baseDeScope, type GroupScope } from '../scope.js';
 import { executerEnTransaction, preparer } from '../sql.js';
+import { notifierInvitation } from './notifications.js';
 import { enfilerEmail, type EmailAEnfiler } from './transverse.js';
 
 // Invitations ÉMISES par un groupe (lot 3). Toutes prennent un `GroupScope` : l'invitation appartient au groupe du scope, une
@@ -92,13 +93,16 @@ export function inviterParNomUtilisateur(scope: GroupScope, emission: EmissionPa
       { colonne: 'status', operateur: '=', valeur: 'pending' },
     ]);
     if (dejaInvite.length > 0) return 'ignoree' as const;
-    scope.inserer('invitations', {
+    const invitationId = scope.inserer('invitations', {
       kind: 'existing_user',
       target_user_id: cibleId,
       role: emission.role,
       message: emission.message,
       expires_at: emission.expireLe,
     });
+    // Le compte existe : l'invitation laisse une trace dans son historique de notifications, même une fois répondue.
+    // (Une invitation par e-mail vise une adresse, pas un compte : rien à notifier tant que personne ne l'a ouverte.)
+    notifierInvitation(scope, { destinataireId: cibleId, invitationId, role: emission.role, maintenant });
     return 'emise' as const;
   });
 }
@@ -276,7 +280,16 @@ function entrer(base: Base, portee: PorteeUtilisateur, invitation: InvitationPro
     ).run(membershipId, invitation.id_groupe, portee.userId, invitation.role, maintenant, maintenant, maintenant);
   } else {
     const ligne = z.object({ id: z.string(), status: z.string() }).parse(existante);
-    if (ligne.status === 'active') return 'deja_membre';
+    if (ligne.status === 'active') {
+      // Déjà dans le groupe (entré par un autre chemin) : l'invitation est sans objet. On la clôt comme acceptée, rattachée à
+      // l'appartenance existante, au lieu de la laisser « en attente » (réponse 409 à chaque essai, pastille qui ne s'éteint jamais).
+      preparer(
+        base,
+        `UPDATE invitations SET status = 'accepted', responded_at = ?, resulting_membership_id = ?
+         WHERE id = ? AND group_id = ? AND status = 'pending'`,
+      ).run(maintenant, ligne.id, invitation.id, invitation.id_groupe);
+      return 'deja_membre';
+    }
     membershipId = ligne.id;
     preparer(
       base,
@@ -296,6 +309,15 @@ function entrer(base: Base, portee: PorteeUtilisateur, invitation: InvitationPro
 
 class ErreurReponseConcurrente extends Error {}
 
+/** Répondre à une invitation lit la notification qui l'annonçait (elle reste dans l'historique, avec l'issue) : la pastille n'attend plus rien. */
+function marquerNotificationInvitationLue(base: Base, userId: string, invitationId: string, maintenant: string): void {
+  preparer(
+    base,
+    `UPDATE notifications SET read_at = ?
+     WHERE user_id = ? AND kind = 'invitation_received' AND subject_type = 'invitation' AND subject_id = ? AND read_at IS NULL`,
+  ).run(maintenant, userId, invitationId);
+}
+
 /** Accepte une invitation ADRESSÉE À CE COMPTE. Une invitation d'un autre compte est introuvable (404), comme une invitation inconnue. */
 export function accepterInvitationRecue(portee: PorteeUtilisateur, invitationId: string, maintenant: string): ResultatReponse {
   const base = baseDe(portee);
@@ -309,7 +331,9 @@ export function accepterInvitationRecue(portee: PorteeUtilisateur, invitationId:
       if (ligne === undefined) return 'introuvable' as const;
       const invitation = ligneProuvee.parse(ligne);
       if (invitation.status !== 'pending' || invitation.expires_at <= maintenant) return 'introuvable' as const;
-      return entrer(base, portee, invitation, maintenant);
+      const resultat = entrer(base, portee, invitation, maintenant);
+      if (resultat === 'acceptee' || resultat === 'deja_membre') marquerNotificationInvitationLue(base, portee.userId, invitation.id, maintenant);
+      return resultat;
     });
   } catch (erreur) {
     if (erreur instanceof ErreurReponseConcurrente) return 'indisponible';
@@ -319,12 +343,17 @@ export function accepterInvitationRecue(portee: PorteeUtilisateur, invitationId:
 
 /** Refuse une invitation ADRESSÉE À CE COMPTE. */
 export function refuserInvitationRecue(portee: PorteeUtilisateur, invitationId: string, maintenant: string): ResultatReponse {
-  const refusee = preparer(
-    baseDe(portee),
-    `UPDATE invitations SET status = 'declined', responded_at = ?
-     WHERE id = ? AND target_user_id = ? AND status = 'pending' AND expires_at > ?`,
-  ).run(maintenant, invitationId, portee.userId, maintenant);
-  return refusee.changes === 1 ? 'refusee' : 'introuvable';
+  const base = baseDe(portee);
+  return executerEnTransaction(base, () => {
+    const refusee = preparer(
+      base,
+      `UPDATE invitations SET status = 'declined', responded_at = ?
+       WHERE id = ? AND target_user_id = ? AND status = 'pending' AND expires_at > ?`,
+    ).run(maintenant, invitationId, portee.userId, maintenant);
+    if (refusee.changes !== 1) return 'introuvable' as const;
+    marquerNotificationInvitationLue(base, portee.userId, invitationId, maintenant);
+    return 'refusee' as const;
+  });
 }
 
 // --- Par lien (jeton) ---------------------------------------------------------------------------------------------------

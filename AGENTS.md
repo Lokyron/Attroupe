@@ -100,6 +100,14 @@ Ils sont corrigés ; ils sont listés ici parce que **chacun est un piège de ce
 - **`db/` est le seul dossier autorisé à écrire du SQL**, une règle ESLint l'impose. `db/` ne doit
   jamais appeler le réseau ni importer `services/`.
 - **Les tests s'écrivent avec le code et se lancent.** Un échec se rapporte avec sa sortie.
+- **Pas de seuil dupliqué entre CSS et JavaScript.** Le CSS porte le seuil (la règle `@container semaine`
+  de `app/client/src/styles.css`), et le JavaScript lit son **effet** (`scroll-snap-type` via
+  `getComputedStyle`, fonction `unSeulJour` de `GrilleSemaine.tsx`) au lieu de recopier la valeur. Une
+  seconde copie du seuil finit toujours par diverger.
+- **La feuille « Créer » a deux déclencheurs pour une seule instance.** Le bouton du bandeau du bas et celui
+  de la barre latérale ouvrent la même `FeuilleCreation`. `boutonsOuvrants` (`App.tsx`) donne au focus le
+  déclencheur d'origine pour le retour, et `premierVisible` (`lib/retour-focus.ts`) retient le premier visible
+  si l'autre est masqué par un redimensionnement. Ne pas monter une seconde feuille pour un second bouton.
 
 ## 5. Vérifier son travail
 
@@ -113,26 +121,40 @@ npm run build
 Les quatre doivent passer : ce sont exactement les étapes de l'intégration continue, et aucune
 image n'est publiée si l'une échoue.
 
-> **Piège de la machine de développement (macOS).** Chaque fichier de test lance son propre
-> serveur HTTP, et `app/tests/cloisonnement/suite-generique.test.ts` laisse à lui seul environ
-> **15 000 sockets en `TIME_WAIT`**, pour une plage éphémère de 16 384 ports (49152-65535) : la
-> plage est donc presque entièrement consommée. On obtient des dizaines de faux
-> `connect EADDRNOTAVAIL` et `listen EADDRNOTAVAIL`, variables d'une exécution à l'autre — on a vu
-> 7, 43, 49, 129 et 154 échecs **pour le même code**, et le commit déjà en production échoue de la
-> même façon.
+> **La saturation des ports éphémères est corrigée (20/11/2026) — ne la réintroduis pas.** Appelé
+> avec une fonction Express, `supertest` monte un vrai serveur TCP **par requête**. Le client de
+> test (`app/tests/fixtures/comptes.ts`) en émettait **16 251 pour la seule suite de
+> cloisonnement**, dont ~70 % pour construire les décors (123 routes au registre, 92 requêtes par
+> monde) : autant de sockets laissés 30 s en `TIME_WAIT` sur les 16 384 ports éphémères de macOS
+> (49152-65535). Pic mesuré **16 260 sur 16 384**, soit 2 % de marge. On obtenait des dizaines de
+> faux `connect EADDRNOTAVAIL` et `listen EADDRNOTAVAIL`, variables d'une exécution à l'autre — on a
+> vu 7, 43, 49, 129 et 154 échecs **pour le même code** — et trois tests sont tombés parce que
+> **deux requêtes** avaient été ajoutées à un décor.
 >
-> - `--maxWorkers=4` suffit en général, machine au repos et ports drainés.
-> - **`--maxWorkers=1` est l'arbitre** : lent, mais son résultat ne se discute pas.
-> - Avant de conclure à une régression, vérifie `netstat -an | grep -c TIME_WAIT` : au-dessus de
->   quelques milliers, attends le drainage. Et compare avec un clone du dernier commit publié,
->   qui est le témoin.
+> `decor()` monte désormais **un seul serveur d'écoute par décor**, partagé par tous ses clients,
+> fermé dans `nettoyer()`, et `Client.envoyer` le vise par son URL avec un `http.Agent` en
+> `keepAlive`. **Mesure avant / après sur `app/tests/cloisonnement`, à ports drainés :
+> 16 260 → 328 sockets en `TIME_WAIT` (÷ 50), et la suite passe de 24,4 s à 16,2 s.** La marge est
+> passée de 2 % à 98 % : une quinzaine de routes de plus au registre ne fait plus tomber la suite.
 >
-> Un fichier qui passe seul mais échoue dans la suite complète, c'est ce symptôme et non un défaut
-> du code. Réduire la consommation de `suite-generique` reste à faire.
+> Deux pièges, documentés sur place dans `comptes.ts` — lis le commentaire avant d'y toucher :
 >
-> **En pratique, ce qui marche** : lancer les trois répertoires séparément **et espacés**, en
-> laissant les ports se drainer entre deux. La référence verte au 20/11/2026, après la phase 3, est
-> **913 schéma + unité, 461 cloisonnement (1 ignoré), 456 intégration = 1 830 tests**.
+> - **`maxSockets: 80` de l'agent est encadré des deux côtés.** En haut par `kern.ipc.somaxconn`,
+>   qui vaut **128** sur macOS : la rafale de 384 requêtes simultanées de
+>   `app/tests/integration/listes-concurrence.test.ts` déborde la file d'acceptation du serveur — que
+>   better-sqlite3, synchrone, n'a pas le temps de vider — et le noyau répond par un RST, donc un
+>   `ECONNRESET`. En bas par `app/tests/integration/auth-securite.test.ts` (« la file de hachage
+>   pleine ne débite pas la cadence »), qui a besoin de **37 requêtes réellement en vol** —
+>   `MAX_PARALLELE` 4 + `MAX_EN_ATTENTE` 32, puis une de plus (`app/server/services/mot-de-passe.ts`).
+>   Sous ce seuil, l'agent les met en file côté client, le 503 attendu ne se produit jamais et **la
+>   preuve devient verte sans rien prouver** ; le test en lance 80, et 80 laisse donc de la marge.
+>   C'est ce seuil de 37 qu'il faut suivre, pas le nombre de requêtes du test.
+> - **Le serveur est `unref`é** : un décor dont `nettoyer()` n'est pas appelé ne doit pas retenir le
+>   processus de test.
+>
+> **En pratique, ce qui marche** : lancer les trois répertoires séparément **et espacés**. La
+> référence verte au 20/11/2026 est **913 schéma + unité, 461 cloisonnement (1 ignoré),
+> 456 intégration = 1 830 tests**.
 >
 > ```bash
 > npx vitest run app/tests/schema app/tests/unite
@@ -140,14 +162,11 @@ image n'est publiée si l'une échoue.
 > npx vitest run app/tests/integration
 > ```
 >
-> **La marge est de 2 %, et la signature n'excuse rien.** Le pic mesuré est de 16 033 sockets en
-> `TIME_WAIT` sur les 16 384 ports éphémères de macOS, parce que le client de test
-> (`app/tests/fixtures/comptes.ts`) ouvre un vrai serveur TCP **par requête** — ~16 349 pour la seule
-> suite de cloisonnement, dont 70 % pour construire les décors. Trois tests sont déjà tombés en
-> `EADDRNOTAVAIL` à cause de **deux requêtes** ajoutées au décor : avant de classer un échec comme
-> « c'est l'environnement », compare au dernier run vert et compte les requêtes. La correction
-> durable est un serveur d'écoute unique par décor avec un agent `keepAlive` ; elle touche des
-> fixtures dont 1 830 tests dépendent, donc elle ne s'improvise pas au milieu d'autre chose.
+> Ne lance **jamais** `npx vitest run` sans chemin. `--maxWorkers=1` reste l'arbitre en cas de
+> doute : lent, mais son résultat ne se discute pas. Et avant de classer un échec comme « c'est
+> l'environnement », vérifie `netstat -an | grep -c TIME_WAIT` : on est maintenant censé rester
+> sous le millier, donc **quelques milliers de sockets sont le signe d'une régression, pas du
+> décor de la machine**.
 
 **Trois tests portent un délai explicite, et ce n'est pas un contournement.** Ils sont lents par
 construction (un verrou de base de données, deux mesures de temps constant sur l'authentification)

@@ -13,6 +13,14 @@ import type { Base } from './base.js';
 // c'est le signal d'écrire autrement (architecture §4, verrou 5), jamais d'ajouter un texte transverse.
 // Limite assumée : elle prouve qu'un filtre lié `colonne = ?` existe, pas QUELLE valeur on lie — c'est le
 // GroupScope / la PorteeUtilisateur qui lient celle de l'appartenance. Les écritures réelles passent par eux.
+//
+// Verrou n° 6 (ADR-0017), dans la même garde : toute requête qui joint `personal_event_shares` et `personal_events` (la lecture de
+// l'agenda d'un compte par un autre membre) doit porter le plafond de compte `users.personal_agenda_visibility = ?` et le
+// rattachement de ce compte au PROPRIÉTAIRE du créneau (`users.id = personal_events.user_id`, ou `users.id = memberships.user_id` avec
+// `memberships.id = personal_event_shares.membership_id`). Un futur chemin de lecture ne peut donc pas oublier le plafond : il est refusé au `preparer`.
+// LIMITE : le verrou prouve qu'un plafond lié, celui du bon compte, existe ; il ne prouve PAS que les colonnes de texte ne sortent que pour
+// le couple (details, details). Un texte « détails » lié à ('busy', 'busy') passe la garde : c'est `listerDisponibilitesGroupe` et sa table
+// de couples (engendrée par `plafonner`, testée) qui en répondent, comme pour la valeur liée aux filtres de portée plus haut.
 
 /** Colonne qui porte la portée d'une table métier ; `null` : jamais accessible par `preparer`. */
 export type ColonnePortee = 'group_id' | 'user_id' | 'id' | null;
@@ -377,6 +385,9 @@ export function diagnostiquer(texte: string): string | undefined {
   const filtres: Filtre[] = [];
   const liens: Array<readonly [string, string]> = []; // [couvert, hérite] : group_id = group_id
   const liensPartage: Array<readonly [string, string]> = []; // [qualifiant du partage, qualifiant de personal_events]
+  const plafonds: string[] = []; // qualifiants `q` de « q.personal_agenda_visibility = ? » (verrou n° 6)
+  const rapprochementsCompte: Array<readonly [string, string]> = []; // [compte, appartenance ou créneau] : u.id = m.user_id, u.id = p.user_id (verrou n° 6)
+  const liensMembre: Array<readonly [string, string]> = []; // [appartenance, partage] : m.id = s.membership_id (verrou n° 6)
   const gardesConflit: GardeConflit[] = [];
   const misesPreuve: Array<{ readonly colonne: string; readonly indice: number }> = []; // colonnes de preuve vues en SET
   const liensInviteur: Array<readonly [string, string]> = []; // [membre, invitation] : m.id = i.invited_by_membership_id
@@ -400,6 +411,14 @@ export function diagnostiquer(texte: string): string | undefined {
           liensPartage.push([partage, creneau]);
         }
       }
+      // u.id = m.user_id (ou u.id = p.user_id) : rattache le compte dont on lit le plafond à l'appartenance (ou au créneau) lue (verrou n° 6).
+      if (m === 'id' && q1 !== undefined && autre === 'user_id' && q2 !== undefined && conjoint(i - 2, i + 5) && proprietaireGauche(i) === undefined) {
+        rapprochementsCompte.push([q1, q2]);
+      }
+      // m.id = s.membership_id : l'appartenance est celle du PARTAGE, donc du propriétaire du créneau (verrou n° 6).
+      if (m === 'id' && q1 !== undefined && autre === 'membership_id' && q2 !== undefined && conjoint(i - 2, i + 5) && proprietaireGauche(i) === undefined) {
+        liensMembre.push([q1, q2]);
+      }
       // m.id = i.invited_by_membership_id : l'inviteur d'une invitation (seule jointure dérivée d'une couverture alternative).
       if (m === 'id' && q1 !== undefined && symbole(i + 1) === '=' && symbole(i + 3) === '.' && mot(i + 4) === 'invited_by_membership_id') {
         const q2i = mot(i + 2);
@@ -411,6 +430,20 @@ export function diagnostiquer(texte: string): string | undefined {
         const gauche = proprietaireGauche(i);
         if (gauche === undefined || gauche === q1) filtres.push({ qualifiant: q1, colonne: 'id' });
       }
+    }
+    if (m === 'membership_id' && symbole(i - 1) === '.' && symbole(i + 1) === '=' && symbole(i + 3) === '.' && mot(i + 4) === 'id') {
+      // s.membership_id = m.id : l'autre sens du lien précédent.
+      const partageQ = mot(i - 2);
+      const membreQ = mot(i + 2);
+      if (partageQ !== undefined && membreQ !== undefined && conjoint(i - 2, i + 5) && proprietaireGauche(i) === undefined) liensMembre.push([membreQ, partageQ]);
+    }
+    if (m === 'personal_agenda_visibility') {
+      // « q.personal_agenda_visibility = ? » : le plafond de compte, conjoint direct d'un WHERE / ON, valeur liée (verrou n° 6).
+      if (symbole(i - 1) === '.' && symbole(i + 1) === '=' && jetons[i + 2]?.genre === 'param' && conjoint(i - 2, i + 3) && proprietaireGauche(i) === undefined) {
+        const qualifiantPlafond = mot(i - 2);
+        if (qualifiantPlafond !== undefined) plafonds.push(qualifiantPlafond);
+      }
+      continue;
     }
     if (m === 'target_user_id' || m === 'token_hash') {
       if (clauseAu[i] === 'set') misesPreuve.push({ colonne: m, indice: i });
@@ -459,6 +492,32 @@ export function diagnostiquer(texte: string): string | undefined {
     }
   }
 
+  // Verrou n° 6 (ADR-0017) : une requête qui joint les partages ET les créneaux d'un agenda personnel est la lecture de l'agenda d'un
+  // compte par un autre membre. Elle doit porter le plafond de compte : `<users>.personal_agenda_visibility = ?` en conjoint direct,
+  // et le rattachement de ce compte au propriétaire du créneau : `<users>.id = <personal_events>.user_id`, ou `<users>.id = <memberships>.user_id` avec `<memberships>.id = <personal_event_shares>.membership_id`. Sans cela, un futur chemin de lecture oublierait le plafond.
+  if (references.some((r) => r.table === 'personal_event_shares') && references.some((r) => r.table === 'personal_events')) {
+    const tableDe = new Map<string, string>();
+    for (let i = 0; i < jetons.length; i++) {
+      if (mot(i - 1) === 'from' || mot(i - 1) === 'join') {
+        const d = declarer(i);
+        if (d !== undefined) tableDe.set(d.qualifiant, d.table);
+      }
+    }
+    // Le plafond doit être celui du PROPRIÉTAIRE du créneau, et non d'un lecteur ou d'un membre quelconque du groupe : le compte
+    // plafonné est rattaché soit directement au créneau lu (users.id = p.user_id), soit à l'appartenance DU PARTAGE
+    // (users.id = m.user_id ET m.id = s.membership_id).
+    const plafonne = rapprochementsCompte.some(([compte, cible]) => {
+      if (tableDe.get(compte) !== 'users' || !plafonds.includes(compte)) return false;
+      if (tableDe.get(cible) === 'personal_events') return true;
+      return (
+        tableDe.get(cible) === 'memberships' &&
+        liensMembre.some(([membre, partage]) => membre === cible && tableDe.get(partage) === 'personal_event_shares')
+      );
+    });
+    if (!plafonne) {
+      return "lecture de personal_event_shares et de personal_events sans le plafond de compte : exige « users.personal_agenda_visibility = ? » (conjoint direct) lié au propriétaire du créneau : « users.id = personal_events.user_id », ou « users.id = memberships.user_id » avec « memberships.id = personal_event_shares.membership_id » (verrou n° 6, ADR-0017)";
+    }
+  }
   // Couverture : chaque référence doit être filtrée par SA colonne de portée.
   const couvertes = new Set<number>();
   for (const [n, ref] of references.entries()) {

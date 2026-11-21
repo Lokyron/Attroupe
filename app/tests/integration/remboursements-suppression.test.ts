@@ -116,8 +116,8 @@ describe('suppression d’un remboursement (intégration HTTP)', () => {
     expect((await notificationsDe(bob)).filter((n) => n.subject_id === id)).toEqual([]);
     expect((await bob.client.get('/api/moi/notifications')).corps['non_lues']).toBe(0);
     expect((await notificationsDe(alice)).map((n) => n.kind)).toEqual(['expense_added']);
-    // Carole n'a jamais été concernée.
-    expect(await notificationsDe(carole)).toEqual([]);
+    // Carole n'a jamais été concernée (hors la notification de son invitation au groupe, qui reste dans son historique).
+    expect((await notificationsDe(carole)).map((n) => n.kind)).toEqual(['invitation_received']);
   });
 
   it('une suppression refusée (409) laisse la notification en place', async () => {

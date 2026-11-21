@@ -189,7 +189,6 @@ export interface GroupScope {
   readonly un: <T>(table: TableAvecId, id: string) => T | undefined;
   readonly inserer: (table, valeurs) => string;      // pose group_id, auteur, horodatages, id (UUID v7)
   readonly modifier / modifierPar / upsert / supprimerDoux / supprimer / transaction;
-  readonly creneauxOccupes: (entre?) => CreneauOccupe[];  // projection « occupé », sans titre
 }
 
 /** Lit l'appartenance ACTIVE en base ; lève ErreurAppartenance sinon. Seul l'intergiciel l'appelle. */
@@ -286,7 +285,9 @@ premiers laisseraient passer, y compris dans un script d'exploitation écrit à 
   ci-dessus ne résout pas se signale : on étend la garde (et ses tests), on ne la contourne pas.
   La garde prouve qu'un filtre lié existe, pas quelle valeur on lie : c'est le rôle du scope.
   `personal_events` n'est lisible que par `user_id = ?` ou par une jointure avec
-  `personal_event_shares` filtrée par `group_id = ?`.
+  `personal_event_shares` filtrée par `group_id = ?`. Depuis l'ADR-0017, cette jointure doit en outre porter le plafond
+  de compte `users.personal_agenda_visibility = ?` et le rapprochement `users.id = memberships.user_id` : c'est la
+  sous-règle n° 6 de cette garde, refusée au `preparer` si elle manque.
   **Trois exceptions raisonnées (lot 3), et aucune autre.** Elles complètent la garde ; elles n'élargissent pas le canal
   transverse, qui reste une liste figée de *lectures* :
   1. `INSERT INTO groups (colonnes) VALUES (…)` : `groups` est la table racine, sans `group_id` à filtrer, et l'unique
@@ -427,7 +428,7 @@ Conventions : préfixe `/api`, JSON, cookie de session obligatoire sauf mention 
 | POST | `/auth/mot-de-passe/oubli` | Mettre un e-mail de réinitialisation en file. *Sans session.* |
 | POST | `/auth/mot-de-passe/reinitialisation` | Consommer le jeton et changer le mot de passe. |
 | GET | `/moi` | Mon compte, mes groupes, le nombre d'invitations en attente. |
-| PATCH | `/moi` | Nom affiché, avatar, fuseau, anniversaire, langue. |
+| PATCH | `/moi` | Nom affiché, avatar, fuseau, anniversaire, langue, visibilité de l'agenda personnel (`personal_agenda_visibility`). |
 | POST | `/moi/mot-de-passe` | Changer de mot de passe : `{current_password, new_password}`. Ancien mot de passe vérifié, **autres sessions révoquées**, jeton de la session courante **renouvelé** (nouveau cookie), le tout en une transaction. *(lot 2)* |
 | POST | `/moi/email/verification` | Renvoyer le mail de vérification d'adresse (409 si déjà vérifiée) : un lien expiré se rattrape. *(ajoutée au lot 2)* |
 | GET / DELETE | `/moi/sessions`, `/moi/sessions/:id` | Lister et révoquer mes appareils ; `DELETE /moi/sessions` révoque tout sauf la session courante. |
@@ -475,11 +476,13 @@ Conventions : préfixe `/api`, JSON, cookie de session obligatoire sauf mention 
 ### Agenda personnel
 | Méthode | Chemin | Rôle |
 |---|---|---|
-| GET / POST | `/moi/agenda` | Mes créneaux personnels. |
+| GET / POST | `/moi/agenda` | Mes créneaux personnels (sans champ `partages`). |
+| GET | `/moi/agenda/:creneauId` | Un créneau de mon agenda. 404 `agenda.introuvable` hors de mon compte. |
 | PATCH / DELETE | `/moi/agenda/:id` | Modifier, supprimer. |
-| PUT | `/moi/agenda/:id/partages` | Par groupe : rien / occupé / détail. |
-| PUT | `/groupes/:g/ma-visibilite` | Mon niveau de partage par défaut dans ce groupe. |
-| GET | `/groupes/:g/disponibilites?du=&au=` | Les créneaux des membres, **projetés** : « occupé » sans titre si la visibilité l'impose. |
+| GET | `/groupes/:g/disponibilites?du=&au=` | Les créneaux des membres, **projetés** : « occupé » sans titre si la visibilité effective l'impose (plafond de compte, ADR-0017). |
+
+La visibilité de l'agenda personnel se règle sur `PATCH /moi` (`personal_agenda_visibility`), une fois par compte.
+Les routes `PUT /moi/agenda/:id/partages` et `PUT /groupes/:g/ma-visibilite` ont été supprimées (ADR-0017).
 
 ### Sondages de dates
 | Méthode | Chemin | Rôle |
@@ -538,7 +541,7 @@ Conventions : préfixe `/api`, JSON, cookie de session obligatoire sauf mention 
 ### Notifications, calendrier, exploitation
 | Méthode | Chemin | Rôle |
 |---|---|---|
-| GET | `/moi/notifications` | Les miennes, tous groupes, avec le nom du groupe. |
+| GET | `/moi/notifications` | Les miennes, tous groupes, avec le nom du groupe. Paramètres `filtre` (`non_lues` / `toutes`), `limite` (1 à 200, 50 par défaut) et `avant` (curseur `<created_at>\|<id>`, pagination). |
 | POST | `/moi/notifications/lecture` | Marquer lu (une, ou tout). |
 | GET / PUT | `/moi/preferences-notifications` | Par groupe : e-mail immédiat, résumé quotidien, coupé. |
 | GET / POST | `/moi/flux-ical` | Mes abonnements ; créer un jeton (**affiché une seule fois**). |

@@ -42,7 +42,6 @@ function usagesInterdits(scope: GroupScope, compte: PorteeUtilisateur, base: Con
     supprimerDoux: () => false,
     supprimer: () => false,
     transaction: (fn) => fn(),
-    creneauxOccupes: () => [],
   };
   lireEvenements(faux);
 

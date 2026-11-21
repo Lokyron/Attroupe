@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ErreurApi, SESSION_EXPIREE } from './api/client';
 import { deconnecter, lireMoi, type Moi } from './api/groupes';
-import { listerNotifications } from './api/notifications';
 import { lireVersion, type InfoVersion } from './api/version';
 import {
   IconeCalendrier,
   IconeCamera,
   IconeCloche,
   IconeDeconnexion,
-  IconeEnveloppe,
   IconeGroupes,
   IconeListe,
   IconeMessage,
@@ -19,6 +17,7 @@ import {
   IconeUtilisateur,
 } from './components/Icones';
 import { Erreur, messageDe } from './components/Erreur';
+import { FeuilleCreation } from './components/FeuilleCreation';
 import { FournisseurGroupe } from './components/FournisseurGroupe';
 import { t } from './i18n';
 import {
@@ -33,6 +32,7 @@ import { Agenda } from './pages/Agenda';
 import { Albums } from './pages/Albums';
 import { Depenses } from './pages/Depenses';
 import { Evenement, NouvelEvenement } from './pages/Evenement';
+import { EvenementPersonnel } from './pages/EvenementPersonnel';
 import { Exploitation } from './pages/Exploitation';
 import { Fil } from './pages/Fil';
 import { Fils } from './pages/Fils';
@@ -48,7 +48,7 @@ import { NouveauGroupe } from './pages/NouveauGroupe';
 import { Sondage } from './pages/Sondage';
 import { Sondages } from './pages/Sondages';
 import { TableauDeBord } from './pages/TableauDeBord';
-import { decoderSegment, estFragmentDeRoute, separerFragment } from './lib/fragment-route';
+import { aFormeDIdentifiant, decoderSegment, estFragmentDeRoute, separerFragment } from './lib/fragment-route';
 import { initialesDe } from './lib/initiales';
 
 type Route =
@@ -57,6 +57,7 @@ type Route =
   | { type: 'invitations' }
   | { type: 'notifications' }
   | { type: 'compte' }
+  | { type: 'agenda-perso'; creneauId: string }
   | { type: 'exploitation' }
   | { type: 'groupe'; id: string }
   | { type: 'agenda'; id: string }
@@ -85,6 +86,11 @@ function lireRoute(): Route {
   if (premier === 'invitations') return { type: 'invitations' };
   if (premier === 'notifications') return { type: 'notifications' };
   if (premier === 'compte') return { type: 'compte' };
+  if (premier === 'agenda' && second !== undefined && second !== '') {
+    const creneauId = decoderSegment(second);
+    // Un segment qui n'a pas la forme d'un identifiant (`#/agenda/sources`) n'est pas un créneau : « introuvable » plutôt qu'une erreur générique.
+    return creneauId === null || !aFormeDIdentifiant(creneauId) ? { type: 'introuvable' } : { type: 'agenda-perso', creneauId };
+  }
   if (premier === 'exploitation') return { type: 'exploitation' };
   if (premier === 'groupe' && second !== undefined && second !== '') {
     // Un `%` mal formé dans un segment n'est pas une route : `decoderSegment` rend `null` au lieu de lever.
@@ -122,6 +128,8 @@ function titreDeRoute(route: Route): string {
       return t('nav.notifications');
     case 'compte':
       return t('nav.compte');
+    case 'agenda-perso':
+      return t('agenda_perso.page_titre');
     case 'exploitation':
       return t('exploitation.lien');
     case 'groupe':
@@ -156,7 +164,19 @@ function aller(hash: string): void {
 export function App() {
   const [etat, setEtat] = useState<Etat>({ type: 'chargement' });
   const [route, setRoute] = useState<Route>(lireRoute);
-  const [nonLues, setNonLues] = useState(0);
+  const [feuilleOuverte, setFeuilleOuverte] = useState(false);
+  const boutonCreer = useRef<HTMLButtonElement>(null);
+  const boutonCreerLateral = useRef<HTMLButtonElement>(null);
+  // Déclencheur qui a ouvert la feuille : le focus lui revient (et l'autre sert de repli si un redimensionnement le masque).
+  const [origineFeuille, setOrigineFeuille] = useState<'bandeau' | 'laterale'>('bandeau');
+  const boutonsOuvrants = useMemo(
+    () => (origineFeuille === 'laterale' ? [boutonCreerLateral, boutonCreer] : [boutonCreer, boutonCreerLateral]),
+    [origineFeuille],
+  );
+  const ouvrirFeuille = (origine: 'bandeau' | 'laterale'): void => {
+    setOrigineFeuille(origine);
+    setFeuilleOuverte(true);
+  };
   const [infoVersion, setInfoVersion] = useState<InfoVersion | null>(null);
   // Les pages à jeton se reconnaissent au CHEMIN, pas au fragment : le routeur, lui, route sur le hash.
   const lien = pageDuLien(window.location.pathname);
@@ -178,10 +198,14 @@ export function App() {
     }
   }, []);
 
+  // La pastille de « Notifs » vient du serveur (`moi.notifications_a_voir`) : on relit `moi`, sans toucher à l'écran en cas d'échec.
   const rafraichirNotifications = useCallback((): void => {
-    listerNotifications()
-      .then((r) => setNonLues(r.non_lues))
-      .catch(() => undefined);
+    lireMoi()
+      .then((moi) => setEtat((actuel): Etat => (actuel.type === 'connecte' ? { type: 'connecte', moi } : actuel)))
+      .catch((erreur: unknown) => {
+        if (erreur instanceof ErreurApi && erreur.statut === 401) setEtat({ type: 'anonyme' });
+        else console.error(erreur);
+      });
   }, []);
 
   const recharger = useCallback((): void => {
@@ -190,7 +214,6 @@ export function App() {
     lireMoi()
       .then((moi) => {
         setEtat({ type: 'connecte', moi });
-        rafraichirNotifications();
       })
       .catch((erreur: unknown) => {
         if (erreur instanceof ErreurApi && erreur.statut === 401) setEtat({ type: 'anonyme' });
@@ -208,7 +231,7 @@ export function App() {
           );
         }
       });
-  }, [rafraichirNotifications]);
+  }, []);
 
   useEffect(recharger, [recharger]);
 
@@ -234,6 +257,7 @@ export function App() {
       if (!estFragmentDeRoute(window.location.hash)) return;
       setRoute(lireRoute());
       setAvis(null);
+      setFeuilleOuverte(false);
       // Toute navigation ferme l'écran d'invitation, y compris après « Reprendre l'invitation » (le chemin est alors
       // déjà `/`). Le jeton reste gardé : la bannière propose de la reprendre.
       setInvitationOuverte(false);
@@ -249,7 +273,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    lireVersion().then(setInfoVersion).catch(() => undefined);
+    lireVersion().then(setInfoVersion).catch((erreur: unknown) => console.error(erreur));
   }, []);
 
   const oublierInvitation = useCallback((): void => {
@@ -318,6 +342,10 @@ export function App() {
       ? route.id
       : '';
 
+  // Le serveur compte les non lues et les invitations en attente sans notification (jamais deux fois la même) ; `#/invitations` (lien des e-mails) en dépend aussi.
+  const badgeNotifications = moi.notifications_a_voir;
+  const enNotifications = route.type === 'notifications' || route.type === 'invitations';
+
   const groupeActifObj = moi.groupes.find((g) => g.group_id === groupeCourant);
   const baseGroupe = groupeCourant !== '' ? `#/groupe/${encodeURIComponent(groupeCourant)}` : '';
   const initiales = initialesDe(moi.display_name);
@@ -373,33 +401,26 @@ export function App() {
               <IconeTableauDeBord className="nav-laterale-icone" />
               <span>{t('nav.tableau_de_bord')}</span>
             </a>
-            <a
-              href="#/nouveau"
+            {/* « Créer » remplace « Nouveau groupe » : la feuille le propose déjà, et le bandeau du bas n'a pas d'entrée séparée non plus. */}
+            <button
+              type="button"
+              ref={boutonCreerLateral}
               className={`nav-laterale-lien${route.type === 'nouveau' ? ' actif' : ''}`}
-              aria-current={route.type === 'nouveau' ? 'page' : undefined}
+              aria-haspopup="dialog"
+              aria-expanded={feuilleOuverte && origineFeuille === 'laterale'}
+              onClick={() => ouvrirFeuille('laterale')}
             >
               <IconePlus className="nav-laterale-icone" />
-              <span>{t('nav.nouveau_groupe')}</span>
-            </a>
-            <a
-              href="#/invitations"
-              className={`nav-laterale-lien${route.type === 'invitations' ? ' actif' : ''}`}
-              aria-current={route.type === 'invitations' ? 'page' : undefined}
-            >
-              <IconeEnveloppe className="nav-laterale-icone" />
-              <span>{t('nav.invitations')}</span>
-              {moi.invitations_en_attente > 0 && (
-                <span className="badge-alerte nav-laterale-badge">{moi.invitations_en_attente}</span>
-              )}
-            </a>
+              <span>{t('nav.creer')}</span>
+            </button>
             <a
               href="#/notifications"
-              className={`nav-laterale-lien${route.type === 'notifications' ? ' actif' : ''}`}
-              aria-current={route.type === 'notifications' ? 'page' : undefined}
+              className={`nav-laterale-lien${enNotifications ? ' actif' : ''}`}
+              aria-current={enNotifications ? 'page' : undefined}
             >
               <IconeCloche className="nav-laterale-icone" />
               <span>{t('nav.notifications')}</span>
-              {nonLues > 0 && <span className="badge-alerte nav-laterale-badge">{nonLues}</span>}
+              {badgeNotifications > 0 && <span className="badge-alerte nav-laterale-badge">{badgeNotifications}</span>}
             </a>
             <a
               href="#/compte"
@@ -577,9 +598,12 @@ export function App() {
           )}
           {!invitationOuverte && route.type === 'invitations' && <Invitations onChange={recharger} />}
           {!invitationOuverte && route.type === 'notifications' && (
-            <Notifications groupes={moi.groupes} onChange={rafraichirNotifications} />
+            <Notifications groupes={moi.groupes} onChange={rafraichirNotifications} onInvitationRepondue={recharger} />
           )}
           {!invitationOuverte && route.type === 'compte' && <Compte moi={moi} groupes={moi.groupes} onProfilChange={recharger} />}
+          {!invitationOuverte && route.type === 'agenda-perso' && (
+            <EvenementPersonnel key={route.creneauId} creneauId={route.creneauId} />
+          )}
           {!invitationOuverte && route.type === 'exploitation' && <Exploitation serviceEmail={moi.service_email} />}
           {!invitationOuverte && route.type === 'introuvable' && (
             <section className="carte">
@@ -648,35 +672,25 @@ export function App() {
           <IconeTableauDeBord className="nav-mobile-icone" />
           <span>{t('nav.accueil')}</span>
         </a>
-        <a
-          href="#/nouveau"
-          className={`nav-mobile-lien${route.type === 'nouveau' ? ' actif' : ''}`}
-          aria-current={route.type === 'nouveau' ? 'page' : undefined}
+        <button
+          type="button"
+          ref={boutonCreer}
+          className={`nav-mobile-lien nav-mobile-bouton${route.type === 'nouveau' ? ' actif' : ''}`}
+          aria-haspopup="dialog"
+          aria-expanded={feuilleOuverte && origineFeuille === 'bandeau'}
+          onClick={() => ouvrirFeuille('bandeau')}
         >
           <IconePlus className="nav-mobile-icone" />
           <span>{t('nav.creer_mobile')}</span>
-        </a>
-        <a
-          href="#/invitations"
-          className={`nav-mobile-lien${route.type === 'invitations' ? ' actif' : ''}`}
-          aria-current={route.type === 'invitations' ? 'page' : undefined}
-        >
-          <span className="nav-mobile-icone-boite">
-            <IconeEnveloppe className="nav-mobile-icone" />
-            {moi.invitations_en_attente > 0 && (
-              <span className="badge-alerte nav-mobile-badge">{moi.invitations_en_attente}</span>
-            )}
-          </span>
-          <span>{t('nav.invitations')}</span>
-        </a>
+        </button>
         <a
           href="#/notifications"
-          className={`nav-mobile-lien${route.type === 'notifications' ? ' actif' : ''}`}
-          aria-current={route.type === 'notifications' ? 'page' : undefined}
+          className={`nav-mobile-lien${enNotifications ? ' actif' : ''}`}
+          aria-current={enNotifications ? 'page' : undefined}
         >
           <span className="nav-mobile-icone-boite">
             <IconeCloche className="nav-mobile-icone" />
-            {nonLues > 0 && <span className="badge-alerte nav-mobile-badge">{nonLues}</span>}
+            {badgeNotifications > 0 && <span className="badge-alerte nav-mobile-badge">{badgeNotifications}</span>}
           </span>
           <span>{t('nav.notifs_mobile')}</span>
         </a>
@@ -689,6 +703,13 @@ export function App() {
           <span>{t('nav.compte_mobile')}</span>
         </a>
       </nav>
+      <FeuilleCreation
+        ouvert={feuilleOuverte}
+        groupes={moi.groupes}
+        groupeInitial={groupeCourant}
+        boutonsOuvrants={boutonsOuvrants}
+        onFermer={() => setFeuilleOuverte(false)}
+      />
     </div>
   );
 }

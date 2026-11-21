@@ -6,7 +6,7 @@ import { OCTETS_MAX } from '../../server/services/agenda-externe.js';
 import { REGLES_PAR_DEFAUT } from '../../server/services/cadence.js';
 import { demarrerTaches, type Taches } from '../../server/services/taches.js';
 import { secretFactice } from '../fixtures/env.js';
-import { decor, groupe, personne, type GroupeAmorce, type Personne } from '../fixtures/groupes.js';
+import { decor, groupe, personne, type Personne } from '../fixtures/groupes.js';
 import type { Decor } from '../fixtures/comptes.js';
 import { demarrerFauxAgenda, ICS_UN_EVENEMENT, ICS_VIDE, type FauxAgenda } from '../fixtures/faux-agenda.js';
 
@@ -161,9 +161,9 @@ describe('agenda externe : synchronisation entrante', () => {
       expect(d.sql.prepare('SELECT count(*) FROM calendar_sources').pluck().get()).toBe(5);
     });
 
-    it('les partages suivent la visibilité par défaut du groupe, mais `details` est ramené à `busy`', async () => {
-      const g: GroupeAmorce = await groupe(d, 'Groupe Agenda', [{ personne: alice, role: 'admin' }]);
-      d.sql.prepare("UPDATE memberships SET default_personal_visibility = 'details' WHERE group_id = ? AND user_id = ?").run(g.groupId, alice.userId);
+    it('les partages suivent le réglage de compte, mais `details` est ramené à `busy`', async () => {
+      await groupe(d, 'Groupe Agenda', [{ personne: alice, role: 'admin' }]);
+      d.sql.prepare("UPDATE users SET personal_agenda_visibility = 'details' WHERE id = ?").run(alice.userId);
       const r = await creer();
       expect(r.statut).toBe(201);
       const partages = d.sql.prepare('SELECT visibility FROM personal_event_shares').pluck().all();
@@ -346,8 +346,8 @@ describe('agenda externe : synchronisation entrante', () => {
   });
 
   describe('créneaux importés dans l’agenda personnel', () => {
-    it('409 `agenda.creneau_importe` pour modifier ou supprimer ; 409 `agenda.import_sans_details` pour un partage en `details` (jamais une SqliteError)', async () => {
-      const g = await groupe(d, 'Groupe Agenda', [{ personne: alice, role: 'admin' }]);
+    it('409 `agenda.creneau_importe` pour modifier ou supprimer un créneau importé (jamais une SqliteError)', async () => {
+      await groupe(d, 'Groupe Agenda', [{ personne: alice, role: 'admin' }]);
       const sourceId = (await creer()).corps['id'] as string;
       const creneau = importes(sourceId)[0]?.id ?? '';
       const modif = await alice.client.patch(`/api/moi/agenda/${creneau}`, { title: 'Renommé' });
@@ -356,12 +356,6 @@ describe('agenda externe : synchronisation entrante', () => {
       const suppr = await alice.client.delete(`/api/moi/agenda/${creneau}`);
       expect(suppr.statut).toBe(409);
       expect(suppr.corps).toEqual({ error: 'agenda.creneau_importe' });
-      const details = await alice.client.put(`/api/moi/agenda/${creneau}/partages`, { partages: [{ group_id: g.groupId, visibility: 'details' }] });
-      expect(details.statut).toBe(409);
-      expect(details.corps).toEqual({ error: 'agenda.import_sans_details' });
-      // `busy` et `none` restent permis.
-      expect((await alice.client.put(`/api/moi/agenda/${creneau}/partages`, { partages: [{ group_id: g.groupId, visibility: 'none' }] })).statut).toBe(200);
-      expect((await alice.client.put(`/api/moi/agenda/${creneau}/partages`, { partages: [{ group_id: g.groupId, visibility: 'busy' }] })).statut).toBe(200);
       expect(importes(sourceId)[0]?.title).toBe('');
     });
 

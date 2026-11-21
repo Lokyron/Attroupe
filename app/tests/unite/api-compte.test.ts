@@ -21,10 +21,17 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('api/compte', () => {
   it('modifie le profil en n’envoyant que les champs fournis', async () => {
-    const f = simuler(200, { display_name: 'Léa', time_zone: 'Europe/Paris', email_verified_at: null });
+    const f = simuler(200, { display_name: 'Léa', time_zone: 'Europe/Paris', email_verified_at: null, personal_agenda_visibility: 'busy' });
     const p = await modifierProfil({ display_name: 'Léa' });
     expect(f).toHaveBeenCalledWith('/api/moi', expect.objectContaining({ method: 'PATCH', body: '{"display_name":"Léa"}' }));
-    expect(p).toEqual({ display_name: 'Léa', time_zone: 'Europe/Paris', email_verified_at: null });
+    expect(p).toEqual({ display_name: 'Léa', time_zone: 'Europe/Paris', email_verified_at: null, personal_agenda_visibility: 'busy' });
+  });
+
+  it('envoie le réglage de visibilité de l’agenda personnel au profil, et relit la valeur renvoyée', async () => {
+    const f = simuler(200, { display_name: 'Léa', time_zone: 'Europe/Paris', email_verified_at: null, personal_agenda_visibility: 'none' });
+    const p = await modifierProfil({ personal_agenda_visibility: 'none' });
+    expect(f).toHaveBeenCalledWith('/api/moi', expect.objectContaining({ method: 'PATCH', body: '{"personal_agenda_visibility":"none"}' }));
+    expect(p.personal_agenda_visibility).toBe('none');
   });
 
   it('envoie les deux mots de passe sous les noms attendus par le serveur', async () => {

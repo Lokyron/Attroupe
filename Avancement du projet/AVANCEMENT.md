@@ -3,6 +3,42 @@
 > Un bloc par jalon. Le plus récent en haut. On y note ce qui est **fait et vérifié**,
 > pas ce qui est prévu (le prévu vit dans le dossier de conception).
 
+## 2026-11-21 — Interface utilisable au téléphone, et visibilité de l'agenda personnel réglée une fois
+
+**Ce chantier change l'usage quotidien, pas la structure des données** (une seule migration, `0009`).
+Il est livré en cinq lots. Cette entrée est écrite à partir de la lecture du code : les tests et le
+typage ne sont pas relancés ici.
+
+- **Le prochain événement mène à l'événement.** La carte d'accueil ouvre désormais une page d'événement
+  personnel, qui n'existait pas (`pages/EvenementPersonnel.tsx`, route `#/agenda/:creneauId`).
+- **Un seul bouton « Créer ».** Le bandeau du bas et la barre latérale ouvrent la même feuille, à quatre
+  entrées (événement, groupe, dépense, liste), avec le choix du groupe quand il y en a plusieurs
+  (`components/FeuilleCreation.tsx`, `lib/actions-creation.ts`).
+- **Les invitations sont fusionnées dans les notifications.** Une invitation envoyée à un compte existant
+  crée une notification (`invitation_received`) ; y répondre la marque lue, et elle reste dans
+  l'historique. L'historique est paginé par curseur (`filtre`, `limite`, `avant`). La pastille « Notifs »
+  vient de `notifications_a_voir`. `#/invitations` reste servie, car les e-mails d'invitation y pointent.
+  Décision : [`ADR-0016`](../docs/decisions/ADR-0016-heritage-des-preferences-de-notification.md), révisée.
+- **La vue semaine est une vraie grille horaire**, mobile d'abord, partagée par la page agenda d'un groupe
+  et le widget de l'accueil (`components/GrilleSemaine.tsx`, `agenda/grille-semaine.ts`). Sous 45 rem, un
+  jour à la fois avec aimantation au défilement ; au-delà, sept colonnes. Le seuil n'existe qu'en CSS.
+- **L'accueil est refondu en mobile d'abord** : prochain événement, « À faire », « Ma semaine », solde net
+  par groupe, puis photos et groupes repliés. Les tuiles de KPI, la grille « bento » et les actions rapides
+  de l'en-tête sont retirées.
+- **La visibilité de l'agenda personnel se règle globalement**, une fois par compte, dans « Mon compte »
+  (`users.personal_agenda_visibility`). C'est un plafond appliqué à la lecture, avec la visibilité du partage
+  (le minimum des deux). Les réglages par créneau et par groupe disparaissent, ainsi que les routes qui les
+  portaient. Décision : [`ADR-0017`](../docs/decisions/ADR-0017-visibilite-globale-agenda-personnel.md).
+  Le verrou n° 6 du garde-fou SQL refuse toute lecture qui joint partages et créneaux sans ce plafond.
+
+**Restent ouverts.**
+
+- **Rien n'a été vérifié dans un navigateur**, ni sur un téléphone réel. Le rendu de la grille horaire, de
+  l'aimantation au défilement et de la feuille de création n'a pas été contrôlé à l'œil.
+- **« Dépense à valider » n'est pas détectable** : le modèle ne porte pas l'information nécessaire.
+- **Une invitation envoyée à une adresse e-mail sans compte ne crée pas de notification.** Il n'y a personne
+  à notifier. Le rattachement au moment de la création du compte reste à faire.
+
 ## 2026-11-20 — Vérification de la phase 3, puis solde réel
 
 **La phase 3 n'était pas bouclée, contrairement à ce que l'entrée du dessous annonce.** Une
@@ -57,11 +93,23 @@ dans le code :
   sockets, et la suite tenait déjà à **2 % du plafond** (pic mesuré 16 033 sur 16 384 ports
   éphémères). Les deux `PUT` sont passés en insertion SQL directe. **La signature `EADDRNOTAVAIL`
   n'excuse pas de ne pas chercher.**
-- **Dette de test connue** : le client de test ouvre un vrai serveur TCP **par requête**
-  (`app/tests/fixtures/comptes.ts`), soit ~16 349 sockets pour la seule suite de cloisonnement. Une
-  quinzaine de routes de plus la refera tomber. La correction durable est un serveur d'écoute unique
-  par décor avec un agent `keepAlive` — elle touche des fixtures dont 1 369 tests dépendent, donc
-  elle se décide à froid.
+- **Dette de test connue, puis soldée le même jour** : le client de test ouvrait un vrai serveur TCP
+  **par requête** (`app/tests/fixtures/comptes.ts`), soit 16 251 sockets pour la seule suite de
+  cloisonnement, et une quinzaine de routes de plus l'aurait refait tomber. `decor()` monte
+  désormais **un seul serveur d'écoute par décor**, partagé par ses clients, fermé dans
+  `nettoyer()`, visé par son URL avec un `http.Agent` en `keepAlive`. **Mesuré sur
+  `app/tests/cloisonnement`, à ports drainés : pic de 16 260 → 328 sockets en `TIME_WAIT` (÷ 50),
+  et la suite passe de 24,4 s à 16,2 s.** La marge est passée de 2 % à 98 % des 16 384 ports.
+  Aucun test n'a été touché : aucune attaque retirée, aucune sautée, aucun délai rallongé.
+- **Et deux pièges trouvés en le faisant, qui valent la peine d'être retenus.** Un serveur partagé
+  rend visibles deux bornes que le serveur-par-requête masquait. En haut, `kern.ipc.somaxconn` vaut
+  **128** sur macOS : la rafale de 384 requêtes simultanées de `listes-concurrence` déborde la file
+  d'acceptation — que better-sqlite3, synchrone, n'a pas le temps de vider — et le noyau répond par
+  un RST (`ECONNRESET`). En bas, plafonner l'agent met les requêtes en file **côté client** : à 32
+  sockets, le test « la file de hachage pleine ne débite pas la cadence » n'atteignait plus les
+  37 requêtes en vol qu'il doit franchir (4 hachages en cours + 32 en attente, puis une de plus), le
+  503 attendu ne se produisait plus et **le test passait au vert sans rien prouver**. C'est exactement le genre de preuve qu'on perd sans s'en apercevoir :
+  d'où `maxSockets: 80`, encadré des deux côtés et justifié sur place dans le code.
 
 **Vérifié par l'orchestrateur, pas par rapport** : `npm run typecheck`, `npm run lint`,
 `npm run build` verts, et les trois suites lancées séparément et espacées — **913** tests schéma +
